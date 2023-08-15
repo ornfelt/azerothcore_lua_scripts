@@ -1,0 +1,253 @@
+diff --git a/src/server/game/AI/ScriptedAI/ScriptedCreature.h b/src/server/game/AI/ScriptedAI/ScriptedCreature.h
+index eec1ce7170..7ea89d21eb 100644
+--- a/src/server/game/AI/ScriptedAI/ScriptedCreature.h
++++ b/src/server/game/AI/ScriptedAI/ScriptedCreature.h
+@@ -396,6 +396,12 @@ inline void GetCreatureListWithEntryInGrid(Container& container, WorldObject* so
+     source->GetCreatureListWithEntryInGrid(container, entry, maxSearchRange);
+ }
+ 
++template <typename Container>
++inline void GetDeadCreatureListInGrid(Container& container, WorldObject* source, float maxSearchRange, bool alive = false)
++{
++    source->GetDeadCreatureListInGrid(container, maxSearchRange, alive);
++}
++
+ template <typename Container>
+ inline void GetGameObjectListWithEntryInGrid(Container& container, WorldObject* source, uint32 entry, float maxSearchRange)
+ {
+diff --git a/src/server/game/Entities/Object/Object.cpp b/src/server/game/Entities/Object/Object.cpp
+index acdb91b4a7..311cdde5fd 100644
+--- a/src/server/game/Entities/Object/Object.cpp
++++ b/src/server/game/Entities/Object/Object.cpp
+@@ -3147,6 +3147,14 @@ void WorldObject::GetCreatureListWithEntryInGrid(Container& creatureContainer, u
+     Cell::VisitGridObjects(this, searcher, maxSearchRange);
+ }
+ 
++template <typename Container>
++void WorldObject::GetDeadCreatureListInGrid(Container& creaturedeadContainer, float maxSearchRange, bool alive /*= false*/) const
++{
++    Trinity::AllDeadCreaturesInRange check(this, maxSearchRange, alive);
++    Trinity::CreatureListSearcher<Trinity::AllDeadCreaturesInRange> searcher(this, creaturedeadContainer, check);
++    Cell::VisitGridObjects(this, searcher, maxSearchRange);
++}
++
+ template <typename Container>
+ void WorldObject::GetPlayerListInGrid(Container& playerContainer, float maxSearchRange, bool alive /*= true*/) const
+ {
+@@ -3598,6 +3606,10 @@ template TC_GAME_API void WorldObject::GetCreatureListWithEntryInGrid(std::list<
+ template TC_GAME_API void WorldObject::GetCreatureListWithEntryInGrid(std::deque<Creature*>&, uint32, float) const;
+ template TC_GAME_API void WorldObject::GetCreatureListWithEntryInGrid(std::vector<Creature*>&, uint32, float) const;
+ 
++template TC_GAME_API void WorldObject::GetDeadCreatureListInGrid(std::list<Creature*>&, float, bool) const;
++template TC_GAME_API void WorldObject::GetDeadCreatureListInGrid(std::deque<Creature*>&, float, bool) const;
++template TC_GAME_API void WorldObject::GetDeadCreatureListInGrid(std::vector<Creature*>&, float, bool) const;
++
+ template TC_GAME_API void WorldObject::GetPlayerListInGrid(std::list<Player*>&, float, bool) const;
+ template TC_GAME_API void WorldObject::GetPlayerListInGrid(std::deque<Player*>&, float, bool) const;
+ template TC_GAME_API void WorldObject::GetPlayerListInGrid(std::vector<Player*>&, float, bool) const;
+diff --git a/src/server/game/Entities/Object/Object.h b/src/server/game/Entities/Object/Object.h
+index 907e7b47f3..85e4194afd 100644
+--- a/src/server/game/Entities/Object/Object.h
++++ b/src/server/game/Entities/Object/Object.h
+@@ -460,6 +460,9 @@ class TC_GAME_API WorldObject : public Object, public WorldLocation
+         template <typename Container>
+         void GetCreatureListWithEntryInGrid(Container& creatureContainer, uint32 entry, float maxSearchRange = 250.0f) const;
+ 
++        template <typename Container>
++        void GetDeadCreatureListInGrid(Container& creaturedeadContainer, float maxSearchRange, bool alive = false) const;
++
+         template <typename Container>
+         void GetPlayerListInGrid(Container& playerContainer, float maxSearchRange, bool alive = true) const;
+ 
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index bffd5163ae..de9a27e57c 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -24840,8 +24840,16 @@ void Player::StoreLootItem(uint8 lootSlot, Loot* loot)
+ 
+     if (!item || item->is_looted)
+     {
+-        SendEquipError(EQUIP_ERR_ALREADY_LOOTED, nullptr, nullptr);
+-        return;
++        if (sConfigMgr->GetBoolDefault("AOE.LOOT.enable", true))
++        {
++            //SendEquipError(EQUIP_ERR_ALREADY_LOOTED, nullptr, nullptr); prevents error already loot from spamming
++            return;
++        }
++        else
++        {
++            SendEquipError(EQUIP_ERR_ALREADY_LOOTED, nullptr, nullptr);
++            return;
++        }
+     }
+ 
+     if (!item->AllowedForPlayer(this))
+diff --git a/src/server/game/Grids/Notifiers/GridNotifiers.h b/src/server/game/Grids/Notifiers/GridNotifiers.h
+index 65fb265c9d..8f0bf1c8ac 100644
+--- a/src/server/game/Grids/Notifiers/GridNotifiers.h
++++ b/src/server/game/Grids/Notifiers/GridNotifiers.h
+@@ -1522,6 +1522,28 @@ namespace Trinity
+             float m_fRange;
+     };
+ 
++    class AllDeadCreaturesInRange
++    {
++    public:
++        AllDeadCreaturesInRange(WorldObject const* obj, float range, bool reqAlive = true) : _obj(obj), _range(range), _reqAlive(reqAlive) { }
++
++        bool operator()(Unit* unit) const
++        {
++            if (_reqAlive && unit->IsAlive())
++                return false;
++
++            if (!_obj->IsWithinDistInMap(unit, _range))
++                return false;
++
++            return true;
++        }
++
++    private:
++        WorldObject const* _obj;
++        float _range;
++        bool _reqAlive;
++    };
++
+     class PlayerAtMinimumRangeAway
+     {
+         public:
+diff --git a/src/server/game/Handlers/LootHandler.cpp b/src/server/game/Handlers/LootHandler.cpp
+index b711826f51..1499492939 100644
+--- a/src/server/game/Handlers/LootHandler.cpp
++++ b/src/server/game/Handlers/LootHandler.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include "WorldSession.h"
+ #include "Common.h"
++#include "Config.h"
+ #include "Corpse.h"
+ #include "Creature.h"
+ #include "GameObject.h"
+@@ -80,15 +81,63 @@ void WorldSession::HandleAutostoreLootItemOpcode(WorldPacket& recvData)
+     else
+     {
+         Creature* creature = GetPlayer()->GetMap()->GetCreature(lguid);
+-
+-        bool lootAllowed = creature && creature->IsAlive() == (player->GetClass() == CLASS_ROGUE && creature->loot.loot_type == LOOT_PICKPOCKETING);
+-        if (!lootAllowed || !creature->IsWithinDistInMap(_player, INTERACTION_DISTANCE))
++        if (!player->GetGroup() && creature && sConfigMgr->GetBoolDefault("AOE.LOOT.enable", true))
+         {
+-            player->SendLootError(lguid, lootAllowed ? LOOT_ERROR_TOO_FAR : LOOT_ERROR_DIDNT_KILL);
+-            return;
++            int i = 0;
++            float range = 30.0f;
++            Creature* c = nullptr;
++            std::vector<Creature*> creaturedie;
++            player->GetDeadCreatureListInGrid(creaturedie, range);
++            for (std::vector<Creature*>::iterator itr = creaturedie.begin(); itr != creaturedie.end(); ++itr)
++            {
++                c = *itr;
++                loot = &c->loot;
++
++                uint8 maxSlot = loot->GetMaxSlotInLootFor(player);
++                for (i = 0; i < maxSlot; ++i)
++                {
++                    if (LootItem* item = loot->LootItemInSlot(i, player))
++                    {
++                        if (player->AddItem(item->itemid, item->count))
++                        {
++                            player->SendNotifyLootItemRemoved(lootSlot);
++                            player->SendLootRelease(player->GetLootGUID());
++                        }
++                        else
++                        {
++                            player->SendItemRetrievalMail(item->itemid, item->count);
++                            player->GetSession()->SendAreaTriggerMessage("Your items has been mailed to you.");
++                        }
++                    }
++                }
++
++                // This if covers a issue with skinning being infinite by Aokromes
++                if (!creature->IsAlive())
++                {
++                    creature->AllLootRemovedFromCorpse();
++                }
++
++                loot->clear();
++
++                if (loot->isLooted() && loot->empty())
++                {
++                    c->RemoveFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE);
++                    c->AllLootRemovedFromCorpse();
++                }
++            }
++        }
++        else
++        {
++            bool lootAllowed = creature && creature->IsAlive() == (player->GetClass() == CLASS_ROGUE && creature->loot.loot_type == LOOT_PICKPOCKETING);
++            if (!lootAllowed || !creature->IsWithinDistInMap(_player, INTERACTION_DISTANCE))
++            {
++                player->SendLootError(lguid, lootAllowed ? LOOT_ERROR_TOO_FAR : LOOT_ERROR_DIDNT_KILL);
++                return;
++            }
++
++            loot = &creature->loot;
+         }
+ 
+-        loot = &creature->loot;
+     }
+ 
+     player->StoreLootItem(lootSlot, loot);
+@@ -195,6 +244,27 @@ void WorldSession::HandleLootMoneyOpcode(WorldPacket& /*recvData*/)
+         }
+         else
+         {
++            ObjectGuid lguid = player->GetLootGUID();
++            Creature* creature = GetPlayer()->GetMap()->GetCreature(lguid);
++            if (creature && sConfigMgr->GetBoolDefault("AOE.LOOT.enable", true))
++            {
++                if (!player->GetGroup())
++                {
++                    float range = 30.0f;
++                    uint32 gold = 0;
++                    Creature* c = nullptr;
++                    std::vector<Creature*> creaturedie;
++                    player->GetDeadCreatureListInGrid(creaturedie, range);
++                    for (std::vector<Creature*>::iterator itr = creaturedie.begin(); itr != creaturedie.end(); ++itr)
++                    {
++                        c = *itr;
++                        loot = &c->loot;
++                        gold += loot->gold;
++                        loot->gold = 0;
++                    }
++                    loot->gold = gold;
++                }
++            }
+             player->ModifyMoney(loot->gold);
+             player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_LOOT_MONEY, loot->gold);
+ 
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index f475d0248e..169f19bfee 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -4125,3 +4125,21 @@ Metric.OverallStatusInterval = 1
+ 
+ #
+ ###################################################################################################
++
++###################################################################################################
++#AOE Looting and Mail Excess to Player#
++#######################################
++#
++#    AOE Looting and Mail Excess
++#        Enable this if you want to enable Area of effect with looting (MOP Feature)
++#        Excess items that is looted in will be mailed to the player
++#
++#    AOE.LOOT.enable
++#         Description: Enables Module
++#         Default:    0 - (Disabled)
++#                     1 - (Enabled)
++
++AOE.LOOT.enable = 1
++
++#
++###################################################################################################

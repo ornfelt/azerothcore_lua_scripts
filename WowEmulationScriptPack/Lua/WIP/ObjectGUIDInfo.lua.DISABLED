@@ -1,0 +1,8 @@
+function GoToTarget(event, player, object)
+        local message3 = "GUID: " .. tostring(object:GetGUID()) .. ", GUID-LOW: " .. tostring(object:GetGUIDLow()) .. ", Entry: " .. tostring(object:GetEntry()) .. ", DBTableGuidLOW: " .. tostring(object:GetDBTableGUIDLow()) .. ", DisplayID: " .. tostring(object:GetDisplayId())
+        print(message3)
+	printObj(object)
+        player:Say(message3, 0)
+end
+
+RegisterGameObjectGossipEvent(189947, 1, GoToTarget)

@@ -1,0 +1,81 @@
+--- Commands ---
+function TESTCommandHandler(event, player, command)
+    if (player:GetGMRank() < 3) then
+        return
+    elseif (command:find("whereisobj") ~= 1) then
+        return
+    else
+        local pattern = "%S+" -- Separate by spaces
+        local parameters = {}
+        for parameter in string.gmatch(command, pattern) do -- Take the entire command and split it by spaces, put into a table.
+            table.insert(parameters, parameter)
+        end
+	local lowguid = parameters[2]
+        local object = player:GetObjectFromPlayerMapByDbGuid(lowguid)
+	local x, y, z, o = object:GetLocation()
+	player:SendBroadcastMessage("Hey Nerd! You requested the location of obj: " .. parameters[2] .. ", and here are the coords! X: " .. x .. " Y: " .. y .. " Z: " .. z .. " O: " .. o)
+	return false
+    end
+end
+
+--[[
+local function TESTGobTurn(event, player, command)
+	-- syntax .apt test <entry> <guid> x, y, z
+	if (command:find("apt test") ~= 1) then
+		return
+	end
+	
+	local pattern = "%S+" -- Separate by spaces
+	local parameters = {}
+	local parameters = getCommandParameters(command)
+	local map = GetMapById(player:GetMapId())
+--	local build = GetObjectGUID(parameters[3], parameters[4])
+--	local object = map:GetWorldObject(build)
+	local gameobjects = player:GetGameObjectsInRange(533, parameters[3])
+	object = map:GetWorldObject(GetObjectGUID(gameobjects[1]:GetGUIDLow(), parameters[3]))
+	object:SetTurn(parameters[4], parameters[5], parameters[6], parameters[7])
+	player:SendBroadcastMessage("object turned")
+--	object:Respawn()
+	return false
+end
+
+RegisterPlayerEvent(42, TESTGobTurn)
+]]
+
+
+CMSG_NAME_QUERY = 80
+SMSG_NAME_QUERY_RESPONSE = 81
+CMSG_GUILD_QUERY = 84
+SMSG_GUILD_QUERY_RESPONSE  = 85
+--ran = 0
+local function GuildNameTest(event, packet, player)
+        local size = packet:GetSize()
+        player:SendBroadcastMessage(" - Packet Opcode:" .. tostring(packet:GetOpcode()))
+        player:SendBroadcastMessage(" - Packet Event type:" .. tostring(event))
+        player:SendBroadcastMessage(" - Packet Size:" .. tostring(size))
+        player:SendBroadcastMessage(" - Packet, 1:" .. tostring(packet:ReadULong()) )
+        player:SendBroadcastMessage(" - Packet, 2:" .. tostring(packet:ReadString()) )
+        player:SendBroadcastMessage(" - Packet, 3:" .. tostring(packet:ReadString()) )
+        player:SendBroadcastMessage(" - Packet, 4:" .. tostring(packet:ReadString()) )
+        player:SendBroadcastMessage(" - Packet, 5:" .. tostring(packet:ReadString()) )
+        return true
+--      packet:WriteULong(packet:ReadByte())
+--      packet:WriteString("Assmunchers")
+--      player:SendBroadcastMessage(tostring(packet:ReadString()))
+--      player:SendBroadcastMessage(tostring(packet:ReadByte()))
+--      player:SendBroadcastMessage(tostring(packet:ReadByte()))
+--      if ran ~= 1 then
+--              player:SendPacket(packet)
+--              ran = 1
+--      end
+end
+
+--RegisterPacketEvent( CMSG_GUILD_QUERY, 5, GuildNameTest )
+-- for all these opcodes, only event 7 is fired.
+RegisterPacketEvent( SMSG_GUILD_QUERY_RESPONSE, 7, GuildNameTest )
+--RegisterPacketEvent( CMSG_GUILD_QUERY, 7, GuildNameTest )
+--RegisterPacketEvent( SMSG_NAME_QUERY_RESPONSE, 7, GuildNameTest )
+--RegisterPacketEvent( CMSG_NAME_QUERY, 7, GuildNameTest )
+
+
+RegisterPlayerEvent(42, TESTCommandHandler)

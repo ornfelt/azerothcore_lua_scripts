@@ -1,0 +1,148 @@
+#####################################################################################################################
+# EmuDev'z Premium System
+# by slp13at420 and the 
+# community of EmuDevs.com,
+# for the comunity of
+# EmuDevs.com.
+#
+# This setting adjust what type of premium system this is.
+# 	PREM.TYPE
+#		Description: adjusts the system to be Account_Premium or character_Premium
+#		Default: 1 // 0 = account // 1 = character
+
+PREM.TYPE = 1
+
+# This setting allows for timed premium rank.
+#	PREM.TIMED	
+#		Description: allows the Admin to apply a duration to the Premium rank making it temporary.
+#		Default: 0 // 0 = no duration permanant Premium rank // 1 = yes duration temporary Premium rank.
+#			requires PREM.DURATION set 1+.
+
+PREM.TIMED = 0
+
+# This setting applies the duration when PREM.TIMED = 1.
+#	PREM.DURATION
+#		Description: when PREM.TIMED is set to 1 you can set the duration in days with this setting.
+#		Deault: 30 // 1 = 1 day // 30 = 30 days.
+
+PREM.DURATION = 30
+
+# This setting allows the admin to set the minimum GM rank to acces GM commands.
+#	PREM.GM_MINIMUM_RANK	
+#		Description: allows the Admin to apply a duration to the Premium rank making it temporary.
+#		Default: 3 // 3 = GM's with GM rank 3 and higher will have access to 
+#			    all the GM Premium commands.
+
+PREM.GM_MINIMUM_RANK = 3
+
+# This setting is where you set what item to use for Premium rank Update item.
+#	PREM.UPGRADE_ITEM
+#		Description: set the id of the item you want to use to update a players Premium rank to 1.
+#		Default: 63000 // custom item id . included with the Premium System files.
+#			you must also set the ScriptName in the item_template.
+
+PREM.UPGRADE_ITEM = 63000
+
+# This setting is where you set if items can require a Premium rank 1.
+#	PREM._ITEMS
+#		Description: set the system to allow items to require a player to be Premium or have a Premium rank of  1.
+#		Default: 0 // no Premium check. item_template sql update included with the Premium System files.
+
+PREM.ITEMS = 0
+
+#
+# This setting is where you set stat mod value.
+#	PREM.MODIFIER
+#		Description: set the modifier for a players stats.
+#		Default: 0.1 // float value 0.1 = 10%.
+
+PREM.MODIFIER = 0.1
+
+#
+# This setting is where you set the Premium chat spam timer..
+#	PREM.CHAT_TIMER
+#		Description: a timer to manage time between messages of a single player.
+#		Default: 5 // in seconds // 5 = 5 seconds.
+
+PREM.CHAT_TIMER = 5
+
+#
+# This setting is where you set the Premium chat for team only chat or world..
+#	PREM.CHAT_TEAM
+#		Description: a timer to manage time between messages of a single player.
+#		Default: 0 // 0 = team only // 1 = world chat // while GM's have GM Tag they will see all Premium  Messages also.
+
+PREM.CHAT_TEAM = 0
+
+#
+# This setting is where you set the Premium to allow a bonus TP.
+#	PREM.TP_ENABLE
+#		Description: add extra TP's.
+#		Default: 0 // 0 = no extra TP // 1 extra TP based on PREM.TP_BONUS.
+
+PREM.TP_ENABLE = 0
+
+#
+# This setting is where you set the Premium to add the bonus TP amount.
+#	PREM.TP_BONUS
+#		Description: add extra TP's.
+#		Default: 14 // apply extra TP's . based on PREM.TP_ENABLE.
+
+PREM.TP_BONUS = 14
+
+#
+# This setting is where you set the Premium to allow a bonus HP.
+#	PREM.HP_ENABLE
+#		Description: add extra HP.
+#		Default: 0 // 0 = no extra HP // 1 = extra HP using PREM.MODIFIER as the multiplier.
+
+PREM.HP_ENABLE = 0
+
+#
+# This setting is where you set the Premium to allow a bonus Mana.
+#	PREM.MANA_ENABLE
+#		Description: add extra mana.
+#		Default: 0 // 0 = no extra ManaPower // 1 = extra ManaPower using PREM.MODIFIER as the multiplier.
+
+PREM.MANA_ENABLE = 0
+
+#
+# This setting is where you set the Premium to allow a bonus Rage.
+#	PREM.RAGE_ENABLE
+#		Description: add extra mana.
+#		Default: 0 // 0 = no extra RagePower // 1 = extra RagePower using PREM.MODIFIER as the multiplier.
+
+PREM.RAGE_ENABLE = 0
+
+#
+# This setting is where you set the Premium Title id.
+#	PREM.TITLE_ID
+#	PREM.TITLE_MASK_ID
+#		Description: add a Premium title to the player.
+#		PREM.TITLE_ID  		Default: 200 // 0 = no extra Title // 1+ = id of the custom Premium Title.
+#
+#		PREM.TITLE_MASK_ID  	Default: 143 // the titleMaskID found in CharTitles.dbc.
+#						     // The id used for drop down menu.
+#						     // Used to check the active title and set/unset
+#						     // active title.
+
+PREM.TITLE_ID = 200
+PREM.TITLE_MASK_ID = 143
+
+#
+# This setting is where you set Premium's are allowed to Water Breathe.
+#	PREM.WATER_BREATHE
+#		Description: allow dis-allow water breathing.
+#		Default: 0 // 0 = no water breathing // 1 = yes water breathing
+
+PREM.WATER_BREATHE = 1
+
+#
+# This setting is where you set if Premium's spells get a cast cost decrease.
+#	PREM.SPELL_COST_DECREASE
+#		Description: allow dis-allow cost decrease.
+#		Default: 0 // 0 = no decrease// 1 = yes decrease
+
+PREM.SPELL_COST_DECREASE = 1
+#
+###################################################################################################

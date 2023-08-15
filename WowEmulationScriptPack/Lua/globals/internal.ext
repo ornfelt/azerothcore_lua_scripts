@@ -1,0 +1,139 @@
+-- filename.ext files are loaded before normal .lua files
+
+-- This file will contain functions that will act as shortcuts to commonly used code, but only for Lua code that have no dependencies (Eluna, external bash code)
+-- Add a comment on the same line as the function start, AND EXPLAIN WHAT IT DOES AND WHY IT EXISTS!
+
+function getCommandParameters(command) -- Takes a string and splits it up by spaces into a table. Used for player commands.
+    local pattern = "%S+" -- Separate by spaces
+    local parameters = {}
+    for parameter in string.gmatch(command, pattern) do -- Take the entire command and split it by spaces, put into a table.
+        table.insert(parameters, parameter) 
+    end
+    return parameters
+end
+
+function getIDFromItemLink(itemLink) -- Takes a string and splits it up by spaces into a table. Used for player commands.
+    local pattern = "item:(%d+):"
+    local _, _, id = string.find(itemLink, pattern)
+    return id
+end
+
+function isNumber(string) -- Takes a string and returns true if it is a number, false if not. Used to verify that players aren't trying to use incorrect parameters to their commands.
+    if (tonumber(string) ~= nil) then
+        return true
+    else
+        return false
+    end
+end
+
+function GMBroadcast(message)
+	local GM = GetPlayersInWorld(2, true)
+	for x=1,#GM,1 do
+		GM[x]:SendBroadcastMessage(tostring(message))
+	end
+end
+
+-- We use this to avoid confusion with CastSpell() methods lying around
+-- Only valid in custom achievements as custom achievements are the same id as the criteria spell.
+function AwardAchievement(player, spell)
+	if (player:HasAchieved(spell) == true) then
+		return
+	else
+		player:CastSpell(player, spell, true)
+	end
+end
+
+local cooldowns = {};
+
+function Player:SetLuaCooldown(seconds, opt_id)
+	assert(type(self) == "userdata");
+	seconds = assert(tonumber(seconds));
+	opt_id = opt_id or 1;
+	local guid, source = self:GetGUIDLow(), debug.getinfo(2, 'S').short_src;
+
+	if (not cooldowns[guid]) then
+		cooldowns[guid] = { [source] = {}; };
+	end
+
+	cooldowns[guid][source][opt_id] = os.time() + seconds;
+end
+
+function Player:GetLuaCooldown(opt_id)
+	assert(type(self) == "userdata");
+	local guid, source = self:GetGUIDLow(), debug.getinfo(2, 'S').short_src;
+	opt_id = opt_id or 1;
+
+	if (not cooldowns[guid]) then
+		cooldowns[guid] = { [source] = {}; };
+	end
+
+	local cd = cooldowns[guid][source][opt_id];
+	if (not cd or cd < os.time()) then
+		cooldowns[guid][source][opt_id] = 0
+		return 0;
+	else
+		return cooldowns[guid][source][opt_id] - os.time();
+	end
+end
+
+-- an interesting function that prints the key of a table to its value, taking argument table.
+-- see example use in playercommands.lua for the census command
+function pairsByKeys(t, f)
+		local a = {}
+		for n in pairs(t) do table.insert(a, n) end
+		table.sort(a, f)
+		local i = 0      -- iterator variable
+		local iter = function ()   -- iterator function
+			i = i + 1
+			if a[i] == nil then return nil
+			else return a[i], t[a[i]]
+			end
+		end
+		return iter
+end
+
+-- gets the currency and returns it in a 10000000X format
+function GetCurrency(player)
+	gold_count = player:GetItemCount(GOLD_COIN) * 10000
+	silver_count = player:GetItemCount(SILVER_COIN) * 100
+	copper_count = player:GetItemCount(COPPER_COIN) * 1
+	money_count = gold_count + silver_count + copper_count
+	return money_count, gold_count, silver_count, copper_count
+end
+
+-- gets the player currency amount and returns it including change. does so by removing all coins first, then adding them.
+function ChangeCurrency(player, quantity)
+	amount = GetCurrency(player) + quantity
+	print(amount)
+	gold_count = math.floor(amount * 0.0001)
+	silver_count = math.floor(amount * 0.01) - gold_count * 100
+	copper_count = math.floor(amount * 1) - gold_count * 10000 - silver_count * 100
+	print(gold_count, silver_count, copper_count)
+	player:RemoveItem(SILVER_COIN, player:GetItemCount( SILVER_COIN, false ))
+	player:RemoveItem(GOLD_COIN, player:GetItemCount( GOLD_COIN, false ))
+	player:RemoveItem(COPPER_COIN, player:GetItemCount( COPPER_COIN, false ))
+	player:AddItem(SILVER_COIN, silver_count)
+	player:AddItem(GOLD_COIN, gold_count)
+	player:AddItem(COPPER_COIN, copper_count)
+end
+
+-- translates the currency into normal terms to be used where appropriate
+function TranslateCurrency(quantity, gold, silver, copper)
+	if quantity ~= nil then -- In this case, quantity is coppers.
+		amount = quantity
+		gold_count = math.floor(amount * 0.0001)
+		silver_count = math.floor(amount * 0.01) - gold_count * 100
+		copper_count = math.floor(amount * 1) - gold_count * 10000 - silver_count * 100
+		auto_string = tostring(gold_count.. " " ..GetItemLink(GOLD_COIN).. " " ..silver_count.. " " ..GetItemLink(SILVER_COIN).. " " ..copper_count.. " " ..GetItemLink(COPPER_COIN))
+		return auto_string, gold_count, silver_count, copper_count	
+	elseif quantity == nil and gold ~= nil and silver ~= nil and copper ~= nil then
+		gold_count = gold * 10000
+		silver_count = silver * 100
+		copper_count = copper * 1
+		money = gold_count + silver_count + copper_count
+		auto_string = tostring(gold.. " " ..GetItemLink(GOLD_COIN).. " " ..silver.. " " ..GetItemLink(SILVER_COIN).. " " ..copper.. " " ..GetItemLink(COPPER_COIN))
+		return auto_string, money
+	else
+		return nil
+	end
+end

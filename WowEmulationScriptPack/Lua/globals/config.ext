@@ -1,0 +1,11 @@
+-- Description:
+-- This is the config file for EVERYTHING on the Ember project.
+-- Useful if you just want to download and go, or look at variables in once place.
+-- Author: grimreapaa/Daddy Didrik ;)
+
+ADMIN_RANK = 3 -- the RBAC ID associated with secret GM capabilities
+
+-- item IDs for coins
+SILVER_COIN = 1999999
+GOLD_COIN   = 1999998
+COPPER_COIN = 1999997

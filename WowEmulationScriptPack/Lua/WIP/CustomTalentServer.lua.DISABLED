@@ -1,0 +1,6 @@
+local AIO = AIO or require("AIO")
+local TalentHandlers = AIO.AddHandlers("CustomTalents", {})
+
+function TalentHandlers.TestPrint(player)
+	player:SendBroadcastMessage("YES.")
+end

@@ -1,0 +1,28 @@
+From cc9d7069d34059fdabe32cbf583488947f03bdb4 Mon Sep 17 00:00:00 2001
+From: LordPsyan <realmsofwarcraft@gmail.com>
+Date: Mon, 29 Feb 2016 08:01:13 -0600
+Subject: [PATCH] 2016_02_29-255_in_Who_List
+
+---
+ src/server/game/Handlers/MiscHandler.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/server/game/Handlers/MiscHandler.cpp b/src/server/game/Handlers/MiscHandler.cpp
+index 45cee59..def7c29 100644
+--- a/src/server/game/Handlers/MiscHandler.cpp
++++ b/src/server/game/Handlers/MiscHandler.cpp
+@@ -265,9 +265,10 @@ void WorldSession::HandleWhoOpcode(WorldPacket& recvData)
+             continue;
+ 
+         // check if target is globally visible for player
++        /* Remove check so Level 255 shows up in who list
+         if (!target->IsVisibleGloballyFor(_player))
+             continue;
+-
++*/
+         // check if target's level is in level range
+         uint8 lvl = target->getLevel();
+         if (lvl < level_min || lvl > level_max)
+-- 
+2.1.4
+

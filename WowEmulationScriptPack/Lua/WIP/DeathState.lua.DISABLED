@@ -1,0 +1,58 @@
+-- BROKE. ONLY JUST_DIED DEATHSTATE (1) CAN BE USED. DOES NOT WORK.
+
+local function GMSetDeathState(event, player, command)
+	if (command:find("wnpc set deathstate") ~= 1) then
+		return
+	end
+	
+	local parameters = {}
+	local parameters = getCommandParameters(command)
+	local target = player:GetSelection()
+	--parameters[4] = on in `.wnpc set deathstate on`
+	if (target == nil) then
+		player:SendBroadcastMessage("You must have a target.")
+		return false
+	elseif (parameters[4] ~= "on") and (parameters[4] ~= "off") then
+		player:SendBroadcastMessage("You must type `.wnpc set deathstate <on/off>` for this to work.")
+		return false
+	elseif (parameters[4] == "on") then
+		target:SetDeathState(0)
+		player:SendBroadcastMessage("NPC set alive.")
+		target:SaveToDB()
+		return false
+	elseif (parameters[4] == "off") then
+		target:SetDeathState(1)
+		target:SetDeathState(2)
+		player:SendBroadcastMessage("NPC set dead.")
+		return false
+	end
+end
+
+RegisterPlayerEvent(42, GMSetDeathState)
+
+--[[
+local function WeaverDeathState(event, player, command)
+	if (command:find("npc set deathstate") ~= 1) then
+		return
+	elseif (player:GetGMRank() == 0) then
+		return
+	end
+	
+	print("command")
+	local target = player:GetSelection()
+	if target == nil then
+		player:SendBroadcastMessage("You must have a target.")
+		return false
+	elseif (command:find("npc set deathstate on") == 1) then
+		player:SendBroadcastMessage("dead")
+		target:SetDeathState(1)
+		return false
+	elseif (command:find("npc set deathstate off") == 1) then
+		player:SendBroadcastMessage("alive")
+		target:SetDeathState(0)
+		return false
+	end	
+end
+
+RegisterPlayerEvent(42, WeaverDeathState)
+]]

@@ -1,0 +1,2 @@
+REPLACE INTO `creature_template` (`entry`, `difficulty_entry_1`, `difficulty_entry_2`, `difficulty_entry_3`, `KillCredit1`, `KillCredit2`, `modelid1`, `modelid2`, `modelid3`, `modelid4`, `name`, `subname`, `IconName`, `gossip_menu_id`, `minlevel`, `maxlevel`, `exp`, `faction`, `npcflag`, `speed_walk`, `speed_run`, `scale`, `rank`) VALUES 
+(60120, 0, 0, 0, 0, 0, 31048, 0, 0, 0, 'Magic Gold Banker', 'Custom Banking', 'Buy', 0, 80, 80, 0, 35, 129, 1, 1.14286, 3.5, 0);

@@ -1,0 +1,944 @@
+From 303d9ef50be3c2fb8b0d35a968ed06521c2da4f1 Mon Sep 17 00:00:00 2001
+From: trickerer <onlysuffering@gmail.com>
+Date: Sun, 24 Jan 2021 16:38:16 +0700
+Subject: [PATCH] MagicFind
+
+---
+ src/server/game/Loot/Loot.cpp                |   7 +-
+ src/server/game/Loot/LootMgr.cpp             | 117 +++++--
+ src/server/game/Loot/LootMgr.h               |   4 +-
+ src/server/game/Loot/MagicFind.cpp           | 505 +++++++++++++++++++++++++++
+ src/server/game/Loot/MagicFind.h             |  54 +++
+ src/server/game/World/World.cpp              |   5 +
+ src/server/worldserver/worldserver.conf.dist |  48 +++
+ 7 files changed, 717 insertions(+), 23 deletions(-)
+ create mode 100644 src/server/game/Loot/MagicFind.cpp
+ create mode 100644 src/server/game/Loot/MagicFind.h
+
+diff --git a/src/server/game/Loot/Loot.cpp b/src/server/game/Loot/Loot.cpp
+index 3cd0762..efd6203 100644
+--- a/src/server/game/Loot/Loot.cpp
++++ b/src/server/game/Loot/Loot.cpp
+@@ -27,6 +27,8 @@
+ #include "Random.h"
+ #include "World.h"
+ 
++#include "MagicFind.h"
++
+  //
+  // --------- LootItem ---------
+  //
+@@ -205,7 +207,10 @@ bool Loot::FillLoot(uint32 lootId, LootStore const& store, Player* lootOwner, bo
+     items.reserve(MAX_NR_LOOT_ITEMS);
+     quest_items.reserve(MAX_NR_QUEST_ITEMS);
+ 
+-    tab->Process(*this, store.IsRatesAllowed(), lootMode);          // Processing is done there, callback via Loot::AddItem()
++    float magic_find_coefs[MAX_ITEM_QUALITY];
++    MagicFind::CalculateMFCoefficients(lootOwner, magic_find_coefs);
++
++    tab->Process(*this, store.IsRatesAllowed(), lootMode, magic_find_coefs);          // Processing is done there, callback via Loot::AddItem()
+ 
+                                                                     // Setting access rights for group loot case
+     Group* group = lootOwner->GetGroup();
+diff --git a/src/server/game/Loot/LootMgr.cpp b/src/server/game/Loot/LootMgr.cpp
+index 8773076..052ecce 100644
+--- a/src/server/game/Loot/LootMgr.cpp
++++ b/src/server/game/Loot/LootMgr.cpp
+@@ -30,6 +30,8 @@
+ #include "Util.h"
+ #include "World.h"
+ 
++#include "MagicFind.h"
++
+ static Rates const qualityToRate[MAX_ITEM_QUALITY] =
+ {
+     RATE_DROP_ITEM_POOR,                                    // ITEM_QUALITY_POOR
+@@ -88,7 +90,7 @@ class LootTemplate::LootGroup                               // A set of loot def
+         bool HasQuestDrop() const;                          // True if group includes at least 1 quest drop entry
+         bool HasQuestDropForPlayer(Player const* player) const;
+                                                             // The same for active quests of the player
+-        void Process(Loot& loot, uint16 lootMode) const;    // Rolls an item from the group (if any) and adds the item to the loot
++        void Process(Loot& loot, uint16 lootMode, float* mf_coefs) const;    // Rolls an item from the group (if any) and adds the item to the loot
+         float RawTotalChance() const;                       // Overall chance for the group (without equal chanced items)
+         float TotalChance() const;                          // Overall chance for the group
+ 
+@@ -101,7 +103,7 @@ class LootTemplate::LootGroup                               // A set of loot def
+         LootStoreItemList ExplicitlyChanced;                // Entries with chances defined in DB
+         LootStoreItemList EqualChanced;                     // Zero chances - every entry takes the same chance
+ 
+-        LootStoreItem const* Roll(Loot& loot, uint16 lootMode) const;   // Rolls an item from the group, returns NULL if all miss their chances
++        LootStoreItem const* Roll(Loot& loot, uint16 lootMode, float* mf_coefs) const;   // Rolls an item from the group, returns NULL if all miss their chances
+ 
+         // This class must never be copied - storing pointers
+         LootGroup(LootGroup const&) = delete;
+@@ -278,8 +280,9 @@ void LootStore::ReportNonExistingId(uint32 lootId, char const* ownerType, uint32
+ 
+ // Checks if the entry (quest, non-quest, reference) takes it's chance (at loot generation)
+ // RATE_DROP_ITEMS is no longer used for all types of entries
+-bool LootStoreItem::Roll(bool rate) const
++bool LootStoreItem::Roll(bool rate, float* mf_coefs) const
+ {
++    //TC_LOG_ERROR("loot", "LootStoreItem::Roll: %u rate %i, chance %.3f", itemid, rate, chance);
+     if (chance >= 100.0f)
+         return true;
+ 
+@@ -289,8 +292,10 @@ bool LootStoreItem::Roll(bool rate) const
+     ItemTemplate const* pProto = sObjectMgr->GetItemTemplate(itemid);
+ 
+     float qualityModifier = pProto && rate ? sWorld->getRate(qualityToRate[pProto->Quality]) : 1.0f;
++    float mf_coef = pProto && rate ? mf_coefs[pProto->Quality] : 1.0f;
+ 
+-    return roll_chance_f(chance*qualityModifier);
++    //TC_LOG_ERROR("loot", "qualityModifier %.3f, mf_coef %.3f", qualityModifier, mf_coef);
++    return roll_chance_f(chance*qualityModifier*mf_coef);
+ }
+ 
+ // Checks correctness of values
+@@ -372,31 +377,101 @@ void LootTemplate::LootGroup::AddEntry(LootStoreItem* item)
+ }
+ 
+ // Rolls an item from the group, returns NULL if all miss their chances
+-LootStoreItem const* LootTemplate::LootGroup::Roll(Loot& loot, uint16 lootMode) const
++LootStoreItem const* LootTemplate::LootGroup::Roll(Loot& loot, uint16 lootMode, float* mf_coefs) const
+ {
++    typedef std::vector<std::pair<LootStoreItem*, float> > WeightedList;
++
+     LootStoreItemList possibleLoot = ExplicitlyChanced;
+     possibleLoot.remove_if(LootGroupInvalidSelector(loot, lootMode));
+ 
+     if (!possibleLoot.empty())                             // First explicitly chanced entries are checked
+     {
++        WeightedList weighted;
++        for (LootStoreItemList::const_iterator cit = possibleLoot.begin(); cit != possibleLoot.end(); ++cit)
++        {
++            //TC_LOG_ERROR("loot", "LootGroup::Roll exch item %u, chance %.3f, ref %i", (*cit)->itemid, (*cit)->chance, (*cit)->mincountOrRef);
++            if ((*cit)->chance >= 100.0f)
++                return (*cit);
++
++            ItemTemplate const* pProto = sObjectMgr->GetItemTemplate((*cit)->itemid);
++            float qualityModifier = pProto ? sWorld->getRate(qualityToRate[pProto->Quality]) : 1.0f;
++            float mf_coef = pProto ? mf_coefs[pProto->Quality] : 1.0f;
++            //TC_LOG_ERROR("loot", "LootGroup::Roll exch item %u, chance = %.3f, qualityModifier %.3f, mf_coef %.3f",
++            //    (*cit)->itemid, (*cit)->chance, qualityModifier, mf_coef);
++            weighted.push_back(std::pair<LootStoreItem*, float>(*cit, (*cit)->chance*qualityModifier*mf_coef));
++        }
++
++        //Reweight to reach 100% total
++        float total_chance = 0.f;
++        for (WeightedList::const_iterator cit = weighted.begin(); cit != weighted.end(); ++cit)
++            total_chance += cit->second;
++
++        if (total_chance > 100.f)
++        {
++            float chance_factor = 100.f / total_chance;
++            for (WeightedList::iterator it = weighted.begin(); it != weighted.end(); ++it)
++                it->second *= chance_factor;
++        }
++
++        //Rolling
+         float roll = (float)rand_chance();
+ 
+-        for (LootStoreItemList::const_iterator itr = possibleLoot.begin(); itr != possibleLoot.end(); ++itr)   // check each explicitly chanced entry in the template and modify its chance based on quality.
++        for (WeightedList::const_iterator cit = weighted.begin(); cit != weighted.end(); ++cit)
+         {
+-            LootStoreItem* item = *itr;
+-            if (item->chance >= 100.0f)
+-                return item;
++            //TC_LOG_ERROR("loot", "LootGroup::Roll exch weighted item %u, chance %.3f", cit->first->itemid, cit->second);
++            if (cit->second >= 100.0f)
++                return cit->first;
+ 
+-            roll -= item->chance;
++            roll -= cit->second;
+             if (roll < 0)
+-                return item;
++                return cit->first;
+         }
+     }
+ 
+     possibleLoot = EqualChanced;
+     possibleLoot.remove_if(LootGroupInvalidSelector(loot, lootMode));
+-    if (!possibleLoot.empty())                              // If nothing selected yet - an item is taken from equal-chanced part
+-        return Trinity::Containers::SelectRandomContainerElement(possibleLoot);
++
++    if (!possibleLoot.empty())
++    {
++        //return Trinity::Containers::SelectRandomContainerElement(possibleLoot);
++
++        float avg_chance = 100.f / possibleLoot.size();
++        WeightedList weighted;
++        for (LootStoreItemList::const_iterator cit = possibleLoot.begin(); cit != possibleLoot.end(); ++cit)
++        {
++            ItemTemplate const* pProto = sObjectMgr->GetItemTemplate((*cit)->itemid);
++            float qualityModifier = pProto && MagicFind::GetBoolConfig(MF_QUALITY_AFFECTS_EQ_CHANCED) ? sWorld->getRate(qualityToRate[pProto->Quality]) : 1.0f;
++            float mf_coef = pProto ? mf_coefs[pProto->Quality] : 1.0f;
++            //TC_LOG_ERROR("loot", "LootGroup::Roll eqchanced item %u, avg = %.3f, qualityModifier %.3f, mf_coef %.3f",
++            //    (*cit)->itemid, avg_chance, qualityModifier, mf_coef);
++            weighted.push_back(std::pair<LootStoreItem*, float>(*cit, avg_chance*qualityModifier*mf_coef));
++        }
++
++        //Reweight to reach 100% total
++        float total_chance = 0.f;
++        for (WeightedList::const_iterator cit = weighted.begin(); cit != weighted.end(); ++cit)
++            total_chance += cit->second;
++
++        float chance_factor = 100.f / total_chance;
++        for (WeightedList::iterator it = weighted.begin(); it != weighted.end(); ++it)
++            it->second *= chance_factor;
++
++        //Rolling
++        float roll = (float)rand_chance();
++
++        for (WeightedList::const_iterator cit = weighted.begin(); cit != weighted.end(); ++cit)
++        {
++            //TC_LOG_ERROR("loot", "LootGroup::Roll weighted item %u, chance %.3f", cit->first->itemid, cit->second);
++            if (cit->second >= 100.0f)
++                return cit->first;
++
++            roll -= cit->second;
++            if (roll < 0)
++                return cit->first;
++        }
++
++        return weighted.back().first;
++    }
+ 
+     return nullptr;                                            // Empty drop from the group
+ }
+@@ -439,9 +514,9 @@ void LootTemplate::LootGroup::CopyConditions(ConditionContainer /*conditions*/)
+ }
+ 
+ // Rolls an item from the group (if any takes its chance) and adds the item to the loot
+-void LootTemplate::LootGroup::Process(Loot& loot, uint16 lootMode) const
++void LootTemplate::LootGroup::Process(Loot& loot, uint16 lootMode, float* mf_coefs) const
+ {
+-    if (LootStoreItem const* item = Roll(loot, lootMode))
++    if (LootStoreItem const* item = Roll(loot, lootMode, mf_coefs))
+         loot.AddItem(*item);
+ }
+ 
+@@ -559,8 +634,9 @@ void LootTemplate::CopyConditions(LootItem* li) const
+ }
+ 
+ // Rolls for every item in the template and adds the rolled items the the loot
+-void LootTemplate::Process(Loot& loot, bool rate, uint16 lootMode, uint8 groupId) const
++void LootTemplate::Process(Loot& loot, bool rate, uint16 lootMode, float* mf_coefs, uint8 groupId) const
+ {
++    //TC_LOG_ERROR("loot", "LootTemplate::Process rate %i, group %u", rate, uint32(groupId));
+     if (groupId)                                            // Group reference uses own processing of the group
+     {
+         if (groupId > Groups.size())
+@@ -569,7 +645,7 @@ void LootTemplate::Process(Loot& loot, bool rate, uint16 lootMode, uint8 groupId
+         if (!Groups[groupId - 1])
+             return;
+ 
+-        Groups[groupId - 1]->Process(loot, lootMode);
++        Groups[groupId - 1]->Process(loot, lootMode, mf_coefs);
+         return;
+     }
+ 
+@@ -580,7 +656,7 @@ void LootTemplate::Process(Loot& loot, bool rate, uint16 lootMode, uint8 groupId
+         if (!(item->lootmode & lootMode))                       // Do not add if mode mismatch
+             continue;
+ 
+-        if (!item->Roll(rate))
++        if (!item->Roll(rate, mf_coefs))
+             continue;                                           // Bad luck for the entry
+ 
+         if (item->reference > 0)                            // References processing
+@@ -589,9 +665,10 @@ void LootTemplate::Process(Loot& loot, bool rate, uint16 lootMode, uint8 groupId
+             if (!Referenced)
+                 continue;                                       // Error message already printed at loading stage
+ 
++            //TC_LOG_ERROR("loot", "Ref process: rate %i, itemchance %.3f", rate, item->chance);
+             uint32 maxcount = uint32(float(item->maxcount) * sWorld->getRate(RATE_DROP_ITEM_REFERENCED_AMOUNT));
+             for (uint32 loop = 0; loop < maxcount; ++loop)      // Ref multiplicator
+-                Referenced->Process(loot, rate, lootMode, item->groupid);
++                Referenced->Process(loot, rate, lootMode, mf_coefs, item->groupid);
+         }
+         else                                                    // Plain entries (not a reference, not grouped)
+             loot.AddItem(*item);                                // Chance is already checked, just add
+@@ -600,7 +677,7 @@ void LootTemplate::Process(Loot& loot, bool rate, uint16 lootMode, uint8 groupId
+     // Now processing groups
+     for (LootGroups::const_iterator i = Groups.begin(); i != Groups.end(); ++i)
+         if (LootGroup* group = *i)
+-            group->Process(loot, lootMode);
++            group->Process(loot, lootMode, mf_coefs);
+ }
+ 
+ // True if template includes at least 1 quest drop entry
+diff --git a/src/server/game/Loot/LootMgr.h b/src/server/game/Loot/LootMgr.h
+index d3d2b6a..c16f42d 100644
+--- a/src/server/game/Loot/LootMgr.h
++++ b/src/server/game/Loot/LootMgr.h
+@@ -50,7 +50,7 @@ struct TC_GAME_API LootStoreItem
+         needs_quest(_needs_quest), groupid(_groupid), mincount(_mincount), maxcount(_maxcount)
+          { }
+ 
+-    bool Roll(bool rate) const;                             // Checks if the entry takes it's chance (at loot generation)
++    bool Roll(bool rate, float* mf_coefs) const;            // Checks if the entry takes it's chance (at loot generation)
+     bool IsValid(LootStore const& store, uint32 entry) const;
+                                                             // Checks correctness of values
+ };
+@@ -108,7 +108,7 @@ class TC_GAME_API LootTemplate
+         // Adds an entry to the group (at loading stage)
+         void AddEntry(LootStoreItem* item);
+         // Rolls for every item in the template and adds the rolled items the the loot
+-        void Process(Loot& loot, bool rate, uint16 lootMode, uint8 groupId = 0) const;
++        void Process(Loot& loot, bool rate, uint16 lootMode, float* mf_coefs, uint8 groupId = 0) const;
+         void CopyConditions(ConditionContainer const& conditions);
+         void CopyConditions(LootItem* li) const;
+ 
+diff --git a/src/server/game/Loot/MagicFind.cpp b/src/server/game/Loot/MagicFind.cpp
+new file mode 100644
+index 0000000..b6a51d9
+--- /dev/null
++++ b/src/server/game/Loot/MagicFind.cpp
+@@ -0,0 +1,505 @@
++/*
++ * Author:
++ * 2020-2021 Trickerer <https://github.com/trickerer>
++ *
++ * Magic Find
++ * Gives better chance at finding quality loot in a non-linear progression
++ */
++
++#include "MagicFind.h"
++#include "Chat.h"
++#include "Config.h"
++#include "Bag.h"
++#include "Language.h"
++#include "MapManager.h"
++#include "Player.h"
++#include "ScriptMgr.h"
++
++//compatibility macros
++#if !defined(_MSC_VER) || _MSC_VER >= 1600
++#define SCRIPT_VERSION_LAST
++#endif
++
++#ifdef SCRIPT_VERSION_LAST
++# define NOTHING nullptr
++# define EMPTYGUID ObjectGuid::Empty
++# define GetGUIDLow GetGUID().GetCounter
++# define GUID_LOPART(guid) guid.GetCounter()
++# define UNORDERED_MAP std::unordered_map
++using namespace Trinity::ChatCommands;
++#else
++# define NOTHING NULL
++# define ObjectGuid uint64
++# define EMPTYGUID 0
++#endif //SCRIPT_VERSION_LAST
++
++void AddSC_script_mf_commands();
++
++typedef UNORDERED_MAP<uint32, uint32> MFMapType;
++MFMapType MFMap;
++
++static bool __inited = false;
++
++//config
++static bool        _demoMode;
++static bool        _qualityAffectsEquallyChanced;
++static float       _factorUncommon;
++static float       _factorRare;
++static float       _factorEpic;
++static float       _factorLegendary;
++static std::string _charmTokens;
++std::set<uint32> CharmTokens;
++
++void MagicFind::LoadConfig()
++{
++    _demoMode                     = sConfigMgr->GetBoolDefault ("MF.Demonstration",                false);
++    _qualityAffectsEquallyChanced = sConfigMgr->GetBoolDefault ("MF.QualityAffectsEquallyChanced", true);
++    _factorUncommon               = sConfigMgr->GetFloatDefault("MF.Factor.Uncommon",              120.0f);
++    _factorRare                   = sConfigMgr->GetFloatDefault("MF.Factor.Rare",                  250.0f);
++    _factorEpic                   = sConfigMgr->GetFloatDefault("MF.Factor.Epic",                  350.0f);
++    _factorLegendary              = sConfigMgr->GetFloatDefault("MF.Factor.Legendary",             999.0f);
++    _charmTokens                  = sConfigMgr->GetStringDefault("MF.CharmItems",                  "");
++
++    ExtractTokens();
++}
++
++void MagicFind::ExtractTokens()
++{
++    //for reload
++    CharmTokens.clear();
++
++    std::string charmItemsString = MagicFind::GetStringConfig(MF_CHARM_TOKENS);
++
++#ifdef SCRIPT_VERSION_LAST
++    std::vector<std::string_view> tok = Trinity::Tokenize(charmItemsString, ',', false);
++    if (tok.size() > 0)
++    {
++        for (std::vector<std::string_view>::size_type i = 0; i != tok.size(); ++i)
++        {
++            try
++            {
++                CharmTokens.insert(*(Trinity::StringTo<uint32>(tok[i])));
++            }
++            catch (const std::string&)
++            {
++                TC_LOG_ERROR("loot", "invalid int token '%s' for charm item ID!", std::string(tok[i]).c_str());
++            }
++        }
++    }
++#else
++    Tokenizer tok = Tokenizer(charmItemsString, ',');
++    if (tok.size() > 0)
++    {
++        for (Tokenizer::const_iterator cit = tok.begin(); cit != tok.end(); ++cit)
++        {
++            try
++            {
++                CharmTokens.insert((uint32)atoi(*cit));
++            }
++            catch (const std::string&)
++            {
++                TC_LOG_ERROR("loot", "invalid int token '%s' for charm item ID!", *cit);
++            }
++        }
++    }
++#endif
++
++    //for (std::set<uint32>::const_iterator itr = CharmTokens.begin(); itr != CharmTokens.end(); ++itr)
++    //    TC_LOG_ERROR("loot", "Token: %u", *itr);
++}
++
++bool MagicFind::IsCharmToken(uint32 itemId)
++{
++    return CharmTokens.find(itemId) != CharmTokens.end();
++}
++
++void MagicFind::InitMagicFindSystem()
++{
++    //cannot reload
++    if (__inited)
++        return;
++
++    __inited = true;
++
++    LoadConfig();
++
++    uint32 botoldMSTime = getMSTime();
++    TC_LOG_INFO("server.loading", "Loading Magic Find...");
++
++#ifdef SCRIPT_VERSION_LAST
++    std::string const& oldcontext = sScriptMgr->GetCurrentScriptContext();
++    sScriptMgr->SetScriptContext("__magic_find__");
++    AddSC_script_mf_commands();
++    sScriptMgr->SetScriptContext(oldcontext);
++#else
++    AddSC_script_mf_commands();
++#endif
++
++    TC_LOG_INFO("server.loading", "Commands loaded");
++
++    //CharacterDatabase.DirectExecute("CREATE TABLE IF NOT EXISTS `character_magic_find` ("
++    //    "`guid` int(10) unsigned NOT NULL DEFAULT '0' COMMENT 'player guid',"
++    //    "`mf` int(10) unsigned NOT NULL DEFAULT '0',"
++    //    "PRIMARY KEY (`guid`)"
++    //    ") ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Magic Find System';");
++
++    QueryResult res = CharacterDatabase.Query("SELECT `guid`, `mf` FROM `character_magic_find`");
++    if (!res)
++    {
++        TC_LOG_INFO("server.loading", ">> Loaded 0 magic find values, DB table `character_magic_find` is empty!");
++        return;
++    }
++
++    Field* fields = res->Fetch();
++    do
++    {
++        uint32 guidlow = fields[0].GetUInt32();
++        uint32 mf      = fields[1].GetUInt32();
++
++        MFMap[guidlow] = mf;
++    } while (res->NextRow());
++
++    uint32 count = uint32(MFMap.size());
++    TC_LOG_INFO("server.loading", ">> Loaded %u magic find values in %u ms", count, GetMSTimeDiffToNow(botoldMSTime));
++}
++
++bool MagicFind::GetBoolConfig(MFBoolConfs c)
++{
++    switch (c)
++    {
++        case MF_IS_DEMO_MODE:
++            return _demoMode;
++        case MF_QUALITY_AFFECTS_EQ_CHANCED:
++            return _qualityAffectsEquallyChanced;
++        default:
++            TC_LOG_ERROR("loot", "Unknown MF bool config %u", uint32(c));
++            return false;
++    }
++}
++
++float MagicFind::GetFloatConfig(MFFloatConfs c)
++{
++    switch (c)
++    {
++        case MF_FACTOR_UNCOMMON:
++            return _factorUncommon;
++        case MF_FACTOR_RARE:
++            return _factorRare;
++        case MF_FACTOR_EPIC:
++            return _factorEpic;
++        case MF_FACTOR_LEGENDARY:
++            return _factorLegendary;
++        default:
++            TC_LOG_ERROR("loot", "Unknown MF float config %u", uint32(c));
++            return 0.f;
++    }
++}
++
++std::string MagicFind::GetStringConfig(MFStringConfs c)
++{
++    switch (c)
++    {
++        case MF_CHARM_TOKENS:
++            return _charmTokens;
++        default:
++            TC_LOG_ERROR("loot", "Unknown MF string config %u", uint32(c));
++            return "";
++    }
++}
++
++void MagicFind::SetMF(uint32 lowguid, uint32 newMF)
++{
++    MFMap[lowguid] = newMF;
++    CharacterDatabase.PExecute("REPLACE INTO `character_magic_find` (`guid`,`mf`) VALUES (%u,%u)", lowguid, newMF);
++}
++
++void MagicFind::SetMF(Player const* player, uint32 newMF)
++{
++    SetMF(player->GetGUIDLow(), newMF);
++}
++
++uint32 MagicFind::GetBaseMF(uint32 lowguid)
++{
++    return (MFMap.count(lowguid) != 0) ? MFMap[lowguid] : 0;
++}
++
++uint32 MagicFind::GetBaseMF(Player const* player)
++{
++    return GetBaseMF(player->GetGUIDLow());
++}
++
++uint32 MagicFind::GetItemsMF(Player const* player)
++{
++    uint32 mf = 0;
++
++    if (!CharmTokens.empty())
++    {
++        for (uint8 i = INVENTORY_SLOT_ITEM_START; i < INVENTORY_SLOT_ITEM_END; ++i)
++        {
++            if (Item const* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, i))
++            {
++                if (IsCharmToken(item->GetEntry()))
++                    mf += item->GetTemplate()->MaxDurability * item->GetCount();
++            }
++        }
++
++        for (uint8 i = INVENTORY_SLOT_BAG_START; i < INVENTORY_SLOT_BAG_END; ++i)
++        {
++            if (Bag const* bag = player->GetBagByPos(i))
++            {
++                for (uint8 j = 0; j < bag->GetBagSize(); ++j)
++                {
++                    if (Item const* item = player->GetItemByPos(i, j))
++                    {
++                        if (IsCharmToken(item->GetEntry()))
++                            mf += item->GetTemplate()->MaxDurability * item->GetCount();
++                    }
++                }
++            }
++        }
++    }
++
++    return mf;
++}
++
++uint32 MagicFind::GetMF(Player const* player)
++{
++    return GetBaseMF(player) + GetItemsMF(player); 
++}
++
++void MagicFind::CalculateMFCoefficients(Player const* player, float* coefs)
++{
++    uint32 mf = GetMF(player);
++
++    for (uint8 i = 0; i != MAX_ITEM_QUALITY; ++i)
++    {
++        float mf_coef = 1.0f;
++
++        if (mf > 0)
++        {
++            float mf_f;
++            switch (i)
++            {
++                case ITEM_QUALITY_UNCOMMON: mf_f = GetFloatConfig(MF_FACTOR_UNCOMMON);  break;
++                case ITEM_QUALITY_RARE:     mf_f = GetFloatConfig(MF_FACTOR_RARE);      break;
++                case ITEM_QUALITY_EPIC:     mf_f = GetFloatConfig(MF_FACTOR_EPIC);      break;
++                case ITEM_QUALITY_LEGENDARY:mf_f = GetFloatConfig(MF_FACTOR_LEGENDARY); break;
++                default:                    mf_f = 0.f;                                 break;
++            }
++            mf_coef += (mf_f <= 0.f) ? 0.f : (0.01f * ((mf <= 10) ? mf :
++                (mf * mf_f) / (mf * (GetBoolConfig(MF_IS_DEMO_MODE) ? 0.f : 0.5f) + mf_f)));
++        }
++
++        coefs[i] = mf_coef;
++    }
++}
++
++#define GM_COMMANDS rbac::RBACPermissions(197)
++#define PLAYER_COMMANDS rbac::RBACPermissions(199)
++
++class script_mf_commands : public CommandScript
++{
++public:
++    script_mf_commands() : CommandScript("script_mf_commands") { }
++
++#ifdef SCRIPT_VERSION_LAST
++    ChatCommandTable GetCommands() const override
++    {
++        static ChatCommandTable mfCommandTable =
++        {
++            { "setbase",    HandleMFSetBaseCommand,                     GM_COMMANDS, Console::Yes },
++            { "reloadcfg",  HandleMFReloadCfgCommand,                   GM_COMMANDS, Console::Yes },
++            //{ "awardtoken", HandleMFAwardTokenCommand,                  GM_COMMANDS, Console::Yes },
++            { "",           HandleMFCommand,                        PLAYER_COMMANDS, Console::No  },
++        };
++
++        static ChatCommandTable commandTable =
++        {
++            { "mf",         mfCommandTable                                                        },
++        };
++        return commandTable;
++    }
++#else
++    ChatCommand* GetCommands() const override
++    {
++        static ChatCommand mfCommandTable[] =
++        {
++            { "setbase",    GM_COMMANDS,            true,  &HandleMFSetBaseCommand,                 "", NULL },
++            { "reloadcfg",  GM_COMMANDS,            true,  &HandleMFReloadCfgCommand,               "", NULL },
++            //{ "awardtoken", GM_COMMANDS,            true,  &HandleMFAwardTokenCommand,              "", NULL },
++            { "",           PLAYER_COMMANDS,        false, &HandleMFCommand,                        "", NULL },
++            { NULL,         0,                      false, NULL,                                    "", NULL }
++        };
++
++        static ChatCommand commandTable[] =
++        {
++            { "mf",         PLAYER_COMMANDS,        true,  NULL,                          "", mfCommandTable },
++            { NULL,         0,                      false, NULL,                                    "", NULL }
++        };
++        return commandTable;
++    }
++#endif
++
++    static bool HandleMFReloadCfgCommand(ChatHandler* handler, const char* /*args*/)
++    {
++        TC_LOG_INFO("misc", "Re-Loading config settings...");
++        sWorld->LoadConfigSettings(true);
++        sMapMgr->InitializeVisibilityDistanceInfo();
++        handler->SendGlobalGMSysMessage("World config settings reloaded.");
++
++        TC_LOG_INFO("misc", "Re-Loading Magic Find settings...");
++        MagicFind::ReloadConfig();
++        handler->SendGlobalGMSysMessage("Magic Find settings reloaded.");
++        return true;
++    }
++
++    static bool HandleMFSetBaseCommand(ChatHandler* handler, const char* args)
++    {
++        char* nameStr = strtok((char*)args, " ");
++        char* mfStr = strtok(NOTHING, " ");
++
++        if (!nameStr || !mfStr)
++        {
++            handler->SendSysMessage("Syntax:\n.mf setbase #player_name #mf\nSets base Magic Find for character named #player_name");
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        Player* target;
++        ObjectGuid target_guid;
++        std::string target_name;
++        if (!handler->extractPlayerTarget(nameStr, &target, &target_guid, &target_name))
++        {
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        if (target_name.empty())
++        {
++            handler->SendSysMessage(LANG_PLAYER_NOT_FOUND);
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        uint32 newMF = uint32(std::max(0, atoi(mfStr)));
++        uint32 oldMF = MagicFind::GetBaseMF(GUID_LOPART(target_guid));
++
++        MagicFind::SetMF(GUID_LOPART(target_guid), newMF);
++        handler->PSendSysMessage("%s base MF was set to %u (was %u).", target_name.c_str(), newMF, oldMF);
++        return true;
++    }
++
++    /*static bool HandleMFAwardTokenCommand(ChatHandler* handler, const char* args)
++    {
++        char* nameStr = strtok((char*)args, " ");
++        char* tokenStr = strtok(NOTHING, " ");
++        char* countStr = strtok(NOTHING, " ");
++
++        Player* target;
++        ObjectGuid target_guid;
++        std::string target_name;
++        if (!nameStr || !tokenStr || !handler->extractPlayerTarget(nameStr, &target, &target_guid, &target_name))
++        {
++            handler->SendSysMessage("Syntax:\n.mf awardtoken #player_name #item_id [#count]\nGives character named #player_name MF charm items");
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        if (!target)
++        {
++            handler->PSendSysMessage(LANG_PLAYER_NOT_EXIST_OR_OFFLINE, nameStr);
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        if (!countStr)
++            countStr = "1";
++
++        uint32 tokenId = uint32(atoi(tokenStr));
++        uint32 count = uint32(atoi(countStr));
++        if (!tokenId || !count)
++            return false;
++
++        if (!MagicFind::IsCharmToken(tokenId))
++        {
++            handler->SendSysMessage(LANG_ITEM_NOT_IN_LIST);
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        uint32 noSpaceForCount = 0;
++        ItemPosCountVec dest;
++        InventoryResult msg = target->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, tokenId, count, &noSpaceForCount);
++        if (msg != EQUIP_ERR_OK)
++            count -= noSpaceForCount;
++        if (count == 0 || dest.empty())
++        {
++            handler->PSendSysMessage("%s has not enough space in bags.", target_name.c_str());
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        Item* item = target->StoreNewItem(dest, tokenId, true, Item::GenerateItemRandomPropertyId(tokenId));
++        if (!item)
++        {
++            handler->SendSysMessage("Could not store items for some reason.");
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        target->SendNewItem(item, count, true, false);
++        handler->PSendSysMessage("%s was awarded %u MF tokens (%u).", target_name.c_str(), count + noSpaceForCount, tokenId);
++        return true;
++    }*/
++
++    static bool HandleMFCommand(ChatHandler* handler, const char* /*args*/)
++    {
++        Player const* player = handler->getSelectedPlayer();
++        if (!player || (player != handler->GetSession()->GetPlayer() &&
++            handler->HasLowerSecurity(handler->GetSession()->GetPlayer(), EMPTYGUID)))
++        {
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        uint32 basemf = MagicFind::GetBaseMF(player);
++        uint32 itemmf = MagicFind::GetItemsMF(player);
++
++        std::ostringstream mfstr;
++        mfstr.setf(std::ios_base::fixed);
++        mfstr.precision(1);
++
++        if (itemmf)
++            mfstr << "+" << (basemf + itemmf) << "% MF (" << basemf <<" base + " << itemmf << " from items)";
++        else
++            mfstr << "+" << basemf << "% MF";
++
++        float mf_coefs[MAX_ITEM_QUALITY];
++        MagicFind::CalculateMFCoefficients(player, mf_coefs);
++        for (uint8 i = 0; i < MAX_ITEM_QUALITY; ++i)
++        {
++            if (i != ITEM_QUALITY_UNCOMMON && i != ITEM_QUALITY_RARE && i != ITEM_QUALITY_EPIC && i != ITEM_QUALITY_LEGENDARY)
++                continue;
++
++            std::string qstr;
++            switch (i)
++            {
++                case ITEM_QUALITY_UNCOMMON:  qstr = "Uncommon";  break;
++                case ITEM_QUALITY_RARE:      qstr = "Rare";      break;
++                case ITEM_QUALITY_EPIC:      qstr = "Epic";      break;
++                case ITEM_QUALITY_LEGENDARY: qstr = "Legendary"; break;
++                default:                                         break;
++            }
++            mfstr << "\n  " << qstr << ": " << float(mf_coefs[i] * 100.f) << "%";
++        }
++
++        handler->SendSysMessage(mfstr.str().c_str());
++
++        return true;
++    }
++};
++
++void AddSC_script_mf_commands()
++{
++    new script_mf_commands();
++}
+diff --git a/src/server/game/Loot/MagicFind.h b/src/server/game/Loot/MagicFind.h
+new file mode 100644
+index 0000000..9e3c9c1
+--- /dev/null
++++ b/src/server/game/Loot/MagicFind.h
+@@ -0,0 +1,54 @@
++/*
++ * Author:
++ * 2020-2021 Trickerer <https://github.com/trickerer>
++ */
++
++#ifndef MAGIC_FIND_H
++#define MAGIC_FIND_H
++
++#include <string>
++
++enum MFBoolConfs
++{
++    MF_IS_DEMO_MODE                     = 1,
++    MF_QUALITY_AFFECTS_EQ_CHANCED       = 2
++};
++
++enum MFFloatConfs
++{
++    MF_FACTOR_UNCOMMON                  = 1,
++    MF_FACTOR_RARE                      = 2,
++    MF_FACTOR_EPIC                      = 3,
++    MF_FACTOR_LEGENDARY                 = 4
++};
++
++enum MFStringConfs
++{
++    MF_CHARM_TOKENS                     = 1
++};
++
++class Player;
++
++class MagicFind
++{
++public:
++    static void InitMagicFindSystem();
++    static bool GetBoolConfig(MFBoolConfs c);
++    static float GetFloatConfig(MFFloatConfs c);
++    static std::string GetStringConfig(MFStringConfs c);
++    static void SetMF(uint32 lowguid, uint32 newMF);
++    static void SetMF(Player const* player, uint32 newMF);
++    static uint32 GetBaseMF(uint32 lowguid);
++    static uint32 GetBaseMF(Player const* player);
++    static uint32 GetItemsMF(Player const* player);
++    static uint32 GetMF(Player const* player);
++    static void ReloadConfig() { LoadConfig(); }
++    static bool IsCharmToken(uint32 itemId);
++    static void CalculateMFCoefficients(Player const* player, float* coefs);
++
++private:
++    static void LoadConfig();
++    static void ExtractTokens();
++};
++
++#endif
+diff --git a/src/server/game/World/World.cpp b/src/server/game/World/World.cpp
+index 5e07e6b..96ad308 100644
+--- a/src/server/game/World/World.cpp
++++ b/src/server/game/World/World.cpp
+@@ -91,6 +91,8 @@
+ 
+ #include <boost/asio/ip/address.hpp>
+ 
++#include "MagicFind.h"
++
+ TC_GAME_API std::atomic<bool> World::m_stopEvent(false);
+ TC_GAME_API uint8 World::m_ExitCode = SHUTDOWN_EXIT_CODE;
+ 
+@@ -1941,6 +1943,9 @@ void World::SetInitialWorldSettings()
+     // Loot tables
+     LoadLootTables();
+ 
++    // Magic Find
++    MagicFind::InitMagicFindSystem();
++
+     TC_LOG_INFO("server.loading", "Loading Skill Discovery Table...");
+     LoadSkillDiscoveryTable();
+ 
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index 6a51d91..70f007c 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -4089,3 +4089,51 @@ Metric.OverallStatusInterval = 1
+ 
+ #
+ ###################################################################################################
++
++###################################################################################################
++# MAGIC FIND SETTINGS
++#
++#    MF.Demonstration
++#        Description: Demonstration mode.
++#        Default:     0 - (Disabled)
++#                     1 - (Enabled, MF increase will be linear)
++
++MF.Demonstration = 0
++
++#
++#    MF.QualityAffectsEquallyChanced
++#        Description: Makes quality drop settings (Rate.Drop.Item.<Quality>) affect
++#                     equally chanced loot groups.
++#        Default:     1 - (Enabled)
++#                     0 - (Disabled)
++
++MF.QualityAffectsEquallyChanced = 1
++
++#
++#    MF.Factor.Uncommon
++#    MF.Factor.Rare
++#    MF.Factor.Epic
++#    MF.Factor.Legendary
++#        Description: MF to chance increase calculation factor.
++#                     The greater the factor - the more linear chance increase MF will provide.
++#        Default:     100.0 - (MF.Factor.Uncommon)
++#                     150.0 - (MF.Factor.Rare)
++#                     300.0 - (MF.Factor.Epic)
++#                     750.0 - (MF.Factor.Legendary)
++
++MF.Factor.Uncommon      = 100.0
++MF.Factor.Rare          = 150.0
++MF.Factor.Epic          = 300.0
++MF.Factor.Legendary     = 750.0
++
++#
++#    MF.CharmItems
++#        Description: List of item IDs, separated by commas, that count as MF charms.
++#                     Item durability is the amount of MF it provides.
++#        Default:     "45290,34643,29557" - (Enabled)
++#                     ""                  - (Disabled)
++
++MF.CharmItems = "45290,34643,29557"
++
++#
++###################################################################################################
+-- 
+2.10.0.windows.1
+

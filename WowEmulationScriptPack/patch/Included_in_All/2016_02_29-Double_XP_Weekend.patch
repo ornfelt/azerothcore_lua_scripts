@@ -1,0 +1,113 @@
+From b29ce598b54cebe8bccab199e9c7b8795bade6fa Mon Sep 17 00:00:00 2001
+From: LordPsyan <realmsofwarcraft@gmail.com>
+Date: Mon, 29 Feb 2016 09:40:18 -0600
+Subject: [PATCH] 2016_02_29-Double_XP_Weekend
+
+---
+ src/server/scripts/Custom/DoubleXP.cpp             | 43 ++++++++++++++++++++++
+ src/server/scripts/Custom/custom_script_loader.cpp |  6 ++-
+ src/server/worldserver/worldserver.conf.dist       | 14 +++++++
+ 3 files changed, 61 insertions(+), 2 deletions(-)
+ create mode 100644 src/server/scripts/Custom/DoubleXP.cpp
+
+diff --git a/src/server/scripts/Custom/DoubleXP.cpp b/src/server/scripts/Custom/DoubleXP.cpp
+new file mode 100644
+index 0000000..1251790
+--- /dev/null
++++ b/src/server/scripts/Custom/DoubleXP.cpp
+@@ -0,0 +1,43 @@
++#include "Player.h"
++#include "Chat.h"
++#include "World.h"
++#include "boost/date_time.hpp"
++#include "Config.h"
++
++class XpWeekend : public PlayerScript
++{
++    public:
++    XpWeekend() : PlayerScript("XpWeekend") { }
++    void OnGiveXP(Player* player, uint32& amount, Unit* victim)override
++{
++if(sConfigMgr->GetBoolDefault("DoubleXP.Enable", true))
++{
++    boost::gregorian::date date(boost::gregorian::day_clock::local_day());
++    auto day = date.day_of_week();
++    if (day == boost::date_time::Friday ||
++        day == boost::date_time::Saturday ||
++        day == boost::date_time::Sunday) {
++
++        amount = amount*2; }
++}
++}
++    void OnLogin(Player* player, bool firstLogin)
++    {
++if(sConfigMgr->GetBoolDefault("DoubleXP.Enable", true))
++{
++        boost::gregorian::date date(boost::gregorian::day_clock::local_day());
++    auto day = date.day_of_week();
++    if (day == boost::date_time::Friday ||
++        day == boost::date_time::Saturday ||
++        day == boost::date_time::Sunday) {
++
++        ChatHandler(player->GetSession()).PSendSysMessage("Double XP is going on now!");
++        }
++}
++    }
++};
++
++void AddSC_XpWeekend()
++{
++    new XpWeekend();
++}
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 0592bb5..22472b5 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -163,7 +163,8 @@
+ // start145
+ // start146
+ // start147
+-// start148
++// Double XP Weekend
++void AddSC_XpWeekend();
+ // start149
+ // start150
+ // start151
+@@ -368,7 +369,8 @@ void AddCustomScripts()
+ // end145
+ // end146
+ // end147
+-// end148
++// Double XP Weekend
++    AddSC_XpWeekend();
+ // end149
+ // end150
+ // end151
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index 4837a24..0cce450 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -3566,6 +3566,20 @@ PacketSpoof.BanDuration = 86400
+ #
+ ###################################################################################################
+ 
++# Double XP Weekend
++#
++# Enables or disables the Double XP Weekend Script
++#
++#    DoubleXP.Enable
++#        Default:     1 (enabled)
++#                     0 (disabled)
++
++DoubleXP.Enable = 1
++
++#
++###################################################################################################
++
++
+ #
+ # Prepatch by LordPsyan.
+ # See http://www.realmsofwarcraft.com/bb for forums and information.
+-- 
+2.1.4
+

@@ -1,0 +1,96 @@
+From 2d8cb1e4fcc57d8fc57bff6ea5b3c3e098725ffa Mon Sep 17 00:00:00 2001
+From: LordPsyan <realmsofwarcraft@gmail.com>
+Date: Mon, 29 Feb 2016 08:08:26 -0600
+Subject: [PATCH] 2016_02_29-Arena_Anti_Draw
+
+---
+ src/server/scripts/Custom/Arena_Anti_Draw.cpp      | 51 ++++++++++++++++++++++
+ src/server/scripts/Custom/custom_script_loader.cpp |  6 ++-
+ 2 files changed, 55 insertions(+), 2 deletions(-)
+ create mode 100644 src/server/scripts/Custom/Arena_Anti_Draw.cpp
+
+diff --git a/src/server/scripts/Custom/Arena_Anti_Draw.cpp b/src/server/scripts/Custom/Arena_Anti_Draw.cpp
+new file mode 100644
+index 0000000..05a4944
+--- /dev/null
++++ b/src/server/scripts/Custom/Arena_Anti_Draw.cpp
+@@ -0,0 +1,51 @@
++#include "Pet.h"
++
++const uint32 SPELL_DEMENTIA = 41406;
++
++class AntiDrawSystem : public PlayerScript
++{
++public:
++    AntiDrawSystem() : PlayerScript("AntiDrawSystem") {}
++
++    void OnUpdateZone(Player* player, uint32 newZone, uint32 newArea)
++    {
++        Pet* pet = player->GetPet();
++
++        // Remove Dementia on updating zone for player
++        if (player->HasAura(SPELL_DEMENTIA))
++            player->RemoveAura(SPELL_DEMENTIA);
++
++        // Remove Dementia on upddating zone for pet
++        if (pet)
++        {
++            if (pet->HasAura(SPELL_DEMENTIA))
++            {
++                pet->RemoveAura(SPELL_DEMENTIA);
++            }
++        }
++    }
++
++    void OnLogin(Player* player, bool /* OnLogin */)
++    {
++        Pet* pet = player->GetPet();
++
++        // Remove Dementia on player login
++        if (player->HasAura(SPELL_DEMENTIA))
++            player->RemoveAura(SPELL_DEMENTIA);
++
++        // Remove Dementia on Pet Login
++        if (pet)
++        {
++            if (pet->HasAura(SPELL_DEMENTIA))
++            {
++                pet->RemoveAura(SPELL_DEMENTIA);
++            }
++        }
++    }
++
++};
++
++void AddSC_Arena_AntiDraw()
++{
++    new AntiDrawSystem();
++}
+\ No newline at end of file
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 0592bb5..22e26c3 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -112,7 +112,8 @@
+ // start94
+ // start95
+ // start96
+-// start97
++// Arena Anti-Draw
++void AddSC_Arena_AntiDraw();
+ // start98
+ // start99
+ // start100
+@@ -317,7 +318,8 @@ void AddCustomScripts()
+ // end94
+ // end95
+ // end96
+-// end97
++// Arena Anti-Draw
++    AddSC_Arena_AntiDraw();
+ // end98
+ // end99
+ // end100
+-- 
+2.1.4
+

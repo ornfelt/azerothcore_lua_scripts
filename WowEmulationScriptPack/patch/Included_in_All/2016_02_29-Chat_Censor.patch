@@ -1,0 +1,150 @@
+From ce798cca8f4b5286e3251c55aab5dd46fb8ee333 Mon Sep 17 00:00:00 2001
+From: LordPsyan <realmsofwarcraft@gmail.com>
+Date: Mon, 29 Feb 2016 08:32:42 -0600
+Subject: [PATCH] 2016_02_29-Chat_Censor
+
+---
+ src/server/scripts/Custom/chat_censor.cpp          | 106 +++++++++++++++++++++
+ src/server/scripts/Custom/custom_script_loader.cpp |   6 +-
+ 2 files changed, 110 insertions(+), 2 deletions(-)
+ create mode 100644 src/server/scripts/Custom/chat_censor.cpp
+
+diff --git a/src/server/scripts/Custom/chat_censor.cpp b/src/server/scripts/Custom/chat_censor.cpp
+new file mode 100644
+index 0000000..016f7c6
+--- /dev/null
++++ b/src/server/scripts/Custom/chat_censor.cpp
+@@ -0,0 +1,106 @@
++// Unknown creator
++// Some errors fixed by CyBeR-PrO
++// Edited by Rochet2
++
++#include "Channel.h"
++
++// only use lowercase letters
++// The strings are trimmed of whitespace and compared lowercase
++// To add more checks, just add a new line to the checks array
++static const char* checks[] = {
++    "sytes",
++    "instant",
++    "dyndns",
++    "no-ip",
++    "http:",
++    ".com",
++    ".net",
++    ".org",
++    ".eu",
++    ".fr",
++    ".bg",
++    ".info",
++    ".br",
++    "https:",
++    "wow",
++    "www.",
++    "no-ip",
++    ".zapto",
++    ".biz",
++    ".servegame",
++
++    "trevonwow",
++    "megawow",
++    "fatalwow",
++    "uniforgiven-wow",
++    "wow-autolouco",
++    "heaven-wow",
++    "fireballwow",
++    "wowbrasilpa",
++    "fatalitywow",
++    "demonic-wow",
++    "revenge-wow",
++    "heavenwow",
++    "undead-wow",
++    "linebr",
++    "azralon",
++    "black-wow",
++};
++
++static const size_t checksize = sizeof(checks) / sizeof(*checks);
++class System_Censure : public PlayerScript
++{
++public:
++    System_Censure() : PlayerScript("System_Censure") { }
++
++    void CheckMessage(Player* player, std::string& msg, uint32 lang)
++    {
++        //if (player->isGameMaster() || lang == LANG_ADDON)
++        //    return;
++
++        // remove all space characters and transform to lowercase for simpler checking
++        std::string checkmsg = msg;
++        checkmsg.erase(remove_if(checkmsg.begin(), checkmsg.end(), ::isspace), checkmsg.end());
++        std::transform(checkmsg.begin(), checkmsg.end(), checkmsg.begin(), ::tolower);
++
++        for (size_t i = 0; i < checksize; ++i)
++        {
++            if (checkmsg.find(checks[i]) != std::string::npos)
++            {
++                msg = "";
++                ChatHandler(player->GetSession()).PSendSysMessage("Links/Advertisements are not allowed!");
++                return;
++            }
++        }
++    };
++
++    void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg) override
++    {
++        CheckMessage(player, msg, lang);
++    }
++
++    void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Player* /*receiver*/) override
++    {
++        CheckMessage(player, msg, lang);
++    }
++
++    void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Group* /*group*/) override
++    {
++        CheckMessage(player, msg, lang);
++    }
++
++    void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Guild* /*guild*/) override
++    {
++        CheckMessage(player, msg, lang);
++    }
++
++    void OnChat(Player* player, uint32 /*type*/, uint32 lang, std::string& msg, Channel* /*channel*/) override
++    {
++        CheckMessage(player, msg, lang);
++    }
++};
++
++void AddSC_System_Censure()
++{
++    new System_Censure();
++}
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 0592bb5..23098b0 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -145,7 +145,8 @@
+ // start127
+ // start128
+ // start129
+-// start130
++// Chat Censor
++void AddSC_System_Censure();
+ // start131
+ // start132
+ // start133
+@@ -350,7 +351,8 @@ void AddCustomScripts()
+ // end127
+ // end128
+ // end129
+-// end130
++// Chat Censor
++    AddSC_System_Censure();
+ // end131
+ // end132
+ // end133
+-- 
+2.1.4
+

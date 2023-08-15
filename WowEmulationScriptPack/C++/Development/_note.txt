@@ -1,0 +1,74 @@
+# Copyright (C) 2008-2012 TrinityCore <http://www.trinitycore.org/>
+#
+# This file is free software; as a special exception the author gives
+# unlimited permission to copy and/or distribute it, with or without
+# modifications, as long as this notice is preserved.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+set(scripts_STAT_SRCS
+  ${scripts_STAT_SRCS}
+
+    Custom/security/sec_anti_farming.cpp
+
+    Custom/Transmogrification.cpp
+    Custom/Transmogrification.h
+
+    Custom/events/pvp_area.cpp
+
+    custom/multivendor/npc_gem.cpp
+    custom/multivendor/npc_startergear.cpp
+    Custom/multivendor/npc_weapon.cpp
+    Custom/multivendor/npc_armor.cpp
+    Custom/multivendor/npc_glyphs.cpp
+    Custom/multivendor/npc_pvp_starter.cpp
+    Custom/multivendor/npc_pve_starter.cpp
+    Custom/multivendor/npc_allinone.cpp
+    Custom/multivendor/npc_transmog_season.cpp
+    Custom/multivendor/npc_transmog_tier.cpp
+    Custom/multivendor/npc_transmog_weapon.cpp
+    Custom/multivendor/npc_pve_end.cpp
+    Custom/multivendor/npc_pvp_end.cpp
+    Custom/multivendor/npc_donation.cpp
+    Custom/multivendor/npc_profession_reagents.cpp
+    Custom/multivendor/npc_mounts.cpp
+
+    Custom/general/npc_event.cpp
+    Custom/general/npc_trainer.cpp
+    Custom/general/npc_teleport.cpp
+    custom/general/npc_transmogrification.cpp
+    Custom/general/npc_profession.cpp
+    Custom/general/npc_gurubashi_theme.cpp
+    Custom/general/npc_guildmaster.cpp
+    Custom/general/npc_enchant.cpp
+    Custom/general/npc_beastmaster.cpp
+    Custom/general/maxskill.cpp
+    Custom/general/npc_support.cpp
+    Custom/general/npc_tools.cpp
+    Custom/general/npc_vote.cpp
+    Custom/general/npc_title.cpp
+    Custom/general/hearthstone_summon.cpp
+    Custom/general/npc_lotto.cpp
+    Custom/general/global_teleporter.cpp
+    Custom/general/player_assistant.cpp
+    Custom/general/summon_all_npc.cpp
+
+    Custom/pvp/bountyhunter.cpp
+    Custom/pvp/toparena.cpp
+    custom/pvp/duelreset.cpp
+    custom/pvp/killstreak.cpp
+    Custom/pvp/1v1.cpp
+    Custom/pvp/pvp_gold.cpp
+    Custom/pvp/pvp_blood_money.cpp
+
+    Custom/events/event_npc.cpp
+
+    Custom/vip/vip_commands.cpp
+    Custom/vip/vip_only_vendor.cpp
+    Custom/vip/vip_only_area.cpp
+
+)
+
+message("  -> Prepared: Custom")

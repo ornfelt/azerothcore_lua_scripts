@@ -1,0 +1,30 @@
+-- filename.ext files are loaded before normal .lua files
+
+-- This file will contain functions that will act as shortcuts to commonly used code. All sterilize functions will rest here.
+-- Add a comment on the same line as the function start, AND EXPLAIN WHAT IT DOES AND WHY IT EXISTS!
+
+sterilize = {}
+
+
+
+function sterilize.generic(parameter) -- https://www.lua.org/pil/20.2.html
+	tostring(parameter)
+	parameter = string.gsub(parameter,"%;","") -- Replace the character ";" with nothing. Does this really need escaping?
+	parameter = string.gsub(parameter,"`","") -- Replace the character "`" with nothing.
+	parameter = string.gsub(parameter,"(%a)'","%1`") -- For any words that end with ', replace the "'" with "`"
+	parameter = string.gsub(parameter,"(%s)'(%a)","%1;%2") -- For any words that have a space, then the character "'" and then letters, replace the "'" with a ";".
+	parameter = string.gsub(parameter,"'","") -- Replace the character "'" with nothing.
+	parameter = string.gsub(parameter,"(%a)`","%1''") -- For any words that end with "`", replace the "`" with "''"
+	parameter = string.gsub(parameter,"(%s);(%a)","%1''%2") -- For any words that have a space, then the character ";" and then letters, replace the ";" with "''".
+	return parameter
+end
+
+function sterilize.onlyLetters(parameter)
+   newstring = tostring(string.gsub(parameter,"[^%a]","")) -- %a is all letters. ^ means negate. Replace with nothing = Replace everything but letters with nothing.
+   return newstring
+end
+
+function sterilize.onlyLettersAndSpaces(parameter)
+    newstring = tostring(string.gsub(parameter,"[^%a% ]","")) -- %a is all letters. '% ' is spacebar. ^ means negate. Replace with nothing = Replace everything but letters and spacebar with nothing.
+    return newstring
+end

@@ -1,0 +1,412 @@
+diff --git a/sql/custom/auth/2016_11_10_00_auth_objscale.sql b/sql/custom/auth/2016_11_10_00_auth_objscale.sql
+new file mode 100644
+index 000000000000..fb9502a8ab7d
+--- /dev/null
++++ b/sql/custom/auth/2016_11_10_00_auth_objscale.sql
+@@ -0,0 +1,5 @@
++INSERT INTO `rbac_permissions` (`id`, `name`) VALUES (1398, 'Command: gobject set scale');
++INSERT INTO `rbac_permissions` (`id`, `name`) VALUES (1589, 'Command: npc set scale');
++
++INSERT INTO `rbac_linked_permissions` (`id`, `linkedId`) VALUES (197, 1398);
++INSERT INTO `rbac_linked_permissions` (`id`, `linkedId`) VALUES (197, 1589);
+diff --git a/sql/custom/world/2021_10_05_00_world_objscale.sql b/sql/custom/world/2021_10_05_00_world_objscale.sql
+new file mode 100644
+index 000000000000..1ce99042a1d2
+--- /dev/null
++++ b/sql/custom/world/2021_10_05_00_world_objscale.sql
+@@ -0,0 +1,8 @@
++
++-- gameobject
++ALTER TABLE `gameobject`ADD COLUMN `size` FLOAT NOT NULL DEFAULT '-1';
++INSERT INTO `command` (`name`, `help`) VALUES ('gobject set scale', 'Syntax: .gobject set scale #guid #scale\r\n\r\nGameobject with DB guid #guid size changed to #scale. Gameobject scale saved to DB and persistent. Does not affect other gameobjects of same entry. Using -1 scale uses the default scale from template.');
++
++-- creature
++ALTER TABLE `creature` ADD COLUMN `size` FLOAT NOT NULL DEFAULT '-1';
++INSERT INTO `command` (`name`, `help`) VALUES ('npc set scale', 'Syntax: .npc set scale #scale\r\n\r\nSelected NPC size changed to #scale. NPC scale saved to DB and persistent. Does not affect other creatures of same entry. Using -1 scale uses the default scale from template.');
+diff --git a/src/server/database/Database/Implementation/WorldDatabase.cpp b/src/server/database/Database/Implementation/WorldDatabase.cpp
+old mode 100644
+new mode 100755
+index 372f64a273ca..2bc1b6b72fe3
+--- a/src/server/database/Database/Implementation/WorldDatabase.cpp
++++ b/src/server/database/Database/Implementation/WorldDatabase.cpp
+@@ -83,10 +83,10 @@ void WorldDatabaseConnection::DoPrepareStatements()
+     PrepareStatement(WORLD_SEL_CREATURE_BY_ID, "SELECT guid FROM creature WHERE id = ?", CONNECTION_SYNCH);
+     PrepareStatement(WORLD_SEL_GAMEOBJECT_NEAREST, "SELECT guid, id, position_x, position_y, position_z, map, (POW(position_x - ?, 2) + POW(position_y - ?, 2) + POW(position_z - ?, 2)) AS order_ FROM gameobject WHERE map = ? AND (POW(position_x - ?, 2) + POW(position_y - ?, 2) + POW(position_z - ?, 2)) <= ? ORDER BY order_", CONNECTION_SYNCH);
+     PrepareStatement(WORLD_SEL_CREATURE_NEAREST, "SELECT guid, id, position_x, position_y, position_z, map, (POW(position_x - ?, 2) + POW(position_y - ?, 2) + POW(position_z - ?, 2)) AS order_ FROM creature WHERE map = ? AND (POW(position_x - ?, 2) + POW(position_y - ?, 2) + POW(position_z - ?, 2)) <= ? ORDER BY order_", CONNECTION_SYNCH);
+-    PrepareStatement(WORLD_INS_CREATURE, "INSERT INTO creature (guid, id , map, spawnMask, phaseMask, modelid, equipment_id, position_x, position_y, position_z, orientation, spawntimesecs, wander_distance, currentwaypoint, curhealth, curmana, MovementType, npcflag, unit_flags, dynamicflags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
++    PrepareStatement(WORLD_INS_CREATURE, "INSERT INTO creature (guid, id , map, spawnMask, phaseMask, modelid, equipment_id, position_x, position_y, position_z, orientation, spawntimesecs, wander_distance, currentwaypoint, curhealth, curmana, MovementType, npcflag, unit_flags, dynamicflags, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
+     PrepareStatement(WORLD_DEL_GAME_EVENT_CREATURE, "DELETE FROM game_event_creature WHERE guid = ?", CONNECTION_ASYNC);
+     PrepareStatement(WORLD_DEL_GAME_EVENT_MODEL_EQUIP, "DELETE FROM game_event_model_equip WHERE guid = ?", CONNECTION_ASYNC);
+-    PrepareStatement(WORLD_INS_GAMEOBJECT, "INSERT INTO gameobject (guid, id, map, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
++    PrepareStatement(WORLD_INS_GAMEOBJECT, "INSERT INTO gameobject (guid, id, map, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
+     PrepareStatement(WORLD_INS_DISABLES, "INSERT INTO disables (entry, sourceType, flags, comment) VALUES (?, ?, ?, ?)", CONNECTION_ASYNC);
+     PrepareStatement(WORLD_SEL_DISABLES, "SELECT entry FROM disables WHERE entry = ? AND sourceType = ?", CONNECTION_SYNCH);
+     PrepareStatement(WORLD_DEL_DISABLES, "DELETE FROM disables WHERE entry = ? AND sourceType = ?", CONNECTION_ASYNC);
+diff --git a/src/server/game/Accounts/RBAC.h b/src/server/game/Accounts/RBAC.h
+index cdca72556e0a..500aa7953b9d 100644
+--- a/src/server/game/Accounts/RBAC.h
++++ b/src/server/game/Accounts/RBAC.h
+@@ -748,6 +748,8 @@ enum RBACPermissions
+     // IF YOU ADD NEW PERMISSIONS, ADD THEM IN MASTER BRANCH AS WELL!
+     //
+     // custom permissions 1000+
++    RBAC_PERM_COMMAND_GOBJECT_SET_SCALE                      = 1398,
++    RBAC_PERM_COMMAND_NPC_SET_SCALE                          = 1589,
+     RBAC_PERM_MAX
+ };
+ 
+diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
+old mode 100644
+new mode 100755
+index 733a5e92c750..5e08e83681fc
+--- a/src/server/game/Entities/Creature/Creature.cpp
++++ b/src/server/game/Entities/Creature/Creature.cpp
+@@ -516,7 +516,10 @@ bool Creature::InitEntry(uint32 entry, CreatureData const* data /*= nullptr*/)
+     SetSpeedRate(MOVE_FLIGHT, 1.0f); // using 1.0 rate
+ 
+     // Will set UNIT_FIELD_BOUNDINGRADIUS and UNIT_FIELD_COMBATREACH
+-    SetObjectScale(GetNativeObjectScale());
++    if (data && data->size > 0.0f)
++        SetObjectScale(data->size);
++    else
++        SetObjectScale(GetNativeObjectScale());
+ 
+     SetFloatValue(UNIT_FIELD_HOVERHEIGHT, cinfo->HoverHeight);
+ 
+@@ -1371,6 +1374,24 @@ void Creature::SaveToDB(uint32 mapid, uint8 spawnMask, uint32 phaseMask)
+     data.npcflag = npcflag;
+     data.unit_flags = unit_flags;
+     data.dynamicflags = dynamicflags;
++    if (data.size == 0.0f)
++    {
++        // first save, use default if scale matches template or use custom scale if not
++        if (cinfo && cinfo->scale == GetObjectScale())
++            data.size = -1.0f;
++        else
++            data.size = GetObjectScale();
++    }
++    else if (data.size < 0.0f || (cinfo && cinfo->scale == data.size))
++    {
++        // scale is negative or matches template, use default
++        data.size = -1.0f;
++    }
++    else
++    {
++        // scale is positive and does not match template
++        // using data.size or could do data.size = GetObjectScale()
++    }
+     if (!data.spawnGroupData)
+         data.spawnGroupData = sObjectMgr->GetDefaultSpawnGroup();
+ 
+@@ -1405,6 +1426,7 @@ void Creature::SaveToDB(uint32 mapid, uint8 spawnMask, uint32 phaseMask)
+     stmt->setUInt32(index++, npcflag);
+     stmt->setUInt32(index++, unit_flags);
+     stmt->setUInt32(index++, dynamicflags);
++    stmt->setFloat(index++, data.size);
+     trans->Append(stmt);
+ 
+     WorldDatabase.CommitTransaction(trans);
+diff --git a/src/server/game/Entities/Creature/CreatureData.h b/src/server/game/Entities/Creature/CreatureData.h
+index 96c6e2a7cb52..3db1ca300248 100644
+--- a/src/server/game/Entities/Creature/CreatureData.h
++++ b/src/server/game/Entities/Creature/CreatureData.h
+@@ -452,6 +452,7 @@ struct CreatureData : public SpawnData
+     uint32 npcflag = 0;
+     uint32 unit_flags = 0;
+     uint32 dynamicflags = 0;
++    float size = -1.0f;
+ };
+ 
+ struct CreatureModelInfo
+diff --git a/src/server/game/Entities/GameObject/GameObject.cpp b/src/server/game/Entities/GameObject/GameObject.cpp
+index c955e5d102b9..846061609279 100644
+--- a/src/server/game/Entities/GameObject/GameObject.cpp
++++ b/src/server/game/Entities/GameObject/GameObject.cpp
+@@ -253,7 +253,7 @@ void GameObject::RemoveFromWorld()
+     }
+ }
+ 
+-bool GameObject::Create(ObjectGuid::LowType guidlow, uint32 name_id, Map* map, uint32 phaseMask, Position const& pos, QuaternionData const& rotation, uint32 animprogress, GOState go_state, uint32 artKit /*= 0*/, bool dynamic, ObjectGuid::LowType spawnid)
++bool GameObject::Create(ObjectGuid::LowType guidlow, uint32 name_id, Map* map, uint32 phaseMask, Position const& pos, QuaternionData const& rotation, uint32 animprogress, GOState go_state, uint32 artKit /*= 0*/, bool dynamic, ObjectGuid::LowType spawnid, float size)
+ {
+     ASSERT(map);
+     SetMap(map);
+@@ -318,7 +318,10 @@ bool GameObject::Create(ObjectGuid::LowType guidlow, uint32 name_id, Map* map, u
+ 
+     SetParentRotation(parentRotation);
+ 
+-    SetObjectScale(goinfo->size);
++    if (size > 0.0f)
++        SetObjectScale(size);
++    else
++        SetObjectScale(goinfo->size);
+ 
+     if (GameObjectOverride const* goOverride = GetGameObjectOverride())
+     {
+@@ -1006,6 +1009,24 @@ void GameObject::SaveToDB(uint32 mapid, uint8 spawnMask, uint32 phaseMask)
+     data.goState = GetGoState();
+     data.spawnMask = spawnMask;
+     data.artKit = GetGoArtKit();
++    if (data.size == 0.0f)
++    {
++        // first save, use default if scale matches template or use custom scale if not
++        if (goI && goI->size == GetObjectScale())
++            data.size = -1.0f;
++        else
++            data.size = GetObjectScale();
++    }
++    else if (data.size < 0.0f || (goI && goI->size == data.size))
++    {
++        // scale is negative or matches template, use default
++        data.size = -1.0f;
++    }
++    else
++    {
++        // scale is positive and does not match template
++        // using data.size or could do data.size = GetObjectScale()
++    }
+     if (!data.spawnGroupData)
+         data.spawnGroupData = sObjectMgr->GetDefaultSpawnGroup();
+ 
+@@ -1035,6 +1056,7 @@ void GameObject::SaveToDB(uint32 mapid, uint8 spawnMask, uint32 phaseMask)
+     stmt->setInt32(index++, int32(m_respawnDelayTime));
+     stmt->setUInt8(index++, GetGoAnimProgress());
+     stmt->setUInt8(index++, uint8(GetGoState()));
++    stmt->setFloat(index++, data.size);
+     trans->Append(stmt);
+ 
+     WorldDatabase.CommitTransaction(trans);
+@@ -1057,10 +1079,11 @@ bool GameObject::LoadFromDB(ObjectGuid::LowType spawnId, Map* map, bool addToMap
+     uint32 animprogress = data->animprogress;
+     GOState go_state = data->goState;
+     uint32 artKit = data->artKit;
++    float size = data->size;
+ 
+     m_spawnId = spawnId;
+     m_respawnCompatibilityMode = ((data->spawnGroupData->flags & SPAWNGROUP_FLAG_COMPATIBILITY_MODE) != 0);
+-    if (!Create(map->GenerateLowGuid<HighGuid::GameObject>(), entry, map, phaseMask, data->spawnPoint, data->rotation, animprogress, go_state, artKit, !m_respawnCompatibilityMode))
++    if (!Create(map->GenerateLowGuid<HighGuid::GameObject>(), entry, map, phaseMask, data->spawnPoint, data->rotation, animprogress, go_state, artKit, !m_respawnCompatibilityMode, 0, size))
+         return false;
+ 
+     if (data->spawntimesecs >= 0)
+@@ -1655,7 +1678,7 @@ void GameObject::Use(Unit* user)
+             for (ChairSlotAndUser::iterator itr = ChairListSlots.begin(); itr != ChairListSlots.end(); ++itr)
+             {
+                 // the distance between this slot and the center of the go - imagine a 1D space
+-                float relativeDistance = (info->size*itr->first)-(info->size*(info->chair.slots-1)/2.0f);
++                float relativeDistance = (GetObjectScale()*itr->first)-(GetObjectScale()*(info->chair.slots-1)/2.0f);
+ 
+                 float x_i = GetPositionX() + relativeDistance * std::cos(orthogonalOrientation);
+                 float y_i = GetPositionY() + relativeDistance * std::sin(orthogonalOrientation);
+diff --git a/src/server/game/Entities/GameObject/GameObject.h b/src/server/game/Entities/GameObject/GameObject.h
+old mode 100644
+new mode 100755
+index ec0547c2aaa4..b6f53313d675
+--- a/src/server/game/Entities/GameObject/GameObject.h
++++ b/src/server/game/Entities/GameObject/GameObject.h
+@@ -89,7 +89,7 @@ class TC_GAME_API GameObject : public WorldObject, public GridObject<GameObject>
+         void RemoveFromWorld() override;
+         void CleanupsBeforeDelete(bool finalCleanup = true) override;
+ 
+-        bool Create(ObjectGuid::LowType guidlow, uint32 name_id, Map* map, uint32 phaseMask, Position const& pos, QuaternionData const& rotation, uint32 animprogress, GOState go_state, uint32 artKit = 0, bool dynamic = false, ObjectGuid::LowType spawnid = 0);
++        bool Create(ObjectGuid::LowType guidlow, uint32 name_id, Map* map, uint32 phaseMask, Position const& pos, QuaternionData const& rotation, uint32 animprogress, GOState go_state, uint32 artKit = 0, bool dynamic = false, ObjectGuid::LowType spawnid = 0, float size = -1.0f);
+         void Update(uint32 p_time) override;
+         GameObjectTemplate const* GetGOInfo() const { return m_goInfo; }
+         GameObjectTemplateAddon const* GetTemplateAddon() const { return m_goTemplateAddon; }
+diff --git a/src/server/game/Entities/GameObject/GameObjectData.h b/src/server/game/Entities/GameObject/GameObjectData.h
+index 087eb8c18bdb..2c5bddc46e9a 100644
+--- a/src/server/game/Entities/GameObject/GameObjectData.h
++++ b/src/server/game/Entities/GameObject/GameObjectData.h
+@@ -670,6 +670,7 @@ struct GameObjectData : public SpawnData
+     uint32 animprogress = 0;
+     GOState goState = GO_STATE_ACTIVE;
+     uint8 artKit = 0;
++    float size = -1.0f;
+ };
+ 
+ enum class GameObjectActions : uint32
+diff --git a/src/server/game/Globals/ObjectMgr.cpp b/src/server/game/Globals/ObjectMgr.cpp
+old mode 100644
+new mode 100755
+index 1256428f6dc6..7596bc29ccee
+--- a/src/server/game/Globals/ObjectMgr.cpp
++++ b/src/server/game/Globals/ObjectMgr.cpp
+@@ -2117,8 +2117,8 @@ void ObjectMgr::LoadCreatures()
+     QueryResult result = WorldDatabase.Query("SELECT creature.guid, id, map, position_x, position_y, position_z, orientation, modelid, equipment_id, spawntimesecs, wander_distance, "
+     //   11               12         13       14            15         16          17          18                19                   20                    21
+         "currentwaypoint, curhealth, curmana, MovementType, spawnMask, phaseMask, eventEntry, poolSpawnId, creature.npcflag, creature.unit_flags, creature.dynamicflags, "
+-    //   22
+-        "creature.ScriptName "
++    //   22                   23
++        "creature.ScriptName, creature.size "
+         "FROM creature "
+         "LEFT OUTER JOIN game_event_creature ON creature.guid = game_event_creature.guid "
+         "LEFT OUTER JOIN pool_members ON pool_members.type = 0 AND creature.guid = pool_members.spawnId");
+@@ -2174,6 +2174,7 @@ void ObjectMgr::LoadCreatures()
+         data.unit_flags     = fields[20].GetUInt32();
+         data.dynamicflags   = fields[21].GetUInt32();
+         data.scriptId       = GetScriptId(fields[22].GetString());
++        data.size           = fields[23].GetFloat();
+         data.spawnGroupData = GetDefaultSpawnGroup();
+ 
+         MapEntry const* mapEntry = sMapStore.LookupEntry(data.mapId);
+@@ -2426,7 +2427,7 @@ void ObjectMgr::LoadGameObjects()
+     //   7          8          9          10         11             12            13     14         15         16          17
+         "rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, spawnMask, phaseMask, eventEntry, poolSpawnId, "
+     //   18
+-        "ScriptName "
++        "ScriptName, size "
+         "FROM gameobject LEFT OUTER JOIN game_event_gameobject ON gameobject.guid = game_event_gameobject.guid "
+         "LEFT OUTER JOIN pool_members ON pool_members.type = 1 AND gameobject.guid = pool_members.spawnId");
+ 
+@@ -2528,6 +2529,7 @@ void ObjectMgr::LoadGameObjects()
+         data.phaseMask      = fields[15].GetUInt32();
+         int16 gameEvent     = fields[16].GetInt8();
+         uint32 PoolId        = fields[17].GetUInt32();
++        data.size           = fields[19].GetFloat();
+ 
+         data.scriptId = GetScriptId(fields[18].GetString());
+ 
+diff --git a/src/server/scripts/Commands/cs_gobject.cpp b/src/server/scripts/Commands/cs_gobject.cpp
+index 5fd73e20f6b4..304e47dba406 100644
+--- a/src/server/scripts/Commands/cs_gobject.cpp
++++ b/src/server/scripts/Commands/cs_gobject.cpp
+@@ -72,6 +72,7 @@ class gobject_commandscript : public CommandScript
+             { "add",            HandleGameObjectAddCommand,       rbac::RBAC_PERM_COMMAND_GOBJECT_ADD,            Console::No },
+             { "set phase",      HandleGameObjectSetPhaseCommand,  rbac::RBAC_PERM_COMMAND_GOBJECT_SET_PHASE,      Console::No },
+             { "set state",      HandleGameObjectSetStateCommand,  rbac::RBAC_PERM_COMMAND_GOBJECT_SET_STATE,      Console::No },
++            { "set scale",      HandleGameObjectSetScaleCommand,  rbac::RBAC_PERM_COMMAND_GOBJECT_SET_SCALE,      Console::No },
+         };
+         static ChatCommandTable commandTable =
+         {
+@@ -622,6 +623,35 @@ class gobject_commandscript : public CommandScript
+         handler->PSendSysMessage("Set gobject type %d state %u", objectType, *objectState);
+         return true;
+     }
++
++    static bool HandleGameObjectSetScaleCommand(ChatHandler* handler, GameObjectSpawnId guidLow, float scale)
++    {
++        GameObject* object = handler->GetObjectFromPlayerMapByDbGuid(guidLow);
++        if (!object)
++        {
++            handler->PSendSysMessage(LANG_COMMAND_OBJNOTFOUND, guidLow);
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        if (scale <= 0.0f)
++        {
++            scale = object->GetGOInfo()->size;
++            const_cast<GameObjectData*>(object->GetGameObjectData())->size = -1.0f;
++        }
++        else
++        {
++            const_cast<GameObjectData*>(object->GetGameObjectData())->size = scale;
++        }
++
++        object->SetObjectScale(scale);
++        object->DestroyForNearbyPlayers();
++        object->UpdateObjectVisibility();
++        object->SaveToDB();
++
++        handler->PSendSysMessage("Set %s scale to %f", object->GetGUID().ToString(), scale);
++        return true;
++    }
+ };
+ 
+ void AddSC_gobject_commandscript()
+diff --git a/src/server/scripts/Commands/cs_npc.cpp b/src/server/scripts/Commands/cs_npc.cpp
+index a232da2ef1b4..a0fd9bef0a07 100644
+--- a/src/server/scripts/Commands/cs_npc.cpp
++++ b/src/server/scripts/Commands/cs_npc.cpp
+@@ -80,6 +80,7 @@ class npc_commandscript : public CommandScript
+             { "model",          HandleNpcSetModelCommand,          rbac::RBAC_PERM_COMMAND_NPC_SET_MODEL,      Console::No },
+             { "movetype",       HandleNpcSetMoveTypeCommand,       rbac::RBAC_PERM_COMMAND_NPC_SET_MOVETYPE,   Console::No },
+             { "phase",          HandleNpcSetPhaseCommand,          rbac::RBAC_PERM_COMMAND_NPC_SET_PHASE,      Console::No },
++            { "scale",          HandleNpcSetScaleCommand,          rbac::RBAC_PERM_COMMAND_NPC_SET_SCALE,      Console::No },
+             { "wanderdistance", HandleNpcSetWanderDistanceCommand, rbac::RBAC_PERM_COMMAND_NPC_SET_SPAWNDIST,  Console::No },
+             { "spawntime",      HandleNpcSetSpawnTimeCommand,      rbac::RBAC_PERM_COMMAND_NPC_SET_SPAWNTIME,  Console::No },
+             { "data",           HandleNpcSetDataCommand,           rbac::RBAC_PERM_COMMAND_NPC_SET_DATA,       Console::No },
+@@ -801,6 +802,32 @@ class npc_commandscript : public CommandScript
+         return true;
+     }
+ 
++    static bool HandleNpcSetScaleCommand(ChatHandler* handler, float scale)
++    {
++        Creature* creature = handler->getSelectedCreature();
++        if (!creature)
++        {
++            handler->SendSysMessage(LANG_SELECT_CREATURE);
++            handler->SetSentErrorMessage(true);
++            return false;
++        }
++
++        if (scale <= 0.0f)
++        {
++            scale = creature->GetCreatureTemplate()->scale;
++            const_cast<CreatureData*>(creature->GetCreatureData())->size = -1.0f;
++        }
++        else
++        {
++            const_cast<CreatureData*>(creature->GetCreatureData())->size = scale;
++        }
++
++        creature->SetObjectScale(scale);
++        if (!creature->IsPet())
++            creature->SaveToDB();
++        return true;
++    }
++
+     //set spawn dist of creature
+     static bool HandleNpcSetWanderDistanceCommand(ChatHandler* handler, float option)
+     {
+diff --git a/src/server/scripts/Custom/objscale/README.md b/src/server/scripts/Custom/objscale/README.md
+new file mode 100644
+index 000000000000..73ad50daf10c
+--- /dev/null
++++ b/src/server/scripts/Custom/objscale/README.md
+@@ -0,0 +1,44 @@
++# Objscale [![Build Status](https://travis-ci.org/Rochet2/TrinityCore.svg?branch=objscale_3.3.5)](https://travis-ci.org/Rochet2/TrinityCore)
++
++#### About
++Objscale allows scaling individual spawns of creatures and gameobjects.
++You can do this change ingame with commands or in the `creature` and `gameobject` database tables.
++Made for 3.3.5a.<br />
++Source: http://rochet2.github.io/Objscale.html
++
++#### Installation
++
++Available as:
++- Direct merge: https://github.com/Rochet2/TrinityCore/tree/objscale_3.3.5
++- Diff: https://github.com/Rochet2/TrinityCore/compare/TrinityCore:3.3.5...objscale_3.3.5.diff
++- Diff in github view: https://github.com/Rochet2/TrinityCore/compare/TrinityCore:3.3.5...objscale_3.3.5
++
++Using direct merge:
++- open git bash to source location
++- do `git remote add rochet2 https://github.com/Rochet2/TrinityCore.git`
++- do `git pull rochet2 objscale_3.3.5`
++- use cmake and compile
++
++Using diff:
++- DO NOT COPY THE DIFF DIRECTLY! It causes apply to fail.
++- download the diff by __right clicking__ the link and select __Save link as__
++- place the downloaded `objscale_3.3.5.diff` to the source root folder
++- open git bash to source location
++- do `git apply objscale_3.3.5.diff`
++- use cmake and compile
++
++After compiling:
++- TrinityCore auto updater should run needed SQLs automatically.
++- If you do not use the auto updater then run files named `*_objscale.sql` from `\sql\custom` to your databases.
++
++#### Usage
++You can set the sizes in the `creature` and `gameobject` database tables in the world database by changing the `size` column.
++In game you can change a spawned object's size by using `.gobject set scale #guid #scale` and spawned NPC sizes by selecting an NPC and using `.npc set scale #scale`
++Using -1 has scale makes the gameobject and npc use the default scale from template.
++
++Known issues:
++- You can not resize some gameobject types. This is likely a client limitation.
++- You may need to relog to see the size changes for some wow patches or versions of the core.
++
++#### Bugs and Contact
++Report issues and similar to https://rochet2.github.io/

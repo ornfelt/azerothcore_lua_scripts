@@ -1,0 +1,9 @@
+[worldserver]
+
+#
+#    PlayerNotSpeak.Enable
+#        Description: Enable notification on chat if player receiver is muted.
+#        	  Option: 1  - (Enable)
+#                     0  - (Disable)
+
+PlayerNotSpeak.Enable = 1

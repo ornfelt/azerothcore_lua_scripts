@@ -1,0 +1,191 @@
+diff --git a/src/server/game/DungeonFinding/LFGMgr.cpp b/src/server/game/DungeonFinding/LFGMgr.cpp
+index aed1ec744da..3b1669054bd 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.cpp
++++ b/src/server/game/DungeonFinding/LFGMgr.cpp
+@@ -56,7 +56,8 @@ LFGDungeonData::LFGDungeonData(LFGDungeonEntry const* dbc) : id(dbc->ID), name(d
+ }
+ 
+ LFGMgr::LFGMgr(): m_QueueTimer(0), m_lfgProposalId(1),
+-    m_options(sWorld->getIntConfig(CONFIG_LFG_OPTIONSMASK))
++    m_options(sWorld->getIntConfig(CONFIG_LFG_OPTIONSMASK)),
++    m_isSoloLFG(false)
+ {
+ }
+ 
+@@ -1057,7 +1058,7 @@ void LFGMgr::UpdateProposal(uint32 proposalId, ObjectGuid guid, bool accept)
+         if (itPlayers->second.accept != LFG_ANSWER_AGREE)   // No answer (-1) or not accepted (0)
+             allAnswered = false;
+ 
+-    if (!allAnswered)
++    if (!sLFGMgr->IsSoloLFG() && !allAnswered)
+     {
+         for (LfgProposalPlayerContainer::const_iterator it = proposal.players.begin(); it != proposal.players.end(); ++it)
+             SendLfgUpdateProposal(it->first, proposal);
+@@ -2140,4 +2141,9 @@ LfgDungeonSet LFGMgr::GetRandomAndSeasonalDungeons(uint8 level, uint8 expansion)
+     return randomDungeons;
+ }
+ 
++void LFGMgr::ToggleSoloLFG()
++{
++    m_isSoloLFG = !m_isSoloLFG;
++}
++
+ } // namespace lfg
+diff --git a/src/server/game/DungeonFinding/LFGMgr.h b/src/server/game/DungeonFinding/LFGMgr.h
+index 3d9109677c0..476b8247271 100644
+--- a/src/server/game/DungeonFinding/LFGMgr.h
++++ b/src/server/game/DungeonFinding/LFGMgr.h
+@@ -408,6 +408,11 @@ class TC_GAME_API LFGMgr
+         /// Leaves lfg
+         void LeaveLfg(ObjectGuid guid, bool disconnected = false);
+ 
++        /// Toggle LFG in debug mode
++        void ToggleSoloLFG();
++        /// Check if debug mode
++        bool IsSoloLFG() const { return m_isSoloLFG; }
++
+         // LfgQueue
+         /// Get last lfg state (NONE, DUNGEON or FINISHED_DUNGEON)
+         LfgState GetOldState(ObjectGuid guid);
+@@ -465,6 +470,8 @@ class TC_GAME_API LFGMgr
+         uint32 m_lfgProposalId;                            /// used as internal counter for proposals
+         uint32 m_options;                                  /// Stores config options
+ 
++        bool m_isSoloLFG;                                  /// solo lfg
++
+         LfgQueueContainer QueuesStore;                     /// Queues
+         LfgCachedDungeonContainer CachedDungeonMapStore;   /// Stores all dungeons by groupType
+         // Reward System
+diff --git a/src/server/game/DungeonFinding/LFGQueue.cpp b/src/server/game/DungeonFinding/LFGQueue.cpp
+index b81aff941d0..b9cb9e6e5e2 100644
+--- a/src/server/game/DungeonFinding/LFGQueue.cpp
++++ b/src/server/game/DungeonFinding/LFGQueue.cpp
+@@ -422,7 +422,7 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
+     }
+ 
+     // Group with less that MAXGROUPSIZE members always compatible
+-    if (check.size() == 1 && numPlayers != MAXGROUPSIZE)
++    if (!sLFGMgr->IsSoloLFG() && numPlayers != MAXGROUPSIZE) //solo lfg
+     {
+         TC_LOG_DEBUG("lfg.queue.match.compatibility.check", "Guids: (%s) single group. Compatibles", GetDetailedMatchRoles(check).c_str());
+         LfgQueueDataContainer::iterator itQueue = QueueDataStore.find(check.front());
+@@ -520,7 +520,7 @@ LfgCompatibility LFGQueue::CheckCompatibility(GuidList check)
+     }
+ 
+     // Enough players?
+-    if (numPlayers != MAXGROUPSIZE)
++    if (!sLFGMgr->IsSoloLFG() && numPlayers != MAXGROUPSIZE) //solo  lfg
+     {
+         TC_LOG_DEBUG("lfg.queue.match.compatibility.check", "Guids: (%s) Compatibles but not enough players(%u)", GetDetailedMatchRoles(check).c_str(), numPlayers);
+         LfgCompatibilityData data(LFG_COMPATIBLES_WITH_LESS_PLAYERS);
+diff --git a/src/server/scripts/Custom/Lfg_Solo.cpp b/src/server/scripts/Custom/Lfg_Solo.cpp
+new file mode 100644
+index 00000000000..f5eaad04443
+--- /dev/null
++++ b/src/server/scripts/Custom/Lfg_Solo.cpp
+@@ -0,0 +1,53 @@
++/*
++** Made by Traesh https://github.com/Traesh
++** Conan513 https://github.com/conan513
++** Made into a module by Micrah https://github.com/milestorme/
++** Converted to TrinityCore by LEO33 http://leo33.info
++** Updated by qyh214 https://github.com/qyh214
++*/
++
++#include "ScriptMgr.h"
++#include "Player.h"
++#include "Configuration/Config.h"
++#include "World.h"
++#include "LFGMgr.h"
++#include "Chat.h"
++#include "Opcodes.h"
++
++class lfg_solo_announce : public PlayerScript
++{
++public:
++    lfg_solo_announce() : PlayerScript("lfg_solo_announce") {}
++
++    void OnLogin(Player* player, bool /*firstLogin*/) override
++    {
++        // Announce Module
++        if (sConfigMgr->GetBoolDefault("SoloLFG.Announce", true))
++        {
++            ChatHandler(player->GetSession()).SendSysMessage("This server is running |cff4CFF00Solo Dungeon Finder|r.");
++         }
++    }
++};
++
++class lfg_solo : public PlayerScript
++{
++public:
++    lfg_solo() : PlayerScript("lfg_solo") { }
++
++   void OnLogin(Player* /*player*/, bool /*firstLogin*/) override
++   {
++      if (sConfigMgr->GetIntDefault("SoloLFG.Enable", true))
++        {
++            if (!sLFGMgr->IsSoloLFG())
++            {
++            sLFGMgr->ToggleSoloLFG();
++            }
++        }
++   }
++};
++
++void AddLfgSoloScripts()
++{
++    new lfg_solo_announce();
++    new lfg_solo();
++}
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 9e5e9ba2bfd..fb466c3cfb3 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -16,9 +16,11 @@
+  */
+ 
+ // This is where scripts' loading functions should be declared:
++void AddLfgSoloScripts();
+ 
+ // The name of this function should match:
+ // void Add${NameOfDirectory}Scripts()
+ void AddCustomScripts()
+ {
++    AddLfgSoloScripts();
+ }
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index f475d0248e8..91aca9d05fc 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -38,6 +38,7 @@
+ #    PACKET SPOOF PROTECTION SETTINGS
+ #    MISC ANTI-CHEAT SETTINGS
+ #    METRIC SETTINGS
++#    SOLO LFG
+ #
+ ###################################################################################################
+ 
+@@ -4125,3 +4126,23 @@ Metric.OverallStatusInterval = 1
+ 
+ #
+ ###################################################################################################
++
++###################################################################################################
++# SOLO LFG
++#
++#    SoloLFG.Enable
++#        Description: Enable the module.
++#        Default:     1  - (Enabled)
++#                     0  - (Disabled)
++
++SoloLFG.Enable = 1
++
++#    SoloLFG.Announce
++#        Description: Announce the module.
++#        Default:     1  - (Enabled)
++#                     0  - (Disabled)
++
++SoloLFG.Announce = 1
++
++#
++###################################################################################################

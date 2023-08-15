@@ -1,0 +1,1593 @@
+diff --git a/src/common/Utilities/DataMap.h b/src/common/Utilities/DataMap.h
+new file mode 100644
+index 00000000000..3d028fc433b
+--- /dev/null
++++ b/src/common/Utilities/DataMap.h
+@@ -0,0 +1,75 @@
++/*
++ * Originally written by Rochet2 - Copyright (C) 2018+ AzerothCore <www.azerothcore.org>, released under GNU AGPL v3 license: http://github.com/azerothcore/azerothcore-wotlk/blob/master/LICENSE-AGPL3
++ * Touched up by SPP MDic for 335 TC Master
++ */
++
++#ifndef _DATA_MAP_H_
++#define _DATA_MAP_H_
++
++#include <string>
++#include <unordered_map>
++#include <memory>
++#include <type_traits>
++
++class DataMap
++{
++public:
++        /**
++         * Base class that you should inherit in your script.
++         * Inheriting classes can be stored to DataMap
++         */
++class Base
++{
++    public:
++    virtual ~Base() = default;
++};
++
++/**
++ * Returns a pointer to object of requested type stored with given key or nullptr
++ */
++template<class T> T * Get(std::string const& k) const
++{
++static_assert(std::is_base_of<Base, T>::value, "T must derive from Base");
++if (Container.empty())
++     return nullptr;
++
++    auto it = Container.find(k);
++if (it != Container.end())
++     return dynamic_cast<T*>(it->second.get());
++return nullptr;
++
++}
++
++/**
++ * Returns a pointer to object of requested type stored with given key
++ * or default constructs one and returns that one
++ */
++
++template<class T, typename std::enable_if<std::is_default_constructible<T>::value, int>::type = 0>
++T * GetDefault(std::string const& k)
++{
++static_assert(std::is_base_of<Base, T>::value, "T must derive from Base");
++if (T* v = Get<T>(k))
++     return v;
++T * v = new T();
++Container.emplace(k, std::unique_ptr<T>(v));
++return v;
++
++}
++
++/**
++ * Stores a new object that inherits the Base class with the given key
++ */
++void Set(std::string const& k, Base * v) { Container[k] = std::unique_ptr<Base>(v); }
++
++/**
++ * Removes objects with given key and returns true if one was removed, false otherwise
++ */
++
++bool Erase(std::string const& k) { return Container.erase(k) != 0; }
++
++private:
++    std::unordered_map<std::string, std::unique_ptr<Base>> Container;
++};
++
++#endif
+\ No newline at end of file
+diff --git a/src/server/game/Entities/Creature/Creature.cpp b/src/server/game/Entities/Creature/Creature.cpp
+index 733a5e92c75..1a0260d1dcf 100644
+--- a/src/server/game/Entities/Creature/Creature.cpp
++++ b/src/server/game/Entities/Creature/Creature.cpp
+@@ -863,6 +863,7 @@ void Creature::Update(uint32 diff)
+         default:
+             break;
+     }
++    sScriptMgr->OnCreatureUpdate(this, diff);
+ }
+ 
+ void Creature::Regenerate(Powers power)
+@@ -1475,6 +1476,7 @@ void Creature::UpdateLevelDependantStats()
+ 
+     float armor = (float)stats->GenerateArmor(cInfo); /// @todo Why is this treated as uint32 when it's a float?
+     SetStatFlatModifier(UNIT_MOD_ARMOR, BASE_VALUE, armor);
++    sScriptMgr->Creature_SelectLevel(cInfo, this);
+ }
+ 
+ float Creature::_GetHealthMod(int32 Rank)
+diff --git a/src/server/game/Entities/Object/Object.h b/src/server/game/Entities/Object/Object.h
+index 907e7b47f35..40e4b7e353e 100644
+--- a/src/server/game/Entities/Object/Object.h
++++ b/src/server/game/Entities/Object/Object.h
+@@ -20,6 +20,7 @@
+ 
+ #include "Common.h"
+ #include "Duration.h"
++#include "DataMap.h"
+ #include "EventProcessor.h"
+ #include "ModelIgnoreFlags.h"
+ #include "MovementInfo.h"
+@@ -194,6 +195,8 @@ class TC_GAME_API Object
+ 
+         virtual std::string GetDebugInfo() const;
+ 
++        DataMap CustomData;
++
+     protected:
+         Object();
+ 
+diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
+index f31760dab2a..47b5d0a64ea 100644
+--- a/src/server/game/Entities/Unit/Unit.cpp
++++ b/src/server/game/Entities/Unit/Unit.cpp
+@@ -6441,7 +6441,10 @@ void Unit::SendHealSpellLog(HealInfo& healInfo, bool critical /*= false*/)
+ int32 Unit::HealBySpell(HealInfo& healInfo, bool critical /*= false*/)
+ {
+     // calculate heal absorb and reduce healing
++    Unit * victim = healInfo.GetTarget();
++    uint32 addhealth = healInfo.GetHeal();
+     Unit::CalcHealAbsorb(healInfo);
++    sScriptMgr->ModifyHealRecieved(this, victim, addhealth);
+     Unit::DealHeal(healInfo);
+     SendHealSpellLog(healInfo, critical);
+     return healInfo.GetEffectiveHeal();
+diff --git a/src/server/game/Maps/Map.cpp b/src/server/game/Maps/Map.cpp
+index 58dcc7e6607..e35ffda641c 100644
+--- a/src/server/game/Maps/Map.cpp
++++ b/src/server/game/Maps/Map.cpp
+@@ -18,6 +18,7 @@
+ #include "Map.h"
+ #include "Battleground.h"
+ #include "CellImpl.h"
++#include "Config.h"
+ #include "DatabaseEnv.h"
+ #include "DisableMgr.h"
+ #include "DynamicTree.h"
+@@ -4238,7 +4239,9 @@ bool InstanceMap::HasPermBoundPlayers() const
+ uint32 InstanceMap::GetMaxPlayers() const
+ {
+     MapDifficulty const* mapDiff = GetMapDifficulty();
+-    if (mapDiff && mapDiff->maxPlayers)
++    if (mapDiff && mapDiff->maxPlayers && (sConfigMgr->GetBoolDefault("AutoBalance.enable", true)))
++        return (mapDiff->maxPlayers == 10 ? 30 : mapDiff->maxPlayers);
++    else
+         return mapDiff->maxPlayers;
+ 
+     return GetEntry()->MaxPlayers;
+diff --git a/src/server/game/Maps/Map.h b/src/server/game/Maps/Map.h
+index c926a00f27f..6f7fbf0bc47 100644
+--- a/src/server/game/Maps/Map.h
++++ b/src/server/game/Maps/Map.h
+@@ -32,6 +32,7 @@
+ #include "SpawnData.h"
+ #include "Timer.h"
+ #include "Transaction.h"
++#include "DataMap.h"
+ #include <boost/heap/fibonacci_heap.hpp>
+ #include <bitset>
+ #include <list>
+@@ -650,6 +651,8 @@ class TC_GAME_API Map : public GridRefManager<NGridType>
+ 
+         virtual std::string GetDebugInfo() const;
+ 
++        DataMap CustomData;
++
+     private:
+         void LoadMapAndVMap(int gx, int gy);
+         void LoadVMap(int gx, int gy);
+diff --git a/src/server/game/Scripting/ScriptMgr.cpp b/src/server/game/Scripting/ScriptMgr.cpp
+index be8494df7eb..2616190bdfe 100644
+--- a/src/server/game/Scripting/ScriptMgr.cpp
++++ b/src/server/game/Scripting/ScriptMgr.cpp
+@@ -1334,6 +1334,17 @@ void ScriptMgr::OnWorldUpdate(uint32 diff)
+     FOREACH_SCRIPT(WorldScript)->OnUpdate(diff);
+ }
+ 
++void ScriptMgr::SetInitialWorldSettings()
++{
++    FOREACH_SCRIPT(WorldScript)->SetInitialWorldSettings();
++}
++
++float ScriptMgr::VAS_Script_Hooks()
++{
++    float VAS_Script_Hook_Version = 1.03f;
++    return VAS_Script_Hook_Version;
++}
++
+ void ScriptMgr::OnHonorCalculation(float& honor, uint8 level, float multiplier)
+ {
+     FOREACH_SCRIPT(FormulaScript)->OnHonorCalculation(honor, level, multiplier);
+@@ -1464,8 +1475,12 @@ void ScriptMgr::OnPlayerEnterMap(Map* map, Player* player)
+     ASSERT(map);
+     ASSERT(player);
+ 
++    FOREACH_SCRIPT(AllMapScript)->OnPlayerEnterAll(map, player);
++
+     FOREACH_SCRIPT(PlayerScript)->OnMapChanged(player);
+ 
++    FOREACH_SCRIPT(AllMapScript)->OnPlayerLeaveAll(map, player);
++
+     SCR_MAP_BGN(WorldMapScript, map, itr, end, entry, IsWorldMap);
+         itr->second->OnPlayerEnter(map, player);
+     SCR_MAP_END;
+@@ -2123,6 +2138,45 @@ void ScriptMgr::ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& dama
+     FOREACH_SCRIPT(UnitScript)->ModifySpellDamageTaken(target, attacker, damage);
+ }
+ 
++void ScriptMgr::ModifyVehiclePassengerExitPos(Unit* passenger, Vehicle* vehicle, Position& pos)
++{
++    FOREACH_SCRIPT(UnitScript)->ModifyVehiclePassengerExitPos(passenger, vehicle, pos);
++    FOREACH_SCRIPT(CreatureScript)->ModifyVehiclePassengerExitPos(passenger, vehicle, pos);
++}
++
++void ScriptMgr::ModifyHealRecieved(Unit * target, Unit * attacker, uint32 & damage)
++{
++    FOREACH_SCRIPT(UnitScript)->ModifyHealRecieved(target, attacker, damage);
++}
++
++//Called From Unit::DealDamage
++//uint32 ScriptMgr::DealDamage(Unit *AttackerUnit, Unit *pVictim, uint32 damage, DamageEffectType damagetype) {
++//    FOR_SCRIPTS_RET(UnitScript, itr, end, damage)damage = itr->second->DealDamage(AttackerUnit, pVictim, damage, damagetype);
++//    return damage;
++//}
++
++AllMapScript::AllMapScript(const char* name)
++ : ScriptObject(name)
++{
++    ScriptRegistry<AllMapScript>::Instance()->AddScript(this);
++}
++
++AllCreatureScript::AllCreatureScript(const char* name)
++ : ScriptObject(name)
++{
++    ScriptRegistry<AllCreatureScript>::Instance()->AddScript(this);
++}
++
++void ScriptMgr::OnCreatureUpdate(Creature * creature, uint32 diff)
++{
++    FOREACH_SCRIPT(AllCreatureScript)->OnAllCreatureUpdate(creature, diff);
++}
++
++void ScriptMgr::Creature_SelectLevel(const CreatureTemplate * cinfo, Creature * creature)
++{
++    FOREACH_SCRIPT(AllCreatureScript)->Creature_SelectLevel(cinfo, creature);
++}
++
+ SpellScriptLoader::SpellScriptLoader(char const* name)
+     : ScriptObject(name)
+ {
+@@ -2323,10 +2377,12 @@ template class TC_GAME_API ScriptRegistry<SpellScriptLoader>;
+ template class TC_GAME_API ScriptRegistry<ServerScript>;
+ template class TC_GAME_API ScriptRegistry<WorldScript>;
+ template class TC_GAME_API ScriptRegistry<FormulaScript>;
++template class TC_GAME_API ScriptRegistry<AllMapScript>;
+ template class TC_GAME_API ScriptRegistry<WorldMapScript>;
+ template class TC_GAME_API ScriptRegistry<InstanceMapScript>;
+ template class TC_GAME_API ScriptRegistry<BattlegroundMapScript>;
+ template class TC_GAME_API ScriptRegistry<ItemScript>;
++template class TC_GAME_API ScriptRegistry<AllCreatureScript>;
+ template class TC_GAME_API ScriptRegistry<CreatureScript>;
+ template class TC_GAME_API ScriptRegistry<GameObjectScript>;
+ template class TC_GAME_API ScriptRegistry<AreaTriggerScript>;
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+index b0f641b80e4..20e0648679d 100644
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -22,6 +22,7 @@
+ #include "ObjectGuid.h"
+ #include "Tuples.h"
+ #include "Types.h"
++#include "Unit.h"
+ #include <vector>
+ 
+ class AccountMgr;
+@@ -275,6 +276,9 @@ class TC_GAME_API WorldScript : public ScriptObject
+ 
+         // Called when the world is actually shut down.
+         virtual void OnShutdown() { }
++
++        // Called at End of SetInitialWorldSettings.
++        virtual void SetInitialWorldSettings() { }
+ };
+ 
+ class TC_GAME_API FormulaScript : public ScriptObject
+@@ -307,6 +311,21 @@ class TC_GAME_API FormulaScript : public ScriptObject
+         virtual void OnGroupRateCalculation(float& /*rate*/, uint32 /*count*/, bool /*isRaid*/) { }
+ };
+ 
++class TC_GAME_API AllMapScript : public ScriptObject
++{
++protected:
++
++       AllMapScript(const char* name);
++
++public:
++
++         // Called when a player enters any Map
++         virtual void OnPlayerEnterAll(Map* /*map*/, Player* /*player*/) { }
++
++         // Called when a player leave any Map
++         virtual void OnPlayerLeaveAll(Map* /*map*/, Player* /*player*/) { }
++};
++
+ template<class TMap> class MapScript : public UpdatableScript<TMap>
+ {
+     MapEntry const* _mapEntry;
+@@ -411,6 +430,12 @@ class TC_GAME_API UnitScript : public ScriptObject
+ 
+         // Called when Spell Damage is being Dealt
+         virtual void ModifySpellDamageTaken(Unit* /*target*/, Unit* /*attacker*/, int32& /*damage*/) { }
++
++        // Called when an unit exits a vehicle
++        virtual void ModifyVehiclePassengerExitPos(Unit* /*passenger*/, Vehicle* /*vehicle*/, Position& /*pos*/) { }
++
++        //Auto Balance VAS
++        virtual void ModifyHealRecieved(Unit* /*target*/, Unit* /*attacker*/, uint32& /*damage*/) { }
+ };
+ 
+ class TC_GAME_API CreatureScript : public ScriptObject
+@@ -420,10 +445,33 @@ class TC_GAME_API CreatureScript : public ScriptObject
+         CreatureScript(char const* name);
+ 
+     public:
++        // Called when an unit exits a vehicle
++        virtual void ModifyVehiclePassengerExitPos(Unit* /*passenger*/, Vehicle* /*vehicle*/, Position& /*pos*/) { }
++        // Called when Heal is Recieved
++        virtual void ModifyHealRecieved(Unit* /*target*/, Unit* /*attacker*/, uint32& /*damage*/) { }
++
++        //VAS AutoBalance
++        // virtual uint32 DealDamage(Unit* AttackerUnit, Unit *pVictim, uint32 damage, DamageEffectType damagetype) { return damage;}
++
+         // Called when a CreatureAI object is needed for the creature.
+         virtual CreatureAI* GetAI(Creature* /*creature*/) const = 0;
+ };
+ 
++class TC_GAME_API AllCreatureScript : public ScriptObject
++{
++protected:
++
++        AllCreatureScript(const char* name);
++
++public:
++
++        // Called from End of Creature Update.
++        virtual void OnAllCreatureUpdate(Creature* /*creature*/, uint32 /*diff*/) { }
++
++        // Called from End of Creature SelectLevel.
++        virtual void Creature_SelectLevel(const CreatureTemplate* /*cinfo*/, Creature* /*creature*/) { }
++};
++
+ class TC_GAME_API GameObjectScript : public ScriptObject
+ {
+     protected:
+@@ -878,6 +926,10 @@ class TC_GAME_API ScriptMgr
+ 
+         void Unload();
+ 
++    public: /* {VAS} Script Hooks */
++
++        float VAS_Script_Hooks();
++
+     public: /* SpellScriptLoader */
+ 
+         void CreateSpellScripts(uint32 spellId, std::vector<SpellScript*>& scriptVector, Spell* invoker) const;
+@@ -903,6 +955,7 @@ class TC_GAME_API ScriptMgr
+         void OnWorldUpdate(uint32 diff);
+         void OnStartup();
+         void OnShutdown();
++        void SetInitialWorldSettings();
+ 
+     public: /* FormulaScript */
+ 
+@@ -914,6 +967,11 @@ class TC_GAME_API ScriptMgr
+         void OnGainCalculation(uint32& gain, Player* player, Unit* unit);
+         void OnGroupRateCalculation(float& rate, uint32 count, bool isRaid);
+ 
++    public: /* AllScript */
++
++        void OnPlayerEnterMapAll(Map * map, Player * player);
++        void OnPlayerLeaveMapAll(Map * map, Player * player);
++
+     public: /* MapScript */
+ 
+         void OnCreateMap(Map* map);
+@@ -936,6 +994,12 @@ class TC_GAME_API ScriptMgr
+         bool OnItemRemove(Player* player, Item* item);
+         bool OnCastItemCombatSpell(Player* player, Unit* victim, SpellInfo const* spellInfo, Item* item);
+ 
++    public: /* AllCreatureScript */
++
++        void OnAllCreatureUpdate(Creature * creature, uint32 diff);
++        void Creature_SelectLevel(const CreatureTemplate * cinfo, Creature * creature);
++        void OnCreatureUpdate(Creature * creature, uint32 diff);
++
+     public: /* CreatureScript */
+ 
+         CreatureAI* GetCreatureAI(Creature* creature);
+@@ -1080,6 +1144,9 @@ class TC_GAME_API ScriptMgr
+         void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage);
+         void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage);
+         void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage);
++        void ModifyVehiclePassengerExitPos(Unit* passenger, Vehicle* vehicle, Position& pos);
++        void ModifyHealRecieved(Unit * target, Unit * attacker, uint32 & addHealth);
++        // uint32 DealDamage(Unit* AttackerUnit, Unit *pVictim, uint32 damage, DamageEffectType damagetype
+ 
+     private:
+         uint32 _scriptCount;
+diff --git a/src/server/game/World/World.cpp b/src/server/game/World/World.cpp
+index 2d8882dcaec..86ed34cf703 100644
+--- a/src/server/game/World/World.cpp
++++ b/src/server/game/World/World.cpp
+@@ -2157,6 +2157,9 @@ void World::SetInitialWorldSettings()
+     // Delete all characters which have been deleted X days before
+     Player::DeleteOldCharacters();
+ 
++    TC_LOG_INFO("server.loading", "Loading Autobalance...");
++    sScriptMgr->SetInitialWorldSettings();
++
+     TC_LOG_INFO("server.loading", "Initialize AuctionHouseBot...");
+     sAuctionBot->Initialize();
+ 
+diff --git a/src/server/scripts/Custom/autobalance.cpp b/src/server/scripts/Custom/autobalance.cpp
+new file mode 100644
+index 00000000000..29a274e1872
+--- /dev/null
++++ b/src/server/scripts/Custom/autobalance.cpp
+@@ -0,0 +1,933 @@
++/*
++* Copyright (C) 2012 CVMagic <http://www.trinitycore.org/f/topic/6551-vas-autobalance/>
++* Copyright (C) 2008-2010 TrinityCore <http://www.trinitycore.org/>
++* Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
++* Copyright (C) 1985-2010 {VAS} KalCorp  <http://vasserver.dyndns.org/>
++*
++* This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
++*
++* This program is free software; you can redistribute it and/or modify it
++* under the terms of the GNU General Public License as published by the
++* Free Software Foundation; either version 2 of the License, or (at your
++* option) any later version.
++*
++* This program is distributed in the hope that it will be useful, but WITHOUT
++* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
++* more details.
++*
++* You should have received a copy of the GNU General Public License along
++* with this program. If not, see <http://www.gnu.org/licenses/>.
++* Script Name: AutoBalance
++* Original Authors: KalCorp and Vaughner
++* Maintainer(s): CVMagic
++* Original Script Name: VAS.AutoBalance
++* Description: This script is intended to scale based on number of players, instance mobs & world bosses' health, mana, and damage.
++*
++* Touched up by SPP MDic for Trinitycore Custom Changes Branch
++*/
++
++#include "Configuration/Config.h"
++#include "Unit.h"
++#include "Chat.h"
++#include "Creature.h"
++#include "Player.h"
++#include "ObjectMgr.h"
++#include "MapManager.h"
++#include "World.h"
++#include "Map.h"
++#include "ScriptMgr.h"
++#include "Language.h"
++#include <vector>
++#include "Log.h"
++#include "Group.h"
++#include "DataMap.h"
++#include "DBCStores.h"
++
++class AutoBalanceCreatureInfo : public DataMap::Base {
++public:
++    AutoBalanceCreatureInfo() {}
++
++    AutoBalanceCreatureInfo(uint32 count, float dmg, float hpRate, float manaRate, float armorRate, uint8 selLevel) :
++        instancePlayerCount(count), selectedLevel(selLevel), DamageMultiplier(dmg), HealthMultiplier(hpRate), ManaMultiplier(manaRate),
++        ArmorMultiplier(armorRate) {}
++
++    uint32 instancePlayerCount = 0;
++    uint8 selectedLevel = 0;
++    // this is used to detect creatures that update their entry
++    uint32 entry = 0;
++    float DamageMultiplier = 1;
++    float HealthMultiplier = 1;
++    float ManaMultiplier = 1;
++    float ArmorMultiplier = 1;
++
++};
++
++class AutoBalanceMapInfo : public DataMap::Base {
++public:
++    AutoBalanceMapInfo() {}
++
++    AutoBalanceMapInfo(uint32 count, uint8 selLevel) : playerCount(count), mapLevel(selLevel) {}
++
++    uint32 playerCount = 0;
++    uint8 mapLevel = 0;
++
++};
++
++// The map values correspond with the .AutoBalance.XX.Name entries in the configuration file.
++static std::map<int, int> forcedCreatureIds;
++static int8 PlayerCountDifficultyOffset, LevelScaling, higherOffset, lowerOffset;
++static bool enabled, LevelEndGameBoost, DungeonsOnly, PlayerChangeNotify, LevelUseDb, DungeonScaleDownXP;
++static float globalRate, healthMultiplier, manaMultiplier, armorMultiplier, damageMultiplier, MinHPModifier, MinManaModifier, MinDamageModifier,
++InflectionPoint, InflectionPointRaid, InflectionPointRaid10M, InflectionPointRaid25M, InflectionPointRaid30M, InflectionPointHeroic, InflectionPointRaidHeroic,
++InflectionPointRaid10MHeroic, InflectionPointRaid25MHeroic, InflectionPointRaid30MHeroic, BossInflectionMult;
++
++int GetValidDebugLevel() {
++    int debugLevel = sConfigMgr->GetIntDefault("AutoBalance.DebugLevel", 2);
++    if ((debugLevel < 0) || (debugLevel > 3))
++    {
++        return 1;
++
++    }
++    return debugLevel;
++
++}
++
++// Used for reading the string from the configuration file to for those creatures who need to be scaled for XX number of players.
++void LoadForcedCreatureIdsFromString(std::string creatureIds, int forcedPlayerCount) {
++    std::string delimitedValue;
++    std::stringstream creatureIdsStream;
++
++    creatureIdsStream.str(creatureIds);
++    // Process each Creature ID in the string, delimited by the comma - ","
++    while (std::getline(creatureIdsStream, delimitedValue, ','))
++    {
++        int creatureId = atoi(delimitedValue.c_str());
++        if (creatureId >= 0)
++        {
++            forcedCreatureIds[creatureId] = forcedPlayerCount;
++
++        }
++
++    }
++}
++
++int GetForcedNumPlayers(int creatureId) {
++    // Don't want the forcedCreatureIds map to blowup to a massive empty array
++    if (forcedCreatureIds.find(creatureId) == forcedCreatureIds.end())
++    {
++        return -1;
++
++    }
++    return forcedCreatureIds[creatureId];
++}
++
++void getAreaLevel(Map* map, uint8 areaid, uint8& min, uint8& max) {
++    LFGDungeonEntry const* dungeon = GetLFGDungeon(map->GetId(), map->GetDifficulty());
++
++    if (dungeon && (map->IsDungeon() || map->IsRaid()))
++    {
++        min = dungeon->MinLevel;
++        max = dungeon->TargetLevel ? dungeon->TargetLevel : dungeon->MaxLevel;
++
++    }
++
++    if (!min && !max)
++    {
++        AreaTableEntry const* areaEntry = sAreaTableStore.LookupEntry(areaid);
++        if (areaEntry && areaEntry->ExplorationLevel > 0)
++        {
++            min = areaEntry->ExplorationLevel;
++            max = areaEntry->ExplorationLevel;
++
++        }
++
++    }
++}
++
++class AutoBalance_WorldScript : public WorldScript
++{
++public:
++    AutoBalance_WorldScript() : WorldScript("AutoBalance_WorldScript") {}
++
++    void OnConfigLoad(bool /*reload*/) override
++    {
++        SetInitialWorldSettings();
++    }
++
++    void OnStartup() override { }
++
++    void SetInitialWorldSettings() override
++    {
++        forcedCreatureIds.clear();
++        LoadForcedCreatureIdsFromString(sConfigMgr->GetStringDefault("AutoBalance.ForcedID40", ""), 40);
++        LoadForcedCreatureIdsFromString(sConfigMgr->GetStringDefault("AutoBalance.ForcedID25", ""), 25);
++        LoadForcedCreatureIdsFromString(sConfigMgr->GetStringDefault("AutoBalance.ForcedID10", ""), 10);
++        LoadForcedCreatureIdsFromString(sConfigMgr->GetStringDefault("AutoBalance.ForcedID5", ""), 5);
++        LoadForcedCreatureIdsFromString(sConfigMgr->GetStringDefault("AutoBalance.ForcedID2", ""), 2);
++        LoadForcedCreatureIdsFromString(sConfigMgr->GetStringDefault("AutoBalance.DisabledID", ""), 0);
++
++        enabled = sConfigMgr->GetBoolDefault("AutoBalance.enable", 1);
++        LevelEndGameBoost = sConfigMgr->GetBoolDefault("AutoBalance.LevelEndGameBoost", 1);
++        DungeonsOnly = sConfigMgr->GetBoolDefault("AutoBalance.DungeonsOnly", 1);
++        PlayerChangeNotify = sConfigMgr->GetBoolDefault("AutoBalance.PlayerChangeNotify", 1);
++        LevelUseDb = sConfigMgr->GetBoolDefault("AutoBalance.levelUseDbValuesWhenExists", 1);
++        DungeonScaleDownXP = sConfigMgr->GetBoolDefault("AutoBalance.DungeonScaleDownXP", 0);
++
++        LevelScaling = sConfigMgr->GetIntDefault("AutoBalance.levelScaling", 1);
++        PlayerCountDifficultyOffset = sConfigMgr->GetIntDefault("AutoBalance.playerCountDifficultyOffset", 0);
++        higherOffset = sConfigMgr->GetIntDefault("AutoBalance.levelHigherOffset", 3);
++        lowerOffset = sConfigMgr->GetIntDefault("AutoBalance.levelLowerOffset", 0);
++
++        InflectionPoint = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPoint", 0.5f);
++        InflectionPointRaid = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid", InflectionPoint);
++        InflectionPointRaid30M = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid30M", InflectionPointRaid);
++        InflectionPointRaid25M = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid25M", InflectionPointRaid);
++        InflectionPointRaid10M = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid10M", InflectionPointRaid);
++        InflectionPointHeroic = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointHeroic", InflectionPoint);
++        InflectionPointRaidHeroic = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaidHeroic", InflectionPointRaid);
++        InflectionPointRaid30MHeroic = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid30MHeroic", InflectionPointRaid30M);
++        InflectionPointRaid25MHeroic = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid25MHeroic", InflectionPointRaid25M);
++        InflectionPointRaid10MHeroic = sConfigMgr->GetFloatDefault("AutoBalance.InflectionPointRaid10MHeroic", InflectionPointRaid10M);
++        BossInflectionMult = sConfigMgr->GetFloatDefault("AutoBalance.BossInflectionMult", 1.0f);
++        globalRate = sConfigMgr->GetFloatDefault("AutoBalance.rate.global", 1.0f);
++        healthMultiplier = sConfigMgr->GetFloatDefault("AutoBalance.rate.health", 1.0f);
++        manaMultiplier = sConfigMgr->GetFloatDefault("AutoBalance.rate.mana", 1.0f);
++        armorMultiplier = sConfigMgr->GetFloatDefault("AutoBalance.rate.armor", 1.0f);
++        damageMultiplier = sConfigMgr->GetFloatDefault("AutoBalance.rate.damage", 1.0f);
++        MinHPModifier = sConfigMgr->GetFloatDefault("AutoBalance.MinHPModifier", 0.1f);
++        MinManaModifier = sConfigMgr->GetFloatDefault("AutoBalance.MinManaModifier", 0.1f);
++        MinDamageModifier = sConfigMgr->GetFloatDefault("AutoBalance.MinDamageModifier", 0.1f);
++    }
++};
++
++class AutoBalance_PlayerScript : public PlayerScript
++{
++public:
++    AutoBalance_PlayerScript() : PlayerScript("AutoBalance_PlayerScript") { }
++
++    void OnLogin(Player* Player, bool /*firstLogin*/) override
++    {
++        if (sConfigMgr->GetBoolDefault("AutoBalanceAnnounce.enable", true))
++        {
++            ChatHandler(Player->GetSession()).SendSysMessage("This server is running the |cff4CFF00AutoBalance |rmodule.");
++        }
++
++    }
++
++    virtual void OnLevelChanged(Player* player, uint8 /*oldlevel*/) override
++    {
++        if (!enabled || !player)
++        {
++            return;
++        }
++
++        if (LevelScaling == 0)
++        {
++            return;
++
++        }
++
++        AutoBalanceMapInfo* mapABInfo = player->GetMap()->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
++        if (mapABInfo->mapLevel < player->GetLevel())
++        {
++            mapABInfo->mapLevel = player->GetLevel();
++        }
++
++    }
++
++    void OnGiveXP(Player* player, uint32& amount, Unit* victim) override
++    {
++        if (victim && DungeonScaleDownXP)
++        {
++            Map* map = player->GetMap();
++
++            if (map->IsDungeon())
++            {
++                // Ensure that the players always get the same XP, even when entering the dungeon alone
++                uint32 maxPlayerCount = ((InstanceMap*)sMapMgr->FindMap(map->GetId(), map->GetInstanceId()))->GetMaxPlayers();
++                uint32 currentPlayerCount = map->GetPlayersCountExceptGMs();
++                amount *= (float)currentPlayerCount / maxPlayerCount;
++            }
++        }
++    }
++};
++
++class AutoBalance_UnitScript : public UnitScript {
++public:
++    AutoBalance_UnitScript() : UnitScript("AutoBalance_UnitScript") {
++
++    }
++
++    //    uint32 DealDamage(Unit *AttackerUnit, Unit *playerVictim, uint32 damage, DamageEffectType /*damagetype*/) {
++    //        return _Modifer_DealDamage(playerVictim, AttackerUnit, damage);
++    //    }
++
++    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage) override
++    {
++        damage = _Modifer_DealDamage(target, attacker, damage);
++    }
++
++    void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage) override
++    {
++        damage = _Modifer_DealDamage(target, attacker, damage);
++    }
++
++    void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
++    {
++        damage = _Modifer_DealDamage(target, attacker, damage);
++    }
++
++    void ModifyHealRecieved(Unit* target, Unit* attacker, uint32& damage) override
++    {
++        damage = _Modifer_DealDamage(target, attacker, damage);
++    }
++
++    uint32 _Modifer_DealDamage(Unit* target, Unit* attacker, uint32 damage)
++    {
++        if (!enabled)
++        {
++            return damage;
++        }
++
++        if (!attacker || attacker->GetTypeId() == TYPEID_PLAYER || !attacker->IsInWorld())
++        {
++            return damage;
++        }
++
++        float damageMultiplier = attacker->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo")->DamageMultiplier;
++        if (damageMultiplier == 1)
++        {
++            return damage;
++
++        }
++
++        if (!(!DungeonsOnly || (target->GetMap()->IsDungeon() && attacker->GetMap()->IsDungeon()) || (attacker->GetMap()->IsBattleground() && target->GetMap()->IsBattleground())))
++        {
++            return damage;
++        }
++
++        if ((attacker->IsHunterPet() || attacker->IsPet() || attacker->IsSummon()) && attacker->IsControlledByPlayer())
++        {
++            return damage;
++        }
++
++        return damage * damageMultiplier;
++    }
++};
++
++class AutoBalance_AllMapScript : public AllMapScript
++{
++public:
++    AutoBalance_AllMapScript() : AllMapScript("AutoBalance_AllMapScript") { }
++
++    void OnPlayerEnterAll(Map* map, Player* player)
++    {
++        if (!enabled)
++        {
++            return;
++        }
++
++        if (player->IsGameMaster())
++        {
++            return;
++
++        }
++
++        AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
++        // always check level, even if not conf enabled
++        // because we can enable at runtime and we need this information
++        if (player)
++        {
++            if (player->GetLevel() > mapABInfo->mapLevel)
++            {
++                mapABInfo->mapLevel = player->GetLevel();
++
++            }
++
++        }
++        else {
++            Map::PlayerList const& playerList = map->GetPlayers();
++            if (!playerList.isEmpty()) {
++                for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
++                {
++                    if (Player* playerHandle = playerIteration->GetSource()) {
++                        if (!playerHandle->IsGameMaster() && playerHandle->GetLevel() > mapABInfo->mapLevel)
++                        {
++                            mapABInfo->mapLevel = playerHandle->GetLevel();
++
++                        }
++
++                    }
++                }
++            }
++        }
++
++        mapABInfo->playerCount++; //(maybe we've to found a safe solution to avoid player recount each time)
++        //mapABInfo->playerCount = map->GetPlayersCountExceptGMs();
++
++        if (PlayerChangeNotify)
++        {
++            if (map->GetEntry()->IsDungeon() && player)
++            {
++                Map::PlayerList const& playerList = map->GetPlayers();
++                if (!playerList.isEmpty())
++                {
++                    for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
++                    {
++                        if (Player* playerHandle = playerIteration->GetSource())
++                        {
++                            ChatHandler chatHandle = ChatHandler(playerHandle->GetSession());
++                            chatHandle.PSendSysMessage("|cffFF0000 [AutoBalance]|r|cffFF8000 %s entered the Instance %s. Auto setting player count to %u (Player Difficulty Offset = %u) |r",
++                                player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount + PlayerCountDifficultyOffset, PlayerCountDifficultyOffset);
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    void OnPlayerLeaveAll(Map* map, Player* player)
++    {
++        if (!enabled)
++        {
++            return;
++        }
++
++        if (player->IsGameMaster())
++        {
++            return;
++        }
++
++        AutoBalanceMapInfo* mapABInfo = map->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
++        // (maybe we've to found a safe solution to avoid player recount each time)
++        mapABInfo->playerCount--;
++        // mapABInfo->playerCount = map->GetPlayersCountExceptGMs();
++
++        // always check level, even if not conf enabled
++        // because we can enable at runtime and we need this information
++        if (!mapABInfo->playerCount)
++        {
++            mapABInfo->mapLevel = 0;
++            return;
++        }
++
++        if (PlayerChangeNotify)
++        {
++            if (map->GetEntry()->IsDungeon() && player)
++            {
++                Map::PlayerList const& playerList = map->GetPlayers();
++                if (!playerList.isEmpty())
++                {
++                    for (Map::PlayerList::const_iterator playerIteration = playerList.begin(); playerIteration != playerList.end(); ++playerIteration)
++                    {
++                        if (Player* playerHandle = playerIteration->GetSource())
++                        {
++                            ChatHandler chatHandle = ChatHandler(playerHandle->GetSession());
++                            chatHandle.PSendSysMessage("|cffFF0000 [-AutoBalance]|r|cffFF8000 %s left the Instance %s. Auto setting player count to %u (Player Difficulty Offset = %u) |r",
++                                player->GetName().c_str(), map->GetMapName(), mapABInfo->playerCount, PlayerCountDifficultyOffset);
++                        }
++                    }
++                }
++            }
++        }
++    }
++};
++
++class AutoBalance_AllCreatureScript : public AllCreatureScript {
++public:
++    AutoBalance_AllCreatureScript() : AllCreatureScript("AutoBalance_AllCreatureScript") { }
++
++    void Creature_SelectLevel(const CreatureTemplate* /*creatureTemplate*/, Creature* creature) override
++    {
++        if (!enabled)
++        {
++            return;
++        }
++        ModifyCreatureAttributes(creature, true);
++
++    }
++
++    void OnAllCreatureUpdate(Creature* creature, uint32 /*diff*/) override
++    {
++        if (!enabled)
++        {
++            return;
++
++        }
++        ModifyCreatureAttributes(creature);
++
++    }
++
++    bool checkLevelOffset(uint8 selectedLevel, uint8 targetLevel) {
++        return selectedLevel && ((targetLevel >= selectedLevel && targetLevel <= (selectedLevel + higherOffset)) || (targetLevel <= selectedLevel && targetLevel >= (selectedLevel - lowerOffset)));
++
++    }
++
++    void ModifyCreatureAttributes(Creature* creature, bool resetSelLevel = false)
++    {
++        if (!creature || !creature->GetMap())
++        {
++            return;
++        }
++
++        if (!creature->GetMap()->IsDungeon() && !creature->GetMap()->IsBattleground() && DungeonsOnly)
++        {
++            return;
++        }
++
++        if (((creature->IsHunterPet() || creature->IsPet() || creature->IsSummon()) && creature->IsControlledByPlayer()))
++        {
++            return;
++        }
++
++        AutoBalanceMapInfo* mapABInfo = creature->GetMap()->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
++        if (!mapABInfo->mapLevel)
++        {
++            return;
++        }
++
++        CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
++        InstanceMap* instanceMap = ((InstanceMap*)sMapMgr->FindMap(creature->GetMapId(), creature->GetInstanceId()));
++        uint32 maxNumberOfPlayers = instanceMap->GetMaxPlayers();
++        int forcedNumPlayers = GetForcedNumPlayers(creatureTemplate->Entry);
++
++        if (forcedNumPlayers > 0)
++        {
++            // Force maxNumberOfPlayers to be changed to match the Configuration entries ForcedID2, ForcedID5, ForcedID10, ForcedID20, ForcedID25, ForcedID40
++            maxNumberOfPlayers = forcedNumPlayers;
++        }
++        else if (forcedNumPlayers == 0)
++        {
++            // forcedNumPlayers 0 means that the creature is contained in DisabledID -> no scaling
++            return;
++        }
++
++        AutoBalanceCreatureInfo* creatureABInfo = creature->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
++        // force resetting selected level.
++        // this is also a "workaround" to fix bug of not recalculated
++        // attributes when UpdateEntry has been used.
++        // TODO: It's better and faster to implement a core hook
++        // in that position and force a recalculation then
++        if ((creatureABInfo->entry != 0 && creatureABInfo->entry != creature->GetEntry()) || resetSelLevel)
++        {
++            // force a recalculation
++            creatureABInfo->selectedLevel = 0;
++        }
++
++        if (!creature->IsAlive())
++        {
++            return;
++        }
++
++        uint32 curCount = mapABInfo->playerCount + PlayerCountDifficultyOffset;
++        uint8 bonusLevel = creatureTemplate->rank == CREATURE_ELITE_WORLDBOSS ? 3 : 0;
++
++        // already scaled
++        if (creatureABInfo->selectedLevel > 0)
++        {
++            if (LevelScaling)
++            {
++                if (checkLevelOffset(mapABInfo->mapLevel + bonusLevel, creature->GetLevel()) &&
++                    checkLevelOffset(creatureABInfo->selectedLevel, creature->GetLevel()) &&
++                    creatureABInfo->instancePlayerCount == curCount)
++                {
++                    return;
++                }
++            }
++            else if (creatureABInfo->instancePlayerCount == curCount)
++            {
++                return;
++            }
++        }
++
++        creatureABInfo->instancePlayerCount = curCount;
++        // no players in map, do not modify attributes
++        if (!creatureABInfo->instancePlayerCount)
++        {
++            return;
++        }
++
++        uint8 originalLevel = creatureTemplate->maxlevel;
++        uint8 level = mapABInfo->mapLevel;
++        uint8 areaMinLvl, areaMaxLvl;
++        getAreaLevel(creature->GetMap(), creature->GetAreaId(), areaMinLvl, areaMaxLvl);
++
++        // avoid level changing for critters and special creatures (spell summons etc.) in instances
++        bool skipLevel = false;
++        if (originalLevel <= 1 && areaMinLvl >= 5)
++        {
++            skipLevel = true;
++        }
++
++        if (LevelScaling && creature->GetMap()->IsDungeon() && !skipLevel && !checkLevelOffset(level, originalLevel))
++        {
++            // change level only whithin the offsets and when in dungeon/raid
++            if (level != creatureABInfo->selectedLevel || creatureABInfo->selectedLevel != creature->GetLevel())
++            {
++                // keep bosses +3 level
++                creatureABInfo->selectedLevel = level + bonusLevel;
++                creature->SetLevel(creatureABInfo->selectedLevel);
++            }
++        }
++        else
++        {
++            creatureABInfo->selectedLevel = creature->GetLevel();
++        }
++
++        creatureABInfo->entry = creature->GetEntry();
++        bool useDefStats = false;
++        if (LevelUseDb && creature->GetLevel() >= creatureTemplate->minlevel && creature->GetLevel() <= creatureTemplate->maxlevel)
++        {
++            useDefStats = true;
++        }
++
++        CreatureBaseStats const* origCreatureStats = sObjectMgr->GetCreatureBaseStats(originalLevel, creatureTemplate->unit_class);
++        CreatureBaseStats const* creatureStats = sObjectMgr->GetCreatureBaseStats(creatureABInfo->selectedLevel, creatureTemplate->unit_class);
++
++        uint32 baseHealth = origCreatureStats->GenerateHealth(creatureTemplate);
++        uint32 baseMana = origCreatureStats->GenerateMana(creatureTemplate);
++        uint32 scaledHealth = 0;
++        uint32 scaledMana = 0;
++
++        // Note: InflectionPoint handle the number of players required to get 50% health.
++        //       you'd adjust this to raise or lower the hp modifier for per additional player in a non-whole group.
++        //
++        //       diff modify the rate of percentage increase between
++        //       number of players. Generally the closer to the value of 1 you have this
++        //       the less gradual the rate will be. For example in a 5 man it would take 3
++        //       total players to face a mob at full health.
++        //
++        //       The +1 and /2 values raise the TanH function to a positive range and make
++        //       sure the modifier never goes above the value or 1.0 or below 0.
++        //
++        float defaultMultiplier = 1.0f;
++        if (creatureABInfo->instancePlayerCount < maxNumberOfPlayers)
++        {
++            float inflectionValue = (float)maxNumberOfPlayers;
++
++            if (instanceMap->IsHeroic())
++            {
++                if (instanceMap->IsRaid())
++                {
++                    switch (instanceMap->GetMaxPlayers())
++                    {
++                    case 10:
++                        inflectionValue *= InflectionPointRaid10MHeroic;
++                        break;
++                    case 25:
++                        inflectionValue *= InflectionPointRaid25MHeroic;
++                        break;
++                    case 30:
++                        inflectionValue *= InflectionPointRaid30MHeroic;
++                        break;
++                    default:
++                        inflectionValue *= InflectionPointRaidHeroic;
++                    }
++                }
++                else
++                {
++                    inflectionValue *= InflectionPointHeroic;
++                }
++            }
++            else
++            {
++                if (instanceMap->IsRaid())
++                {
++                    switch (instanceMap->GetMaxPlayers())
++                    {
++                    case 10:
++                        inflectionValue *= InflectionPointRaid10M;
++                        break;
++                    case 25:
++                        inflectionValue *= InflectionPointRaid25M;
++                        break;
++                    case 30:
++                        inflectionValue *= InflectionPointRaid30M;
++                        break;
++                    default:
++                        inflectionValue *= InflectionPointRaid;
++
++                    }
++                }
++                else
++                {
++                    inflectionValue *= InflectionPoint;
++                }
++            }
++            if (creature->IsDungeonBoss())
++            {
++                inflectionValue *= BossInflectionMult;
++            }
++
++            float diff = ((float)maxNumberOfPlayers / 5) * 1.5f;
++            defaultMultiplier = (tanh(((float)creatureABInfo->instancePlayerCount - inflectionValue) / diff) + 1.0f) / 2.0f;
++
++        }
++
++        creatureABInfo->HealthMultiplier = healthMultiplier * defaultMultiplier * globalRate;
++
++        if (creatureABInfo->HealthMultiplier <= MinHPModifier)
++        {
++            creatureABInfo->HealthMultiplier = MinHPModifier;
++        }
++
++        float hpStatsRate = 1.0f;
++        if (!useDefStats && LevelScaling && !skipLevel)
++        {
++            float newBaseHealth = 0;
++            if (level <= 60)
++            {
++                newBaseHealth = creatureStats->BaseHealth[0];
++            }
++            else if (level <= 70)
++            {
++                newBaseHealth = creatureStats->BaseHealth[1];
++            }
++            else
++            {
++                newBaseHealth = creatureStats->BaseHealth[2];
++                // special increasing for end-game contents
++                if (LevelEndGameBoost)
++                {
++                    newBaseHealth *= creatureABInfo->selectedLevel >= 75 && originalLevel < 75 ? float(creatureABInfo->selectedLevel - 70) * 0.3f : 1;
++                }
++            }
++
++            float newHealth = newBaseHealth * creatureTemplate->ModHealth;
++            // allows health to be different with creatures that originally
++            // differentiate their health by different level instead of multiplier field.
++            // expecially in dungeons. The health reduction decrease if original level is similar to the area max level
++            if (originalLevel >= areaMinLvl && originalLevel < areaMaxLvl)
++            {
++                // never more than 30%
++                float reduction = newHealth / float(areaMaxLvl - areaMinLvl) * (float(areaMaxLvl - originalLevel) * 0.3f);
++                if (reduction > 0 && reduction < newHealth)
++                {
++                    newHealth -= reduction;
++                }
++            }
++            hpStatsRate = newHealth / float(baseHealth);
++        }
++
++        creatureABInfo->HealthMultiplier *= hpStatsRate;
++        scaledHealth = round(((float)baseHealth * creatureABInfo->HealthMultiplier) + 1.0f);
++
++        // Getting the list of Classes in this group
++        // This will be used later on to determine what additional scaling will be required based on the ratio of tank/dps/healer
++        // Update playerClassList with the list of all the participating Classes
++        // GetPlayerClassList(creature, playerClassList);
++
++        float manaStatsRate = 1.0f;
++        if (!useDefStats && LevelScaling && !skipLevel)
++        {
++            float newMana = creatureStats->GenerateMana(creatureTemplate);
++            manaStatsRate = newMana / float(baseMana);
++        }
++
++        creatureABInfo->ManaMultiplier = manaStatsRate * manaMultiplier * defaultMultiplier * globalRate;
++        if (creatureABInfo->ManaMultiplier <= MinManaModifier)
++        {
++            creatureABInfo->ManaMultiplier = MinManaModifier;
++        }
++
++        scaledMana = round(baseMana * creatureABInfo->ManaMultiplier);
++        float damageMul = defaultMultiplier * globalRate * damageMultiplier;
++        // Can not be less then Min_D_Mod
++        if (damageMul <= MinDamageModifier)
++        {
++            damageMul = MinDamageModifier;
++        }
++
++        if (!useDefStats && LevelScaling && !skipLevel)
++        {
++            float origDmgBase = origCreatureStats->GenerateBaseDamage(creatureTemplate);
++            float newDmgBase = 0;
++            if (level <= 60)
++            {
++                newDmgBase = creatureStats->BaseDamage[0];
++            }
++            else if (level <= 70)
++            {
++                newDmgBase = creatureStats->BaseDamage[1];
++            }
++            else
++            {
++                newDmgBase = creatureStats->BaseDamage[2];
++                // special increasing for end-game contents
++                if (LevelEndGameBoost && !creature->GetMap()->IsRaid())
++                    newDmgBase *= creatureABInfo->selectedLevel >= 75 && originalLevel < 75 ? float(creatureABInfo->selectedLevel - 70) * 0.3f : 1;
++            }
++
++            damageMul *= newDmgBase / origDmgBase;
++
++        }
++
++        creatureABInfo->ArmorMultiplier = defaultMultiplier * globalRate * armorMultiplier;
++        uint32 newBaseArmor = round(creatureABInfo->ArmorMultiplier *
++            ((useDefStats || !LevelScaling || skipLevel) ? origCreatureStats->GenerateArmor(creatureTemplate)
++                : creatureStats->GenerateArmor(creatureTemplate)));
++        uint32 prevMaxHealth = creature->GetMaxHealth();
++        uint32 prevMaxPower = creature->GetMaxPower(POWER_MANA);
++        uint32 prevHealth = creature->GetHealth();
++        uint32 prevPower = creature->GetPower(POWER_MANA);
++        Powers pType = creature->GetPowerType();
++
++        creature->SetArmor(newBaseArmor);
++        creature->SetStatFlatModifier(UNIT_MOD_ARMOR, BASE_VALUE, (float)newBaseArmor);
++        creature->SetCreateHealth(scaledHealth);
++        creature->SetMaxHealth(scaledHealth);
++        creature->ResetPlayerDamageReq();
++        creature->SetCreateMana(scaledMana);
++        creature->SetMaxPower(POWER_MANA, scaledMana);
++        creature->SetStatFlatModifier(UNIT_MOD_ENERGY, BASE_VALUE, (float)100.0f);
++        creature->SetStatFlatModifier(UNIT_MOD_RAGE, BASE_VALUE, (float)100.0f);
++        creature->SetStatFlatModifier(UNIT_MOD_HEALTH, BASE_VALUE, (float)scaledHealth);
++        creature->SetStatFlatModifier(UNIT_MOD_MANA, BASE_VALUE, (float)scaledMana);
++        creatureABInfo->DamageMultiplier = damageMul;
++
++        uint32 scaledCurHealth = prevHealth && prevMaxHealth ? float(scaledHealth) / float(prevMaxHealth) * float(prevHealth) : 0;
++        uint32 scaledCurPower = prevPower && prevMaxPower ? float(scaledMana) / float(prevMaxPower) * float(prevPower) : 0;
++
++        creature->SetHealth(scaledCurHealth);
++        if (pType == POWER_MANA)
++        {
++            creature->SetPower(POWER_MANA, scaledCurPower);
++        }
++        else
++        {
++            // fix creatures with different power types
++            creature->SetPowerType(pType);
++        }
++        creature->UpdateAllStats();
++    }
++};
++
++using namespace Trinity::ChatCommands;
++
++class AutoBalance_CommandScript : public CommandScript
++{
++public:
++    AutoBalance_CommandScript() : CommandScript("AutoBalance_CommandScript") { }
++
++    ChatCommandTable GetCommands() const override
++    {
++        static ChatCommandTable ABCommandTable =
++        {
++            { "setoffset",      HandleABSetOffsetCommand,               rbac::RBAC_ROLE_GAMEMASTER,                     Console::Yes },
++            { "getoffset",      HandleABGetOffsetCommand,               rbac::RBAC_ROLE_GAMEMASTER,                     Console::Yes },
++            { "checkmap",       HandleABCheckMapCommand,                rbac::RBAC_ROLE_GAMEMASTER,                     Console::Yes },
++            { "mapstat",        HandleABMapStatsCommand,                rbac::RBAC_ROLE_GAMEMASTER,                     Console::Yes },
++            { "crstat",         HandleABCreatureStatsCommand,           rbac::RBAC_ROLE_GAMEMASTER,                     Console::Yes },
++        };
++        static ChatCommandTable commandTable =
++        {
++            { "vas", ABCommandTable },
++        };
++        return commandTable;
++
++    }
++
++    static bool HandleABSetOffsetCommand(ChatHandler* handler, uint32 offseti)
++    {
++        handler->PSendSysMessage("Changing Player Difficulty Offset to %i.", offseti);
++        PlayerCountDifficultyOffset = offseti;
++        return true;
++    }
++
++    static bool HandleABGetOffsetCommand(ChatHandler* handler)
++    {
++        handler->PSendSysMessage("Current Player Difficulty Offset = %i", PlayerCountDifficultyOffset);
++        return true;
++    }
++
++    static bool HandleABCheckMapCommand(ChatHandler* handler)
++    {
++        Player* pl = handler->getSelectedPlayer();
++
++        if (!pl)
++        {
++            handler->SendSysMessage(LANG_SELECT_PLAYER_OR_PET);
++            handler->SetSentErrorMessage(true);
++            return false;
++
++        }
++
++        AutoBalanceMapInfo* mapABInfo = pl->GetMap()->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
++        mapABInfo->playerCount = pl->GetMap()->GetPlayersCountExceptGMs();
++
++        Map::PlayerList const& playerList = pl->GetMap()->GetPlayers();
++        uint8 level = 0;
++        if (!playerList.isEmpty())
++        {
++            for (Map::PlayerList::const_iterator playerIteration = playerList.begin();
++                playerIteration != playerList.end(); ++playerIteration)
++            {
++                if (Player* playerHandle = playerIteration->GetSource())
++                {
++                    if (playerHandle->GetLevel() > level)
++                    {
++                        mapABInfo->mapLevel = level = playerHandle->GetLevel();
++
++                    }
++
++                }
++
++            }
++
++        }
++        HandleABMapStatsCommand(handler);
++        return true;
++
++    }
++
++    static bool HandleABMapStatsCommand(ChatHandler* handler)
++    {
++        Player* pl = handler->getSelectedPlayer();
++        if (!pl)
++        {
++            handler->SendSysMessage(LANG_SELECT_PLAYER_OR_PET);
++            handler->SetSentErrorMessage(true);
++            return false;
++
++        }
++
++        AutoBalanceMapInfo* mapABInfo = pl->GetMap()->CustomData.GetDefault<AutoBalanceMapInfo>("AutoBalanceMapInfo");
++        handler->PSendSysMessage("Players on map: %u", mapABInfo->playerCount);
++        handler->PSendSysMessage("Max level of players in this map: %u", mapABInfo->mapLevel);
++        return true;
++
++    }
++
++    static bool HandleABCreatureStatsCommand(ChatHandler* handler)
++    {
++        Creature* target = handler->getSelectedCreature();
++
++        if (!target)
++        {
++            handler->SendSysMessage(LANG_SELECT_CREATURE);
++            handler->SetSentErrorMessage(true);
++            return false;
++
++        }
++
++        AutoBalanceCreatureInfo* creatureABInfo = target->CustomData.GetDefault<AutoBalanceCreatureInfo>("AutoBalanceCreatureInfo");
++        handler->PSendSysMessage("Instance player Count: %u", creatureABInfo->instancePlayerCount);
++        handler->PSendSysMessage("Selected level: %u", creatureABInfo->selectedLevel);
++        handler->PSendSysMessage("Damage multiplier: %.6f", creatureABInfo->DamageMultiplier);
++        handler->PSendSysMessage("Health multiplier: %.6f", creatureABInfo->HealthMultiplier);
++        handler->PSendSysMessage("Mana multiplier: %.6f", creatureABInfo->ManaMultiplier);
++        handler->PSendSysMessage("Armor multiplier: %.6f", creatureABInfo->ArmorMultiplier);
++        return true;
++    }
++};
++
++void AddSC_AutoBalance()
++{
++    new AutoBalance_WorldScript;
++    new AutoBalance_PlayerScript;
++    new AutoBalance_UnitScript;
++    new AutoBalance_AllCreatureScript;
++    new AutoBalance_AllMapScript;
++    new AutoBalance_CommandScript;
++}
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 9e5e9ba2bfd..a068ace28d3 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -19,6 +19,11 @@
+ 
+ // The name of this function should match:
+ // void Add${NameOfDirectory}Scripts()
++
++void AddSC_AutoBalance();
++
+ void AddCustomScripts()
+ {
++    // VAS AutoBalance
++    AddSC_AutoBalance();
+ }
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index f475d0248e8..9c6d6ba2f37 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -4125,3 +4125,198 @@ Metric.OverallStatusInterval = 1
+ 
+ #
+ ###################################################################################################
++
++###################################################################################################
++#
++# AUTOBALANCE ANNOUNCE
++#
++#     AutoBalanceAnnounce.enable
++#        Announce the module on login
++#        Default:     1 (1 = ON, 0 = OFF)
++
++AutoBalanceAnnounce.enable = 1
++
++#
++# AUTOBALANCE OPTIONS
++#
++#     AutoBalance.enable
++#        Enable/Disable the autobalance system
++#        Default:     1 (1 = ON, 0 = OFF)
++
++AutoBalance.enable = 1
++
++#     AutoBalance.InflectionPoint series
++#        Adjust value of Hyperbolic Tangent function where
++#        the curve of scaling must change. A lower value means higher difficulty.
++#        InflectionPoint & InflectionPointHeroic are the fallback values for 5-man dungeons
++#        InflectionPointRaid10M & InflectionPointRaid10MHeroic are the fallback values for 10 man raids
++#        InflectionPointRaid25M & InflectionPointRaid25MHeroic are the fallback values for 25 man raids
++#        InflectionPointRaid30M & InflectionPointRaid30MHeroic are the fallback values for 30 man raids
++#        InflectionPointRaid & InflectionPointRaidHeroic are the fallback values for other raids (40-man, 20-man, 15-man, or custom size)
++#        The inflection points fallback to the most specific number
++#
++#        Example: with 0.5 in InflectionPointRaid, a creature of raid (40) will have half of its life with 20 players in
++#                 with 0.8, the same creature will have half of its life with 12 players in
++#
++#        Default:     0.5
++
++AutoBalance.InflectionPoint = 0.5
++AutoBalance.InflectionPointHeroic = 0.5
++
++AutoBalance.InflectionPointRaid10M = 0.5
++AutoBalance.InflectionPointRaid10MHeroic = 0.5
++
++AutoBalance.InflectionPointRaid25M = 0.5
++AutoBalance.InflectionPointRaid25MHeroic = 0.5
++
++AutoBalance.InflectionPointRaid30M = 0.5
++AutoBalance.InflectionPointRaid30MHeroic = 0.5
++
++AutoBalance.InflectionPointRaid = 0.5
++AutoBalance.InflectionPointRaidHeroic = 0.5
++
++#
++#     AutoBalance.BossInflectionMult
++#        Multiplies the inflection point of bosses, only applies to creatures considered dungeon bosses (from dungeons or raids).
++#        Example: If AutoBalance.BossInflectionMult = 0.4 and AutoBalance.InflectionPoint=0.5, the bosses inflection point will be 0.4*0.9 = 0.36 in a normal dungeon.
++#        Default:     1.0
++
++AutoBalance.BossInflectionMult = 1.0
++
++#
++#     AutoBalance.levelScaling
++#        Check the max level of players in map and scale creature based on it.
++#        This triggers depending on the two options below AutoBalance.levelHigherOffset and AutoBalance.levelLowerOffset
++#        0 = Disabled
++#        1 = Enabled (only in dungeons/raids)
++#        Default:     1
++
++AutoBalance.levelScaling = 0
++
++#
++#     AutoBalance.levelHigherOffset
++#     AutoBalance.levelLowerOffset
++#        Level Offsets between creatures will not be scaled by level.
++#        You can even use it to disable scaling from lower to higher levelScaling
++#        setting levelLowerOffset to 80 (max wotlk level) for example.
++#        default: 3 (higher), 0 (lower)
++
++AutoBalance.levelHigherOffset = 3
++AutoBalance.levelLowerOffset  = 0
++
++#
++#     AutoBalance.levelUseDbValuesWhenExists
++#        When enabled with levelScaling, the creature will use its default database values
++#        instead of level scaling formula when player/party level has correspondance with
++#        creature_template minlevel/maxlevel.
++#
++#        Default:     0 (1 = ON, 0 = OFF)
++
++AutoBalance.levelUseDbValuesWhenExists = 0
++
++#
++#     AutoBalance.LevelEndGameBoost
++#        End game creatures have an exponential (not linear) regression
++#        that is not correctly handled by db values. Keep this enabled
++#        to have stats as near possible to the official ones.
++#
++#        Default:     1 (1 = ON, 0 = OFF)
++
++AutoBalance.LevelEndGameBoost = 1
++
++#
++#     AutoBalance.DungeonScaleDownXP
++#        Decrease individual player's amount of XP gained during a dungeon to match the
++#        amount of XP gained during a full group run. Example: In a 5-man group, you
++#        earn 1/5 of the total XP per kill, but if you solo the dungeon with
++#        AutoBalance.DungeonScaleDownXP = 0, you will earn 5/5 of the total XP.
++#        With the option enabled, you will earn 1/5.
++#        Default:     0 (1 = ON, 0 = OFF)
++
++AutoBalance.DungeonScaleDownXP = 0
++
++#
++#     AutoBalance.DungeonsOnly
++#        Only apply scaling changes to dungeons and raids
++#        Default:     1 (1 = ON, 0 = OFF)
++
++AutoBalance.DungeonsOnly = 1
++
++#
++#     AutoBalance.DebugLevel
++#        0 = None
++#        1 = Errors Only
++#        2 = Errors and Basic Information
++#        3 = All  Info
++#        Default:     2
++
++AutoBalance.DebugLevel = 2
++
++#
++#     AutoBalance.PlayerChangeNotify
++#        Set Auto Notifications to all players in Instance that player count has changed.
++#        Default:     1 (1 = ON, 0 = OFF)
++
++AutoBalance.PlayerChangeNotify = 1
++
++#
++#     AutoBalance.MinHPModifier
++#        Minimum Modifier setting for Health Modification
++#        Default:     0.01
++
++AutoBalance.MinHPModifier = 0.01
++
++#
++#     AutoBalance.MinManaModifier
++#        Minimum Modifier setting for Mana Modification
++#        Default:     0.01
++
++AutoBalance.MinManaModifier = 0.01
++
++#
++#     AutoBalance.MinDamageModifier
++#        Minimum Modifier setting for Damage Modification
++#        Default:     0.01
++
++AutoBalance.MinDamageModifier = 0.01
++
++#
++#     AutoBalance.rate.*
++#        You can tune all rates increasing/decreasing difficulty in a linear way
++#        Note that global rate will increase all other rates. For example:
++#        global = 2.0 , damage = 1.5  -> it means that damage will be 3.0
++#        Default:     1.0
++
++AutoBalance.rate.global = 1.0
++AutoBalance.rate.health = 1.0
++AutoBalance.rate.mana   = 1.0
++AutoBalance.rate.armor  = 1.0
++AutoBalance.rate.damage = 1.0
++
++#
++#     AutoBalance.playerCountDifficultyOffset
++#        Offset of players inside an instance
++#        Default:     0
++
++AutoBalance.playerCountDifficultyOffset = 0
++
++#
++#     AutoBalance.ForcedIDXX
++#        Sets MobIDs for the group they belong to.
++#        All 5 Man Mobs should go in .AutoBalance.5.Name
++#        All 10 Man Mobs should go in .AutoBalance.10.Name etc.
++
++AutoBalance.ForcedID40 = "11583,16441,30057,13020,15589,14435,18192,14889,14888,14887,14890,15302,15818,15742,15741,15740,18338"
++AutoBalance.ForcedID25 = "22997,21966,21965,21964,21806,21215,21845,19728,12397,17711,18256,18192,"
++AutoBalance.ForcedID20 = ""
++AutoBalance.ForcedID10 = "15689,15550,16152,17521,17225,16028,29324,31099"
++AutoBalance.ForcedID5  = "8317,15203,15204,15205,15305,6109,26801,30508,26799,30495,26803,30497,27859,27249"
++AutoBalance.ForcedID2  = ""
++
++#
++#     AutoBalance.DisabledID
++#        Disable scaling on specific creatures
++#
++
++AutoBalance.DisabledID = ""
++###################################################################################################

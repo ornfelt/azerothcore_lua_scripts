@@ -1,0 +1,222 @@
+# lines starting with # are skipped as comment
+#
+# every event block should start with name/description
+# every event block should end with "EndBlock" keyword
+#
+# Time needs to be in 24 hour format 9 PM is 21 hour
+#
+# DayOfTheWeek has values [0..6] . 0 means sunday. any other value means it's not used
+#
+# !!! events multiply each others effect. It's not addition !. If you have global 3xhealing + 3xHealing in instances, the applied effect is 9x healing
+#
+# possible Event values :
+#	NameAndDescription=
+#	StartHour=
+#	EndHour=
+#	EventType=
+#	MapId=
+#	SpawnLocationX=
+#	SpawnLocationY=
+#	SpawnLocationZ=
+#	SpawnLocationO=
+#	SpawnEntry=
+#	ValueMultiplier=
+#	ValueAdded=
+#	DayOfTheWeek=
+#
+# possible event types
+#    SE_MULTIPLIED_HEALING_EVERYWHERE                = 1,
+#    SE_MULTIPLIED_HEALING_INSTANCES                 = 2,
+#    SE_MULTIPLIED_HEALING_SPECIFIC_INSTANCE         = 3,
+#    SE_MULTIPLIED_DMG_EVERYWHERE                    = 4,
+#    SE_MULTIPLIED_DMG_INSTANCES                     = 5,
+#    SE_MULTIPLIED_DAMAGE_SPECIFIC_INSTANCE          = 6,
+#    SE_MULTIPLIED_LOOT_EVERYWHERE                   = 7,
+#    SE_MULTIPLIED_LOOT_INSTANCES                    = 8,
+#    SE_MULTIPLIED_LOOT_SPECIFIC_INSTANCE            = 9,
+#    SE_MULTIPLIED_GOLD_EVERYWHERE                   = 10,
+#    SE_MULTIPLIED_GOLD_INSTANCES                    = 11,
+#    SE_MULTIPLIED_GOLD_SPECIFIC_INSTANCE            = 12,
+#    SE_REDUCED_CREATURE_HEALTH_EVERYWHERE           = 13,
+#    SE_REDUCED_CREATURE_HEALTH_ANY_INSTANCE         = 14,
+#    SE_REDUCED_CREATURE_HEALTH_SPECIFIC_INSTANCE    = 15,
+#    SE_REDUCED_CREATURE_DMG_EVERYWHERE              = 16,
+#    SE_REDUCED_CREATURE_DMG_ANY_INSTANCE            = 17,
+#    SE_REDUCED_CREATURE_DMG_SPECIFIC_INSTANCE       = 18,
+#    SE_SPAWN_CREATURE                               = 19,
+#    SE_LOOT_ONLY_ITEM_QUALITY_ANYWHERE              = 36,
+#    SE_LOOT_ONLY_ITEM_QUALITY_INSTANCES             = 37,
+#    SE_LOOT_ONLY_ITEM_QUALITY_SPECIFIC_MAP          = 38,
+#    SE_LOOTED_ITEMS_COUNT_ANYWHERE                  = 39,
+#    SE_LOOTED_ITEMS_COUNT_INSTANCES                 = 40,
+#    SE_LOOTED_ITEMS_COUNT_SPECIFIC_MAP              = 41,
+#
+#
+#below events are used only as example. I tested if the system works
+
+NameAndDescription=Only green items drop from monsters
+StartHour=1:50
+EndHour=23:57
+EventType=36
+ValueAdded=2		0 is gray, 2 is green, 7 is hairloom
+EndBlock
+
+NameAndDescription=Blood queen has been spawned in stormwind
+StartHour=16:50
+EndHour=16:57
+EventType=19
+MapId=0
+SpawnEntry=37955
+SpawnLocationX=-8833.76
+SpawnLocationY=623.25
+SpawnLocationZ=94
+SpawnLocationO=0
+DayOfTheWeek=1
+EndBlock
+
+NameAndDescription=Increased player healing
+StartHour=1:42
+EndHour=23:43
+EventType=1
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased player healing in any instance
+StartHour=1:42
+EndHour=23:43
+EventType=2
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased player healing in shadowfang keep
+StartHour=1:42
+EndHour=23:43
+EventType=3
+MapId=33
+ValueAdded=1000
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased player damage
+StartHour=1:42
+EndHour=23:43
+EventType=4
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased player damage in any instance
+StartHour=1:42
+EndHour=23:43
+EventType=5
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased player damage in shadowfang keep
+StartHour=1:42
+EndHour=23:43
+EventType=6
+MapId=33
+ValueAdded=1000
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased drop chances
+StartHour=1:42
+EndHour=23:43
+EventType=7
+ValueAdded=10
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased drop chances
+StartHour=1:42
+EndHour=23:43
+EventType=8
+ValueAdded=10
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased drop chances in shadowfang keep
+StartHour=1:42
+EndHour=23:43
+EventType=9
+MapId=33
+ValueAdded=10
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased gold droprate
+StartHour=1:42
+EndHour=23:43
+EventType=10
+ValueAdded=10000
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased gold droprate
+StartHour=1:42
+EndHour=23:43
+EventType=11
+ValueAdded=10000
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Increased gold droprate in shadowfang keep
+StartHour=1:42
+EndHour=23:43
+EventType=12
+MapId=33
+ValueAdded=10
+ValueMultiplier=2.0
+EndBlock
+
+NameAndDescription=Half Mob health on spawn
+StartHour=1:30
+EndHour=23:43
+EventType=13
+ValueMultiplier=0.5
+EndBlock
+
+NameAndDescription=Half Mob health on spawn in isntances
+StartHour=1:30
+EndHour=23:43
+EventType=14
+ValueMultiplier=0.5
+EndBlock
+
+NameAndDescription=Half Mob health on spawn in shadowfang keep
+StartHour=1:30
+EndHour=23:43
+EventType=15
+MapId=33
+ValueMultiplier=0.5
+EndBlock
+
+NameAndDescription=Half Mob damage
+StartHour=1:30
+EndHour=23:43
+EventType=16
+ValueMultiplier=0.5
+EndBlock
+
+NameAndDescription=Half Mob damage in instances
+StartHour=1:30
+EndHour=23:43
+EventType=17
+ValueMultiplier=0.5
+EndBlock
+
+NameAndDescription=Half Mob damage in shadowfang keep
+StartHour=1:30
+EndHour=23:43
+EventType=18
+MapId=33
+ValueMultiplier=0.5
+EndBlock
+
+NameAndDescription=Increase loot drop count everywhere
+StartHour=1:42
+EndHour=23:43
+EventType=39
+ValueAdded=2
+EndBlock

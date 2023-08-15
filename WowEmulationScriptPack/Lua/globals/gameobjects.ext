@@ -1,0 +1,34 @@
+-- filename.ext files are loaded before normal .lua files
+
+-- This file will contain functions that will act as shortcuts to commonly used code, but only for Eluna code that affects Gameobjects.
+-- Add a comment on the same line as the function start, AND EXPLAIN WHAT IT DOES AND WHY IT EXISTS!
+
+function GetGameObjectXYZ(objectGUID) -- Replace this with a non-DB query as soon as possible.
+    if (objectGUID == tonumber(objectGUID)) then
+        local gameobjectQuery = {}
+        local gameobjectQuery = WorldDBQuery("SELECT map,position_x,position_y,position_z,orientation FROM gameobject WHERE guid = " .. objectGUID .. ";")
+        local gameobjectCoords = {
+            map = gameobjectQuery:GetFloat(0),
+            x = gameobjectQuery:GetFloat(1),
+            y = gameobjectQuery:GetFloat(2),
+            z = gameobjectQuery:GetFloat(3),
+            o = gameobjectQuery:GetFloat(4),
+        };
+        return gameobjectCoords
+    else
+        PrintInfo("Something is feeding GetGameObjectXYZ invalid GUIDs.")
+        return false
+    end
+end
+
+function GetGameObjectEntryID(objectGUID) -- Replace this with a non-DB query as soon as possible.
+    if (objectGUID == tonumber(objectGUID)) then
+        local gameobjectQuery = {}
+        local gameobjectQuery = WorldDBQuery("SELECT id FROM gameobject WHERE guid = " .. objectGUID .. ";")
+        local gameobjectEntryID = gameobjectQuery:GetUInt32(0)
+        return gameobjectEntryID
+    else
+        PrintInfo("Something is feeding GetGameObjectEntryID invalid GUIDs.")
+        return false
+    end
+end

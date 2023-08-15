@@ -1,0 +1,4 @@
+INSERT INTO creature_proto (entry, minlevel, maxlevel, faction, minhealth, maxhealth, mana, scale, npcflags, attacktime, mindamage, maxdamage, rangedattacktime, rangedmindamage, rangedmaxdamage, respawntime, armor, resistance1, resistance2, resistance3, resistance4, resistance5, resistance6, combat_reach, bounding_radius, auras, boss, money, invisibility_type, death_state)
+VALUES (333333, 250, 250, 35,  1000000,  1000000,  1000000,  1.5, 3, 1800, 150, 250, 1800, 500, 650, 36000, 0, 0, 0, 0, 0, 0, 0, 1, 0, "MEMO", 0, 0, 0, 0);
+INSERT INTO creature_names (entry, `name`, Subname, Flags1, type, Family, Rank, unk4, SpellDataID, male_displayid, female_displayid, unknown_float1, unknown_float2, Civilian, Leader, info_str)
+VALUES (333333,"Teleporter","HHScripts",0,7,0,0,0,NULL,28213,28213,1, 1,1,NULL, '');

@@ -1,0 +1,1543 @@
+From ee3a882311fe302b66502c8f56c1c8949dc914be Mon Sep 17 00:00:00 2001
+From: LordPsyan <realmsofwarcraft@gmail.com>
+Date: Sat, 23 Jan 2016 10:56:53 -0600
+Subject: [PATCH] 2016_01_23-Arena_Spectator
+
+---
+ .../Arena_Spectator/auth.Arena_Spectator.sql       |  15 +
+ .../Arena_Spectator/world.Arena_Spectator.sql      |  10 +
+ src/server/game/Accounts/RBAC.h                    |   8 +-
+ src/server/game/Battlegrounds/Battleground.cpp     |  24 +-
+ src/server/game/Battlegrounds/Battleground.h       |  11 +
+ src/server/game/Battlegrounds/BattlegroundMgr.h    |  12 +-
+ src/server/game/Battlegrounds/SpectatorAddon.cpp   | 224 +++++++
+ src/server/game/Battlegrounds/SpectatorAddon.h     |  96 +++
+ src/server/game/Entities/GameObject/GameObject.cpp |   9 +
+ src/server/game/Entities/Player/Player.cpp         | 114 +++-
+ src/server/game/Entities/Player/Player.h           |  15 +-
+ src/server/game/Entities/Unit/Unit.cpp             |  13 +
+ src/server/game/Handlers/ChatHandler.cpp           |   6 +
+ src/server/game/Maps/Map.cpp                       |   7 +
+ src/server/game/Miscellaneous/Language.h           |   3 +
+ src/server/game/Spells/Spell.cpp                   |   4 +
+ src/server/scripts/Commands/cs_gm.cpp              |   3 +
+ src/server/scripts/Custom/ArenaSpectator/README.md |  33 ++
+ .../Custom/ArenaSpectator/arena_spectator.cpp      | 643 +++++++++++++++++++++
+ 19 files changed, 1239 insertions(+), 11 deletions(-)
+ create mode 100644 sql/TrinityCore-Patches/Arena_Spectator/auth.Arena_Spectator.sql
+ create mode 100644 sql/TrinityCore-Patches/Arena_Spectator/world.Arena_Spectator.sql
+ create mode 100644 src/server/game/Battlegrounds/SpectatorAddon.cpp
+ create mode 100644 src/server/game/Battlegrounds/SpectatorAddon.h
+ create mode 100644 src/server/scripts/Custom/ArenaSpectator/README.md
+ create mode 100644 src/server/scripts/Custom/ArenaSpectator/arena_spectator.cpp
+
+diff --git a/sql/TrinityCore-Patches/Arena_Spectator/auth.Arena_Spectator.sql b/sql/TrinityCore-Patches/Arena_Spectator/auth.Arena_Spectator.sql
+new file mode 100644
+index 0000000..862cda6
+--- /dev/null
++++ b/sql/TrinityCore-Patches/Arena_Spectator/auth.Arena_Spectator.sql
+@@ -0,0 +1,15 @@
++DELETE FROM `rbac_linked_permissions` where `linkedId` IN ("1003","1004","1005","1006","1007");
++INSERT INTO `rbac_linked_permissions` (`id`, `linkedId`) values
++('195','1003'),
++('195','1004'),
++('195','1005'),
++('195','1006'),
++('195','1007');
++
++DELETE FROM `rbac_permissions` WHERE `id` IN ("1003","1004","1005","1006","1007");
++insert into `rbac_permissions` (`id`, `name`) values
++('1003', 'spectate'),
++('1004', 'spectate player'),
++('1005', 'spectate view'),
++('1006', 'spectate reset'),
++('1007', 'spectate leave');
+\ No newline at end of file
+diff --git a/sql/TrinityCore-Patches/Arena_Spectator/world.Arena_Spectator.sql b/sql/TrinityCore-Patches/Arena_Spectator/world.Arena_Spectator.sql
+new file mode 100644
+index 0000000..2f4aed5
+--- /dev/null
++++ b/sql/TrinityCore-Patches/Arena_Spectator/world.Arena_Spectator.sql
+@@ -0,0 +1,10 @@
++SET
++@Entry = 190000,
++@Name = "Arena Spectator",
++@Subname = "Spectate Master",
++@IconName = "Speak";
++
++DELETE FROM `creature_template` WHERE `entry`=@Entry;
++INSERT INTO `creature_template` (`entry`, `modelid1`, `modelid2`, `name`, `subname`, `IconName`, `gossip_menu_id`, `minlevel`, `maxlevel`, `exp`, `faction`, `npcflag`, `scale`, `rank`, `dmgschool`, `baseattacktime`, `rangeattacktime`, `unit_class`, `unit_flags`, `type`, `type_flags`, `lootid`, `pickpocketloot`, `skinloot`, `AIName`, `MovementType`, `InhabitType`, `HoverHeight`, `RacialLeader`, `movementId`, `RegenHealth`, `mechanic_immune_mask`, `flags_extra`, `ScriptName`) VALUES
++(@Entry, 29348, 0, @Name, @Subname, @IconName, 0, 80, 80, 2, 35, 3, 1, 0, 0, 2000, 0, 1, 0, 7, 138936390, 0, 0, 0, '', 0, 3, 1, 0, 0, 1, 0, 0, 'npc_arena_spectator');
++
+diff --git a/src/server/game/Accounts/RBAC.h b/src/server/game/Accounts/RBAC.h
+index 3c3e838..5cc3daf 100644
+--- a/src/server/game/Accounts/RBAC.h
++++ b/src/server/game/Accounts/RBAC.h
+@@ -697,7 +697,13 @@ enum RBACPermissions
+     // 799 - 834 6.x only
+     RBAC_PERM_COMMAND_DEBUG_LOADCELLS                        = 835,
+     RBAC_PERM_COMMAND_DEBUG_BOUNDARY                         = 836,
+-
++	
++	//Arena Spectator
++    RBAC_PERM_COMMAND_SPECTATE                               = 1003,
++    RBAC_PERM_COMMAND_SPECTATE_PLAYER                        = 1004,
++    RBAC_PERM_COMMAND_SPECTATE_VIEW                          = 1005,
++    RBAC_PERM_COMMAND_SPECTATE_RESET                         = 1006,
++    RBAC_PERM_COMMAND_SPECTATE_LEAVE                         = 1007,
+     // custom permissions 1000+
+     // Prepatch by LordPsyan
+     // 01
+diff --git a/src/server/game/Battlegrounds/Battleground.cpp b/src/server/game/Battlegrounds/Battleground.cpp
+index 100e2e6..e79a643 100644
+--- a/src/server/game/Battlegrounds/Battleground.cpp
++++ b/src/server/game/Battlegrounds/Battleground.cpp
+@@ -1141,13 +1141,23 @@ void Battleground::EventPlayerLoggedOut(Player* player)
+     m_Players[guid].OfflineRemoveTime = sWorld->GetGameTime() + MAX_OFFLINE_TIME;
+     if (GetStatus() == STATUS_IN_PROGRESS)
+     {
+-        // drop flag and handle other cleanups
+-        RemovePlayer(player, guid, GetPlayerTeam(guid));
+-
+-        // 1 player is logging out, if it is the last, then end arena!
+-        if (isArena())
+-            if (GetAlivePlayersCountByTeam(player->GetBGTeam()) <= 1 && GetPlayersCountByTeam(GetOtherTeam(player->GetBGTeam())))
+-                EndBattleground(GetOtherTeam(player->GetBGTeam()));
++        if (!player->IsSpectator())
++        {
++            // drop flag and handle other cleanups
++            RemovePlayer(player, guid, GetPlayerTeam(guid));
++            // 1 player is logging out, if it is the last, then end arena!
++            if (isArena())
++                if (GetAlivePlayersCountByTeam(player->GetTeam()) <= 1 && GetPlayersCountByTeam(GetOtherTeam(player->GetTeam())))
++                    EndBattleground(GetOtherTeam(player->GetTeam()));
++        }
++    }
++	    
++	if (!player->IsSpectator())
++        player->LeaveBattleground();
++    else
++    {
++        player->TeleportToBGEntryPoint();
++        RemoveSpectator(player->GetGUID());
+     }
+ }
+ 
+diff --git a/src/server/game/Battlegrounds/Battleground.h b/src/server/game/Battlegrounds/Battleground.h
+index 03f138a..190528e 100644
+--- a/src/server/game/Battlegrounds/Battleground.h
++++ b/src/server/game/Battlegrounds/Battleground.h
+@@ -27,6 +27,7 @@
+ #include "Object.h"
+ #include "GameObject.h"
+ #include "EventMap.h"
++#include "SpectatorAddon.h"
+ 
+ class Creature;
+ class GameObject;
+@@ -309,6 +310,13 @@ class Battleground
+         uint32 GetInvitedCount(uint32 team) const   { return (team == ALLIANCE) ? m_InvitedAlliance : m_InvitedHorde; }
+         bool HasFreeSlots() const;
+         uint32 GetFreeSlotsForTeam(uint32 Team) const;
++		
++		/* Arena Spectator */
++		typedef std::set<uint32> SpectatorList;
++		void AddSpectator(uint32 playerId) { m_Spectators.insert(playerId); }
++		void RemoveSpectator(uint32 playerId) { m_Spectators.erase(playerId); }
++		bool HaveSpectators() { return (m_Spectators.size() > 0); }
++		/* Arena Spectator */
+ 
+         bool isArena() const        { return m_IsArena; }
+         bool isBattleground() const { return !m_IsArena; }
+@@ -589,6 +597,9 @@ class Battleground
+ 
+         // Players count by team
+         uint32 m_PlayersCount[BG_TEAMS_COUNT];
++		
++        // Arena Spectator
++        SpectatorList m_Spectators;
+ 
+         // Arena team ids by team
+         uint32 m_ArenaTeamIds[BG_TEAMS_COUNT];
+diff --git a/src/server/game/Battlegrounds/BattlegroundMgr.h b/src/server/game/Battlegrounds/BattlegroundMgr.h
+index 595745e..e088c5b 100644
+--- a/src/server/game/Battlegrounds/BattlegroundMgr.h
++++ b/src/server/game/Battlegrounds/BattlegroundMgr.h
+@@ -109,6 +109,7 @@ class BattlegroundMgr
+ 
+         bool isArenaTesting() const { return m_ArenaTesting; }
+         bool isTesting() const { return m_Testing; }
++		bool IsArenaType(BattlegroundTypeId bgTypeId);
+ 
+         static BattlegroundQueueTypeId BGQueueTypeId(BattlegroundTypeId bgTypeId, uint8 arenaType);
+         static BattlegroundTypeId BGTemplateId(BattlegroundQueueTypeId bgQueueTypeId);
+@@ -118,6 +119,15 @@ class BattlegroundMgr
+         static BattlegroundTypeId WeekendHolidayIdToBGType(HolidayIds holiday);
+         static bool IsBGWeekend(BattlegroundTypeId bgTypeId);
+ 
++		BattlegroundData* GetAllBattlegroundsWithTypeId(BattlegroundTypeId bgTypeId)
++        {
++            BattlegroundDataContainer::iterator it = bgDataStore.find(bgTypeId);
++            if (it == bgDataStore.end())
++                return NULL;
++
++            return &it->second;
++        }
++
+         uint32 GetMaxRatingDifference() const;
+         uint32 GetRatingDiscardTimer()  const;
+         void InitAutomaticArenaPointDistribution();
+@@ -134,7 +144,7 @@ class BattlegroundMgr
+     private:
+         bool CreateBattleground(BattlegroundTemplate const* bgTemplate);
+         uint32 CreateClientVisibleInstanceId(BattlegroundTypeId bgTypeId, BattlegroundBracketId bracket_id);
+-        static bool IsArenaType(BattlegroundTypeId bgTypeId);
++        //static bool IsArenaType(BattlegroundTypeId bgTypeId);
+         BattlegroundTypeId GetRandomBG(BattlegroundTypeId id);
+ 
+         typedef std::map<BattlegroundTypeId, BattlegroundData> BattlegroundDataContainer;
+diff --git a/src/server/game/Battlegrounds/SpectatorAddon.cpp b/src/server/game/Battlegrounds/SpectatorAddon.cpp
+new file mode 100644
+index 0000000..ce265b6
+--- /dev/null
++++ b/src/server/game/Battlegrounds/SpectatorAddon.cpp
+@@ -0,0 +1,224 @@
++/*
++ * Copyright (C) 2008-2012 TrinityCore <http://www.trinitycore.org/>
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program. If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include "Player.h"
++#include "Item.h"
++#include "SpellInfo.h"
++#include "SpectatorAddon.h"
++#include "ObjectAccessor.h"
++#include "Opcodes.h"
++#include "WorldPacket.h"
++#include "WorldSession.h"
++
++SpectatorAddonMsg::SpectatorAddonMsg()
++{
++    for (uint8 i = 0; i < SPECTATOR_PREFIX_COUNT; ++i)
++        prefixFlags[i] = false;
++
++    player    = "";
++    target    = "";
++    isAlive   = false;
++    pClass    = CLASS_WARRIOR;
++    maxHP     = 0;
++    maxPower  = 0;
++    currHP    = 0;
++    currPower = 0;
++    powerType = POWER_MANA;
++    spellId   = 0;
++    castTime  = 0;
++    team      = ALLIANCE;
++}
++
++bool SpectatorAddonMsg::CanSandAura(uint32 auraID)
++{
++    const SpellInfo *spell = sSpellMgr->GetSpellInfo(auraID);
++    if (!spell)
++        return false;
++
++    if (spell->SpellIconID == 1)
++        return false;
++
++    return true;
++}
++
++void SpectatorAddonMsg::CreateAura(uint32 _caster, uint32 _spellId, bool _isDebuff, uint8 _type, int32 _duration, int32 _expire, uint16 _stack, bool _isRemove)
++{
++    if (!CanSandAura(_spellId))
++        return;
++
++    aCaster     = _caster;
++    aSpellId    = _spellId;
++    aIsDebuff   = _isDebuff;
++    aType       = _type;
++    aDuration   = _duration;
++    aExpire     = _expire;
++    aStack      = _stack;
++    aRemove     = _isRemove;
++    EnableFlag(SPECTATOR_PREFIX_AURA);
++}
++
++std::string SpectatorAddonMsg::GetMsgData()
++{
++    std::string addonData = "";
++
++    if (!isFilledIn(SPECTATOR_PREFIX_PLAYER))
++    {
++        TC_LOG_INFO("battleground", "SPECTATOR ADDON: player is not filled in.");
++        return addonData;
++    }
++
++    std::string msg = "";
++    for (uint8 i = 0; i < SPECTATOR_PREFIX_COUNT; ++i)
++        if (isFilledIn(i))
++        {
++            switch (i)
++            {
++                case SPECTATOR_PREFIX_PLAYER:
++                    msg += player + ";";
++                    break;
++                case SPECTATOR_PREFIX_TARGET:
++                    msg += "TRG=" + target + ";";
++                    break;
++                case SPECTATOR_PREFIX_TEAM:
++                {
++                    char buffer[20];
++                    sprintf(buffer, "TEM=%i;", (uint16)team);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_STATUS:
++                {
++                    char buffer[20];
++                    sprintf(buffer, "STA=%d;", isAlive);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_CLASS:
++                {
++                    char buffer[20];
++                    sprintf(buffer, "CLA=%i;", (int)pClass);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_MAXHP:
++                {
++                    char buffer[30];
++                    sprintf(buffer, "MHP=%i;", maxHP);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_CURHP:
++                {
++                    char buffer[30];
++                    sprintf(buffer, "CHP=%i;", currHP);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_MAXPOWER:
++                {
++                    char buffer[30];
++                    sprintf(buffer, "MPW=%i;", maxPower);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_CURPOWER:
++                {
++                    char buffer[30];
++                    sprintf(buffer, "CPW=%i;", currPower);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_POWERTYPE:
++                {
++                    char buffer[20];
++                    sprintf(buffer, "PWT=%i;", (uint8)powerType);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_SPELL:
++                {
++                    char buffer[80];
++                    sprintf(buffer, "SPE=%i,%i;", spellId, castTime);
++                    msg += buffer;
++                    break;
++                }
++                case SPECTATOR_PREFIX_AURA:
++                {
++                    char buffer[300];
++                    sprintf(buffer, "AUR=%i,%i,%i,%i,%i,%i,%i,0x%X;", aRemove,   aStack,
++                                                                    aExpire,   aDuration,
++                                                                    aSpellId,  aType,
++                                                                    aIsDebuff, aCaster);
++                    msg += buffer;
++                    break;
++                }
++            }
++        }
++
++    if (msg != "")
++        addonData = "ARENASPEC	" + msg;
++
++    return addonData;
++}
++
++bool SpectatorAddonMsg::SendPacket(ObjectGuid receiver)
++{
++	std::string addonData = GetMsgData();
++	if (addonData == "")
++		return false;
++
++	Player* rPlayer = ObjectAccessor::FindPlayer(receiver);
++	if (!rPlayer)
++		return false;
++
++	WorldPacket data(SMSG_MESSAGECHAT, 200);
++	data << uint8(CHAT_MSG_WHISPER);
++	data << uint32(LANG_ADDON);
++	data << uint64(0);
++	data << uint32(LANG_ADDON);                               //language 2.1.0 ?
++	data << uint64(0);
++	data << uint32(addonData.length() + 1);
++	data << addonData;
++	data << uint8(CHAT_TAG_NONE);
++	rPlayer->GetSession()->SendPacket(&data);
++
++	return true;
++}
++
++bool SpectatorAddonMsg::SendPacket(SpectatorAddonMsg msg, ObjectGuid receiver)
++{
++	std::string addonData = msg.GetMsgData();
++	if (addonData == "")
++		return false;
++
++	Player* rPlayer = ObjectAccessor::FindPlayer(receiver);
++	if (!rPlayer)
++		return false;
++
++	WorldPacket data(SMSG_MESSAGECHAT, 200);
++	data << uint8(CHAT_MSG_WHISPER);
++	data << uint32(LANG_ADDON);
++	data << uint64(0);
++	data << uint32(LANG_ADDON);                               //language 2.1.0 ?
++	data << uint64(0);
++	data << uint32(addonData.length() + 1);
++	data << addonData;
++	data << uint8(CHAT_TAG_NONE);
++	rPlayer->GetSession()->SendPacket(&data);
++
++	return true;
++}
+\ No newline at end of file
+diff --git a/src/server/game/Battlegrounds/SpectatorAddon.h b/src/server/game/Battlegrounds/SpectatorAddon.h
+new file mode 100644
+index 0000000..21f44c4
+--- /dev/null
++++ b/src/server/game/Battlegrounds/SpectatorAddon.h
+@@ -0,0 +1,96 @@
++/*
++ * Copyright (C) 2008-2012 TrinityCore <http://www.trinitycore.org/>
++ * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program. If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#define SPECTATOR_ADDON_SPELL_INTERUPTED 99999 // specific addons
++#define SPECTATOR_ADDON_SPELL_CANCELED 99998   // numbers =\
++
++
++enum SpectatorPrefix {
++	SPECTATOR_PREFIX_PLAYER,
++	SPECTATOR_PREFIX_STATUS,
++	SPECTATOR_PREFIX_MAXHP,
++	SPECTATOR_PREFIX_CURHP,
++	SPECTATOR_PREFIX_MAXPOWER,
++	SPECTATOR_PREFIX_CURPOWER,
++	SPECTATOR_PREFIX_POWERTYPE,
++	SPECTATOR_PREFIX_TARGET,
++	SPECTATOR_PREFIX_CLASS,
++	SPECTATOR_PREFIX_TEAM,
++	SPECTATOR_PREFIX_SPELL,
++	SPECTATOR_PREFIX_AURA,
++	SPECTATOR_PREFIX_COUNT      // must be at the end of list
++};
++
++class SpectatorAddonMsg {
++    public:
++        SpectatorAddonMsg();
++
++        void SetPlayer(std::string _player)     { player    = _player;  EnableFlag(SPECTATOR_PREFIX_PLAYER); }
++        void SetStatus(bool _isAlive)           { isAlive   = _isAlive; EnableFlag(SPECTATOR_PREFIX_STATUS); }
++        void SetClass(uint8 _class)             { pClass    = _class;   EnableFlag(SPECTATOR_PREFIX_CLASS); }
++        void SetTarget(std::string _target)     { target    = _target;  EnableFlag(SPECTATOR_PREFIX_TARGET); }
++        void SetTeam(uint32 _team)              { team      = _team;    EnableFlag(SPECTATOR_PREFIX_TEAM); }
++
++        void SetMaxHP(uint16 hp)                { maxHP     = hp; EnableFlag(SPECTATOR_PREFIX_MAXHP); }
++        void SetCurrentHP(uint16 hp)            { currHP    = hp; EnableFlag(SPECTATOR_PREFIX_CURHP);  }
++        void SetMaxPower(uint16 power)          { maxPower  = power; EnableFlag(SPECTATOR_PREFIX_MAXPOWER); }
++        void SetCurrentPower(uint16 power)      { currPower = power; EnableFlag(SPECTATOR_PREFIX_CURPOWER); }
++        void SetPowerType(Powers power)         { powerType = power; EnableFlag(SPECTATOR_PREFIX_POWERTYPE); }
++
++        void CastSpell(uint32 _spellId, uint32 _castTime) { spellId = _spellId; castTime = _castTime; EnableFlag(SPECTATOR_PREFIX_SPELL); }
++        void CreateAura(uint32 _caster,  uint32 _spellId, bool _isDebuff, uint8 _type, int32 _duration, int32 _expire, uint16 _stack, bool _isRemove);
++
++        static bool SendPacket(SpectatorAddonMsg msg, ObjectGuid receiver);
++        bool SendPacket(ObjectGuid receiver);
++
++        std::string GetMsgData();
++
++        bool isFilledIn(uint8 prefix) { return prefixFlags[prefix]; }
++
++        static bool CanSandAura(uint32 auraID);
++    private:
++
++        void EnableFlag(uint8 prefix) { prefixFlags[prefix] = true; }
++        std::string player;
++        bool isAlive;
++        std::string target;
++        uint8 pClass;
++
++        uint16 maxHP;
++        uint16 maxPower;
++        uint16 currHP;
++        uint16 currPower;
++        Powers powerType;
++
++        uint32 spellId;
++        uint32 castTime;
++
++        uint32 team;
++
++        // aura data
++        uint32 aCaster;
++        uint32 aSpellId;
++        bool aIsDebuff;
++        uint8 aType;
++        int32 aDuration;
++        int32 aExpire;
++        uint16 aStack;
++        bool aRemove;
++
++        bool prefixFlags[SPECTATOR_PREFIX_COUNT];
++};
+diff --git a/src/server/game/Entities/GameObject/GameObject.cpp b/src/server/game/Entities/GameObject/GameObject.cpp
+index 6f0b9f8..aff8918 100644
+--- a/src/server/game/Entities/GameObject/GameObject.cpp
++++ b/src/server/game/Entities/GameObject/GameObject.cpp
+@@ -571,6 +571,10 @@ void GameObject::Update(uint32 diff)
+                     }
+                     else if (Unit* target = ObjectAccessor::GetUnit(*this, m_lootStateUnitGUID))
+                     {
++					     // If player is spectator do not activate.
++						if (Player *tmpPlayer = target->ToPlayer())
++                            if (tmpPlayer->IsSpectator())
++                                return;
+                         // Some traps do not have a spell but should be triggered
+                         if (goInfo->trap.spellId)
+                             CastSpell(target, goInfo->trap.spellId);
+@@ -1774,6 +1778,11 @@ void GameObject::Use(Unit* user)
+ 
+ void GameObject::CastSpell(Unit* target, uint32 spellId, bool triggered /*= true*/)
+ {
++	if (target)
++        if (Player *tmpPlayer = target->ToPlayer())
++            if (tmpPlayer->IsSpectator())
++                return;
++			
+     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
+     if (!spellInfo)
+         return;
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index 15c2c47..9d15b81 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -555,6 +555,11 @@ Player::Player(WorldSession* session): Unit(true)
+     m_MonthlyQuestChanged = false;
+ 
+     m_SeasonalQuestChanged = false;
++	
++	 // Arena Spectator
++	spectatorFlag = false;
++	spectateCanceled = false;
++	spectateFrom = NULL;
+ 
+     SetPendingBind(0, 0);
+ 
+@@ -2084,7 +2089,17 @@ bool Player::TeleportToBGEntryPoint()
+     ScheduleDelayedOperation(DELAYED_BG_MOUNT_RESTORE);
+     ScheduleDelayedOperation(DELAYED_BG_TAXI_RESTORE);
+     ScheduleDelayedOperation(DELAYED_BG_GROUP_RESTORE);
+-    return TeleportTo(m_bgData.joinPos);
++    //return TeleportTo(m_bgData.joinPos);
++    Battleground *oldBg = GetBattleground();
++    bool result = TeleportTo(m_bgData.joinPos);
++
++    if (IsSpectator() && result)
++    {
++        SetSpectate(false);
++        if (oldBg)
++            oldBg->RemoveSpectator(GetGUID());
++    }
++    return result;
+ }
+ 
+ void Player::ProcessDelayedOperations()
+@@ -23978,6 +23993,15 @@ void Player::SetViewpoint(WorldObject* target, bool apply)
+ {
+     if (apply)
+     {
++	    if (target->ToPlayer() == this)
++            return;
++
++        //remove Viewpoint if already have
++        if (IsSpectator() && spectateFrom)
++        {
++            SetViewpoint(spectateFrom, false);
++            spectateFrom = NULL;
++        }
+         TC_LOG_DEBUG("maps", "Player::CreateViewpoint: Player %s create seer %u (TypeId: %u).", GetName().c_str(), target->GetEntry(), target->GetTypeId());
+ 
+         if (!AddGuidValue(PLAYER_FARSIGHT, target->GetGUID()))
+@@ -24007,6 +24031,9 @@ void Player::SetViewpoint(WorldObject* target, bool apply)
+ 
+         //must immediately set seer back otherwise may crash
+         m_seer = this;
++		
++		if (IsSpectator())
++            spectateFrom = NULL;
+ 
+         //WorldPacket data(SMSG_CLEAR_FAR_SIGHT_IMMEDIATE, 0);
+         //GetSession()->SendPacket(&data);
+@@ -26485,3 +26512,88 @@ void Player::RemoveRestFlag(RestFlag restFlag)
+         RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_RESTING);
+     }
+ }
++
++void Player::SetSelection(ObjectGuid guid)
++{
++    uint32 m_curSelection = guid;
++    SetUInt64Value(UNIT_FIELD_TARGET, guid);
++}
++
++void Player::SetSpectate(bool on)
++{
++    if (on)
++    {
++        SetSpeed(MOVE_RUN, 5.0);
++        spectatorFlag = true;
++
++        m_ExtraFlags |= PLAYER_EXTRA_GM_ON;
++        setFaction(35);
++
++        if (Pet* pet = GetPet())
++        {
++            RemovePet(pet, PET_SAVE_AS_CURRENT);
++        }
++        UnsummonPetTemporaryIfAny();
++
++        RemoveByteFlag(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_FFA_PVP);
++        ResetContestedPvP();
++
++        getHostileRefManager().setOnlineOfflineState(false);
++        CombatStopWithPets();
++
++        m_serverSideVisibility.SetValue(SERVERSIDE_VISIBILITY_GM, SEC_ADMINISTRATOR);
++    }
++    else
++    {
++        uint32 newPhase = 0;
++        AuraEffectList const& phases = GetAuraEffectsByType(SPELL_AURA_PHASE);
++        if (!phases.empty())
++            for (AuraEffectList::const_iterator itr = phases.begin(); itr != phases.end(); ++itr)
++                newPhase |= (*itr)->GetMiscValue();
++
++        if (!newPhase)
++            newPhase = PHASEMASK_NORMAL;
++
++        SetPhaseMask(newPhase, false);
++
++        m_ExtraFlags &= ~ PLAYER_EXTRA_GM_ON;
++        setFactionForRace(getRace());
++        RemoveFlag(PLAYER_FLAGS, PLAYER_FLAGS_GM);
++        RemoveFlag(UNIT_FIELD_FLAGS_2, UNIT_FLAG2_ALLOW_CHEAT_SPELLS);
++
++        if (spectateFrom)
++            SetViewpoint(spectateFrom, false);
++
++        // restore FFA PvP Server state
++        if (sWorld->IsFFAPvPRealm())
++            SetByteFlag(UNIT_FIELD_BYTES_2, 1, UNIT_BYTE2_FLAG_FFA_PVP);
++
++        // restore FFA PvP area state, remove not allowed for GM mounts
++        UpdateArea(m_areaUpdateId);
++
++        getHostileRefManager().setOnlineOfflineState(true);
++        m_serverSideVisibility.SetValue(SERVERSIDE_VISIBILITY_GM, SEC_PLAYER);
++        spectateCanceled = false;
++        spectatorFlag = false;
++        RestoreDisplayId();
++        UpdateSpeed(MOVE_RUN, true);
++    }
++    UpdateObjectVisibility();
++}
++
++bool Player::HaveSpectators()
++{
++    if (IsSpectator())
++        return false;
++
++    if (Battleground *bg = GetBattleground())
++        if (bg->isArena())
++        {
++            if (bg->GetStatus() != STATUS_IN_PROGRESS)
++                return false;
++
++            return bg->HaveSpectators();
++        }
++
++        return false;
++}
+diff --git a/src/server/game/Entities/Player/Player.h b/src/server/game/Entities/Player/Player.h
+index b7d7d81..f1f5cbb 100644
+--- a/src/server/game/Entities/Player/Player.h
++++ b/src/server/game/Entities/Player/Player.h
+@@ -1085,6 +1085,14 @@ class Player : public Unit, public GridObject<Player>
+         bool Has310Flyer(bool checkAllSpells, uint32 excludeSpellId = 0);
+         void SetHas310Flyer(bool on) { if (on) m_ExtraFlags |= PLAYER_EXTRA_HAS_310_FLYER; else m_ExtraFlags &= ~PLAYER_EXTRA_HAS_310_FLYER; }
+         void SetPvPDeath(bool on) { if (on) m_ExtraFlags |= PLAYER_EXTRA_PVP_DEATH; else m_ExtraFlags &= ~PLAYER_EXTRA_PVP_DEATH; }
++		
++		// Arena Spectator
++		bool HaveSpectators();
++        bool isSpectateCanceled() { return spectateCanceled; }
++        void CancelSpectate() { spectateCanceled = true; }
++        Unit* getSpectateFrom() { return spectateFrom; }
++        bool IsSpectator() const { return spectatorFlag; }
++        void SetSpectate(bool on);
+ 
+         void GiveXP(uint32 xp, Unit* victim, float group_rate=1.0f);
+         void GiveLevel(uint8 level);
+@@ -1453,7 +1461,8 @@ class Player : public Unit, public GridObject<Player>
+         Player* GetSelectedPlayer() const;
+ 
+         void SetTarget(ObjectGuid /*guid*/) override { } /// Used for serverside target changes, does not apply to players
+-        void SetSelection(ObjectGuid guid) { SetGuidValue(UNIT_FIELD_TARGET, guid); }
++        //void SetSelection(ObjectGuid guid) { SetGuidValue(UNIT_FIELD_TARGET, guid); }
++		void SetSelection(ObjectGuid guid);
+ 
+         uint8 GetComboPoints() const { return m_comboPoints; }
+         ObjectGuid GetComboTarget() const { return m_comboTarget; }
+@@ -2583,6 +2592,10 @@ class Player : public Unit, public GridObject<Player>
+         InstanceTimeMap _instanceResetTimes;
+         uint32 _pendingBindId;
+         uint32 _pendingBindTimer;
++		
++	    bool spectatorFlag;
++        bool spectateCanceled;
++        Unit *spectateFrom;
+ 
+         uint32 _activeCheats;
+ 
+diff --git a/src/server/game/Entities/Unit/Unit.cpp b/src/server/game/Entities/Unit/Unit.cpp
+index a826f84..fae8c5b 100644
+--- a/src/server/game/Entities/Unit/Unit.cpp
++++ b/src/server/game/Entities/Unit/Unit.cpp
+@@ -291,6 +291,19 @@ Unit::~Unit()
+             m_currentSpells[i]->SetReferencedFromCurrent(false);
+             m_currentSpells[i] = NULL;
+         }
++		
++	// remove view point for spectator
++    if (!m_sharedVision.empty())
++    {
++        for (SharedVisionList::iterator itr = m_sharedVision.begin(); itr != m_sharedVision.end(); ++itr)
++            if ((*itr)->IsSpectator() && (*itr)->getSpectateFrom())
++            {
++                (*itr)->SetViewpoint((*itr)->getSpectateFrom(), false);
++                if (m_sharedVision.empty())
++                    break;
++                --itr;
++            }
++    }
+ 
+     _DeleteRemovedAuras();
+ 
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+index f7fd9c8..0fdba1e 100644
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -574,6 +574,12 @@ void WorldSession::HandleTextEmoteOpcode(WorldPacket& recvData)
+     recvData >> text_emote;
+     recvData >> emoteNum;
+     recvData >> guid;
++	
++	if (GetPlayer()->IsSpectator())
++    {
++        SendNotification(LANG_SPEC_CAN_NOT_CHAT);
++        return;
++    }
+ 
+     sScriptMgr->OnPlayerTextEmote(GetPlayer(), text_emote, emoteNum, guid);
+ 
+diff --git a/src/server/game/Maps/Map.cpp b/src/server/game/Maps/Map.cpp
+index a2cb843..7c8cc9e 100644
+--- a/src/server/game/Maps/Map.cpp
++++ b/src/server/game/Maps/Map.cpp
+@@ -3347,6 +3347,13 @@ bool BattlegroundMap::AddPlayerToMap(Player* player)
+ 
+ void BattlegroundMap::RemovePlayerFromMap(Player* player, bool remove)
+ {
++	if (player && player->IsSpectator() && !player->isSpectateCanceled())
++    {
++        if (GetBG())
++            GetBG()->RemoveSpectator(player->GetGUID());
++        player->SetSpectate(false);
++    }
++	
+     TC_LOG_DEBUG("maps", "MAP: Removing player '%s' from bg '%u' of map '%s' before relocating to another map", player->GetName().c_str(), GetInstanceId(), GetMapName());
+     Map::RemovePlayerFromMap(player, remove);
+ }
+diff --git a/src/server/game/Miscellaneous/Language.h b/src/server/game/Miscellaneous/Language.h
+index 73a9905..cc579b4 100644
+--- a/src/server/game/Miscellaneous/Language.h
++++ b/src/server/game/Miscellaneous/Language.h
+@@ -854,6 +854,9 @@ enum TrinityStrings
+     LANG_ACCOUNT_SEC_TYPE               = 880,
+     LANG_RBAC_EMAIL_REQUIRED            = 881,
+     // Room for in-game strings           882-999 not used
++	
++	// Arena Spectator
++    LANG_SPEC_CAN_NOT_CHAT = 900,
+ 
+     // Level 4 (CLI only commands)
+     LANG_COMMAND_EXIT                   = 1000,
+diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
+index 84bff4a..059d6ff 100644
+--- a/src/server/game/Spells/Spell.cpp
++++ b/src/server/game/Spells/Spell.cpp
+@@ -4736,6 +4736,10 @@ SpellCastResult Spell::CheckCast(bool strict)
+                 m_caster->GetMap()->IsOutdoors(m_caster->GetPositionX(), m_caster->GetPositionY(), m_caster->GetPositionZ()))
+             return SPELL_FAILED_ONLY_INDOORS;
+     }
++	
++	if (Player *tmpPlayer = m_caster->ToPlayer())
++        if (tmpPlayer->IsSpectator())
++            return SPELL_FAILED_SPELL_UNAVAILABLE;
+ 
+     // only check at first call, Stealth auras are already removed at second call
+     // for now, ignore triggered spells
+diff --git a/src/server/scripts/Commands/cs_gm.cpp b/src/server/scripts/Commands/cs_gm.cpp
+index e03942b..fc48f27 100644
+--- a/src/server/scripts/Commands/cs_gm.cpp
++++ b/src/server/scripts/Commands/cs_gm.cpp
+@@ -131,6 +131,9 @@ public:
+                  itrSec <= AccountTypes(sWorld->getIntConfig(CONFIG_GM_LEVEL_IN_GM_LIST)))) &&
+                 (!handler->GetSession() || itr->second->IsVisibleGloballyFor(handler->GetSession()->GetPlayer())))
+             {
++				if (itr->second->IsSpectator())
++					continue; // don't show spectators, they're not really gms
++				
+                 if (first)
+                 {
+                     first = false;
+diff --git a/src/server/scripts/Custom/ArenaSpectator/README.md b/src/server/scripts/Custom/ArenaSpectator/README.md
+new file mode 100644
+index 0000000..abbb7a5
+--- /dev/null
++++ b/src/server/scripts/Custom/ArenaSpectator/README.md
+@@ -0,0 +1,33 @@
++#Arena Spectator
++
++####About
++Arena Spectator gives you the
++oportunity to spectate players when
++they are in arena.You can spectate a 
++2vs2 / 3vs3 / 5vs5 / Specific Player arena.
++
++
++####Installation
++
++Available as:
++- Direct merge: https://github.com/Flameshot/TrinityCore/tree/Arena-Spectator
++- Diff/Patch: http://flameshot.tk/ipbdownload/Arena-Spectator.diff
++
++Using direct merge:
++- open git bash to source location
++- do `git remote add flameshot https://github.com/Flameshot/TrinityCore.git`
++- do `git pull flameshot arena-spectator`
++- use cmake and compile
++
++Using diff:
++- download the diff by __right clicking__ the link and select __Save link as__
++- place the downloaded `arena-spectator.diff` to the source root folder
++- open git bash to source location
++- do `git apply arena-spectator.diff`
++- use cmake and compile
++
++After compiling:
++- Navigate to `\src\server\scripts\Custom\ArenaSpectator\sql\`
++- Run `Arena Spectator NPC.sql` to your world database
++- Run `rbac_permissions.sql` to your auth database
++- Run `rbac_linked_permissions.sql` to your auth database
+\ No newline at end of file
+diff --git a/src/server/scripts/Custom/ArenaSpectator/arena_spectator.cpp b/src/server/scripts/Custom/ArenaSpectator/arena_spectator.cpp
+new file mode 100644
+index 0000000..7eeed69
+--- /dev/null
++++ b/src/server/scripts/Custom/ArenaSpectator/arena_spectator.cpp
+@@ -0,0 +1,643 @@
++/*
++* Copyright (C) 2008-2012 TrinityCore <http://www.trinitycore.org/>
++* Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
++*
++* This program is free software; you can redistribute it and/or modify it
++* under the terms of the GNU General Public License as published by the
++* Free Software Foundation; either version 2 of the License, or (at your
++* option) any later version.
++*
++* This program is distributed in the hope that it will be useful, but WITHOUT
++* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
++* more details.
++*
++* You should have received a copy of the GNU General Public License along
++* with this program. If not, see <http://www.gnu.org/licenses/>.
++*/
++
++/* ScriptData
++Name: Arena Spectator
++%Complete: 100
++Comment: Script allow spectate arena games
++Category: Custom Script
++Copyright: Flameshot
++EndScriptData */
++
++#include "Chat.h"
++#include "ArenaTeamMgr.h"
++#include "BattlegroundMgr.h"
++#include "WorldSession.h"
++#include "Player.h"
++#include "ArenaTeam.h"
++#include "Battleground.h"
++#include "BattlegroundMgr.h"
++#include "CreatureTextMgr.h"
++#include "Config.h"
++#include "ScriptedGossip.h"
++#include "ScriptMgr.h"
++
++int8 UsingGossip;
++
++class arena_spectator_commands : public CommandScript
++{
++public:
++	arena_spectator_commands() : CommandScript("arena_spectator_commands") { }
++
++	static bool HandleSpectateCommand(ChatHandler* handler, char const* args)
++	{
++		Player* target;
++		ObjectGuid target_guid;
++		std::string target_name;
++		if (!handler->extractPlayerTarget((char*)args, &target, &target_guid, &target_name))
++			return false;
++
++		Player* player = handler->GetSession()->GetPlayer();
++		if (target == player || target_guid == player->GetGUID())
++		{
++			handler->PSendSysMessage("You can't spectate yourself.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (player->IsInCombat())
++		{
++			handler->PSendSysMessage("You are in combat.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (!target)
++		{
++			handler->PSendSysMessage("Target is not online or does not exist.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (player->GetPet())
++		{
++			handler->PSendSysMessage("You must hide your pet.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (player->GetMap()->IsBattlegroundOrArena() && !player->IsSpectator())
++		{
++			handler->PSendSysMessage("You are already in a battleground or arena.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		Map* cMap = target->GetMap();
++		if (!cMap->IsBattleArena())
++		{
++			handler->PSendSysMessage("Player is not in an Arena match.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (player->GetMap()->IsBattleground())
++		{
++			handler->PSendSysMessage("You can't do that while in a battleground.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (target->HasAura(32728) || target->HasAura(32727))
++		{
++			handler->PSendSysMessage("You can't do that. The Arena match didn't start yet.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (target->IsSpectator())
++		{
++			handler->PSendSysMessage("You can't do that. Your target is a spectator.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (player->IsMounted())
++		{
++			handler->PSendSysMessage("Cannot Spectate while mounted.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		// all's well, set bg id
++		// when porting out from the bg, it will be reset to 0
++		player->SetBattlegroundId(target->GetBattlegroundId(), target->GetBattlegroundTypeId());
++		// remember current position as entry point for return at bg end teleportation
++		if (!player->GetMap()->IsBattlegroundOrArena())
++			player->SetBattlegroundEntryPoint();
++
++		// stop flight if need
++		if (player->IsInFlight())
++		{
++			player->GetMotionMaster()->MovementExpired();
++			player->CleanupAfterTaxiFlight();
++		}
++		// save only in non-flight case
++		else
++			player->SaveRecallPosition();
++
++		// search for two teams
++		Battleground *bGround = target->GetBattleground();
++		if (bGround->isRated())
++		{
++			uint32 slot = bGround->GetArenaType() - 2;
++			if (bGround->GetArenaType() > 3)
++				slot = 2;
++			uint32 firstTeamID = target->GetArenaTeamId(slot);
++			uint32 secondTeamID = 0;
++			Player *firstTeamMember = target;
++			Player *secondTeamMember = NULL;
++			for (Battleground::BattlegroundPlayerMap::const_iterator itr = bGround->GetPlayers().begin(); itr != bGround->GetPlayers().end(); ++itr)
++				if (Player* tmpPlayer = ObjectAccessor::FindPlayer(itr->first))
++				{
++					if (tmpPlayer->IsSpectator())
++						continue;
++
++					uint32 tmpID = tmpPlayer->GetArenaTeamId(slot);
++					if (tmpID != firstTeamID && tmpID > 0)
++					{
++						secondTeamID = tmpID;
++						secondTeamMember = tmpPlayer;
++						break;
++					}
++				}
++
++			if (firstTeamID > 0 && secondTeamID > 0 && secondTeamMember)
++			{
++				ArenaTeam *firstTeam = sArenaTeamMgr->GetArenaTeamById(firstTeamID);
++				ArenaTeam *secondTeam = sArenaTeamMgr->GetArenaTeamById(secondTeamID);
++				if (firstTeam && secondTeam)
++				{
++					handler->PSendSysMessage("You entered a Rated Arena.");
++					handler->PSendSysMessage("Teams:");
++					handler->PSendSysMessage("|cFFffffff%s|r vs |cFFffffff%s|r", firstTeam->GetName().c_str(), secondTeam->GetName().c_str());
++					handler->PSendSysMessage("|cFFffffff%u(%u)|r -- |cFFffffff%u(%u)|r", firstTeam->GetRating(), firstTeam->GetAverageMMR(firstTeamMember->GetGroup()),
++						secondTeam->GetRating(), secondTeam->GetAverageMMR(secondTeamMember->GetGroup()));
++				}
++			}
++		}
++
++		// to point to see at target with same orientation
++		float x, y, z;
++		target->GetContactPoint(player, x, y, z);
++
++		player->TeleportTo(target->GetMapId(), x, y, z, player->GetAngle(target), TELE_TO_GM_MODE);
++		player->SetPhaseMask(target->GetPhaseMask(), true);
++		player->SetSpectate(true);
++		target->GetBattleground()->AddSpectator(player->GetGUID());
++
++		return true;
++	}
++
++	static bool HandleSpectateCancelCommand(ChatHandler* handler, const char* /*args*/)
++	{
++		Player* player = handler->GetSession()->GetPlayer();
++
++		if (!player->IsSpectator())
++		{
++			handler->PSendSysMessage("You are not a spectator.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		player->GetBattleground()->RemoveSpectator(player->GetGUID());
++		player->CancelSpectate();
++		player->TeleportToBGEntryPoint();
++
++		return true;
++	}
++
++	static bool HandleSpectateFromCommand(ChatHandler* handler, const char *args)
++	{
++		Player* target;
++		ObjectGuid target_guid;
++		std::string target_name;
++		if (!handler->extractPlayerTarget((char*)args, &target, &target_guid, &target_name))
++			return false;
++
++		Player* player = handler->GetSession()->GetPlayer();
++
++		if (target->HasAuraType(SPELL_AURA_MOD_STEALTH))
++		{
++			handler->PSendSysMessage("You can't target stealthed players.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (!target)
++		{
++			handler->PSendSysMessage("Player is not online or does not exist.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (!player->IsSpectator())
++		{
++			handler->PSendSysMessage("You are not a spectator, spectate someone first.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (target->IsSpectator() && target != player)
++		{
++			handler->PSendSysMessage("You can't do that. Your target is a spectator.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (player->GetMap() != target->GetMap())
++		{
++			handler->PSendSysMessage("You can't do that. Your target might be in a different arena match.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		// check for arena preperation
++		// if exists than battle didn`t begin
++		if (target->HasAura(32728) || target->HasAura(32727))
++		{
++			handler->PSendSysMessage("You can't do that. The Arena match didn't start yet.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		(target == player && player->getSpectateFrom()) ? player->SetViewpoint(player->getSpectateFrom(), false) :
++			player->SetViewpoint(target, true);
++		return true;
++	}
++
++	static bool HandleSpectateResetCommand(ChatHandler* handler, const char *args)
++	{
++		Player* player = handler->GetSession()->GetPlayer();
++
++		if (!player)
++		{
++			handler->PSendSysMessage("Cant find player.");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		if (!player->IsSpectator())
++		{
++			handler->PSendSysMessage("You are not a spectator!");
++			handler->SetSentErrorMessage(true);
++			return false;
++		}
++
++		Battleground *bGround = player->GetBattleground();
++		if (!bGround)
++			return false;
++
++		if (bGround->GetStatus() != STATUS_IN_PROGRESS)
++			return true;
++
++		for (Battleground::BattlegroundPlayerMap::const_iterator itr = bGround->GetPlayers().begin(); itr != bGround->GetPlayers().end(); ++itr)
++			if (Player* tmpPlayer = ObjectAccessor::FindPlayer(itr->first))
++			{
++				if (tmpPlayer->IsSpectator())
++					continue;
++
++				uint32 tmpID = bGround->GetPlayerTeam(tmpPlayer->GetGUID());
++
++				// generate addon massage
++				std::string pName = tmpPlayer->GetName();
++				std::string tName = "";
++
++				if (Player *target = tmpPlayer->GetSelectedPlayer())
++					tName = target->GetName();
++
++				SpectatorAddonMsg msg; // Travis
++				msg.SetPlayer(pName);
++				if (tName != "")
++					msg.SetTarget(tName);
++				msg.SetStatus(tmpPlayer->IsAlive());
++				msg.SetClass(tmpPlayer->getClass());
++				msg.SetCurrentHP(tmpPlayer->GetHealth());
++				msg.SetMaxHP(tmpPlayer->GetMaxHealth());
++				Powers powerType = tmpPlayer->getPowerType();
++				msg.SetMaxPower(tmpPlayer->GetMaxPower(powerType));
++				msg.SetCurrentPower(tmpPlayer->GetPower(powerType));
++				msg.SetPowerType(powerType);
++				msg.SetTeam(tmpID);
++				msg.SendPacket(player->GetGUID());
++			}
++
++		return true;
++	}
++
++	std::vector<ChatCommand> GetCommands() const override
++	{
++		static std::vector<ChatCommand> spectateCommandTable =
++		{
++			{ "player", rbac::RBAC_PERM_COMMAND_SPECTATE_PLAYER, true,     &HandleSpectateCommand, "" },
++			{ "view", rbac::RBAC_PERM_COMMAND_SPECTATE_VIEW, true,     &HandleSpectateFromCommand, "" },
++			{ "reset", rbac::RBAC_PERM_COMMAND_SPECTATE_RESET, true,  &HandleSpectateResetCommand, "" },
++			{ "leave", rbac::RBAC_PERM_COMMAND_SPECTATE_LEAVE, true, &HandleSpectateCancelCommand, "" },
++		};
++
++		static std::vector<ChatCommand> commandTable =
++		{
++			{ "spectate", rbac::RBAC_PERM_COMMAND_SPECTATE, false, NULL, "",     spectateCommandTable },
++		};
++		return commandTable;
++	}
++};
++
++
++enum NpcSpectatorAtions {
++	// will be used for scrolling
++	NPC_SPECTATOR_ACTION_2V2_GAMES = 2000,  //NPC_SPECTATOR_ACTION_LIST_GAMES = 1000,
++	NPC_SPECTATOR_ACTION_3V3_GAMES = 3000, // NPC_SPECTATOR_ACTION_LIST_TOP_GAMES = 2000,
++	NPC_SPECTATOR_ACTION_5V5_GAMES = 1000,
++	NPC_SPECTATOR_ACTION_SPECIFIC = 500,
++
++	// NPC_SPECTATOR_ACTION_SELECTED_PLAYER + player.Guid()
++	NPC_SPECTATOR_ACTION_SELECTED_PLAYER = 4000
++};
++
++const uint8  GamesOnPage = 15;
++
++class npc_arena_spectator : public CreatureScript
++{
++public:
++	npc_arena_spectator() : CreatureScript("npc_arena_spectator") { }
++
++	bool OnGossipHello(Player* pPlayer, Creature* pCreature)
++	{
++		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "|TInterface\\icons\\Achievement_Arena_2v2_7:35:35:-30:0|tGames: 2v2", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_2V2_GAMES);
++		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "|TInterface\\icons\\Achievement_Arena_3v3_7:35:35:-30:0|tGames: 3v3", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_3V3_GAMES);
++		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "|TInterface\\icons\\Achievement_Arena_5v5_7:35:35:-30:0|tGames: 5v5", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_5V5_GAMES);
++		pPlayer->ADD_GOSSIP_ITEM_EXTENDED(GOSSIP_ICON_CHAT, "|TInterface\\icons\\Spell_Holy_DevineAegis:35:35:-30:0|tSpectate Specific Player.", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_SPECIFIC, "", 0, true);
++		pPlayer->SEND_GOSSIP_MENU(DEFAULT_GOSSIP_MESSAGE, pCreature->GetGUID());
++		return true;
++	}
++
++	bool OnGossipSelect(Player* player, Creature* creature, uint32 /*sender*/, uint32 action)
++	{
++		player->PlayerTalkClass->ClearMenus();
++
++		if (action == NPC_SPECTATOR_ACTION_SPECIFIC)
++		{
++
++		}
++
++		if (action >= NPC_SPECTATOR_ACTION_2V2_GAMES && action < NPC_SPECTATOR_ACTION_3V3_GAMES)
++		{
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, " Refresh", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_2V2_GAMES);
++			ShowPage(player, action - NPC_SPECTATOR_ACTION_2V2_GAMES, ARENA_TYPE_2v2);
++			player->SEND_GOSSIP_MENU(DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
++		}
++		else if (action >= NPC_SPECTATOR_ACTION_3V3_GAMES && action < NPC_SPECTATOR_ACTION_5V5_GAMES)
++		{
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Refresh", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_3V3_GAMES);
++			ShowPage(player, action - NPC_SPECTATOR_ACTION_3V3_GAMES, ARENA_TYPE_3v3);
++			player->SEND_GOSSIP_MENU(DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
++		}
++		else if (action >= NPC_SPECTATOR_ACTION_5V5_GAMES && action < NPC_SPECTATOR_ACTION_SELECTED_PLAYER)
++		{
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Refresh", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_5V5_GAMES);
++			ShowPage(player, action - NPC_SPECTATOR_ACTION_5V5_GAMES, ARENA_TYPE_5v5);
++			player->SEND_GOSSIP_MENU(DEFAULT_GOSSIP_MESSAGE, creature->GetGUID());
++		}
++		else
++		{
++
++			ObjectGuid guid = ObjectGuid(HighGuid::Player, action - NPC_SPECTATOR_ACTION_SELECTED_PLAYER);
++			if (Player* target = ObjectAccessor::FindPlayer(guid))
++			{
++				ChatHandler handler(player->GetSession());
++				char const* pTarget = target->GetName().c_str();
++				arena_spectator_commands::HandleSpectateCommand(&handler, pTarget);
++			}
++		}
++		return true;
++	}
++
++	std::string GetClassNameById(uint8 id)
++	{
++		std::string sClass = "";
++		switch (id)
++		{
++		case CLASS_WARRIOR:         sClass = "Warrior ";        break;
++		case CLASS_PALADIN:         sClass = "Paladin ";        break;
++		case CLASS_HUNTER:          sClass = "Hunter ";         break;
++		case CLASS_ROGUE:           sClass = "Rogue ";          break;
++		case CLASS_PRIEST:          sClass = "Priest ";         break;
++		case CLASS_DEATH_KNIGHT:    sClass = "DKnight ";        break;
++		case CLASS_SHAMAN:          sClass = "Shaman ";         break;
++		case CLASS_MAGE:            sClass = "Mage ";           break;
++		case CLASS_WARLOCK:         sClass = "Warlock ";        break;
++		case CLASS_DRUID:           sClass = "Druid ";          break;
++		}
++		return sClass;
++	}
++
++	std::string GetGamesStringData(Battleground* team, uint16 mmr, uint16 mmrTwo)
++	{
++		std::string teamsMember[BG_TEAMS_COUNT];
++		uint32 firstTeamId = 0;
++		for (Battleground::BattlegroundPlayerMap::const_iterator itr = team->GetPlayers().begin(); itr != team->GetPlayers().end(); ++itr)
++			if (Player* player = ObjectAccessor::FindPlayer(itr->first))
++			{
++				if (player->IsSpectator())
++					continue;
++
++				if (player->IsGameMaster())
++					continue;
++
++				uint32 team = itr->second.Team;
++				if (!firstTeamId)
++					firstTeamId = team;
++
++				teamsMember[firstTeamId == team] += GetClassNameById(player->getClass());
++			}
++
++		std::string data = teamsMember[0] + "(";
++		std::stringstream ss;
++		std::stringstream sstwo;
++		ss << mmr;
++		sstwo << mmrTwo;
++		data += ss.str();
++		data += ") - ";
++		data += teamsMember[1] + "(" + sstwo.str();
++		data += ")";
++		return data;
++	}
++
++	ObjectGuid GetFirstPlayerGuid(Battleground* team)
++	{
++		for (Battleground::BattlegroundPlayerMap::const_iterator itr = team->GetPlayers().begin(); itr != team->GetPlayers().end(); ++itr)
++			if (Player* player = ObjectAccessor::FindPlayer(itr->first))
++				return itr->first;
++		return ObjectGuid::Empty;
++	}
++
++	void ShowPage(Player* player, uint16 page, uint32 IsTop)
++	{		
++		uint32 firstTeamId = 0;
++		uint16 TypeOne = 0;
++		uint16 TypeTwo = 0;
++		uint16 TypeThree = 0;
++		uint16 mmr = 0;
++		uint16 mmrTwo = 0;
++		bool haveNextPage = false;
++		for (uint8 i = 0; i <= MAX_BATTLEGROUND_TYPE_ID; ++i)
++		{
++			if (!sBattlegroundMgr->IsArenaType(BattlegroundTypeId(i)))
++				continue;
++
++			//BattlegroundContainer arenas = sBattlegroundMgr->GetBattlegroundsByType((BattlegroundTypeId)i);
++			BattlegroundData* arenas = sBattlegroundMgr->GetAllBattlegroundsWithTypeId(BattlegroundTypeId(i));
++
++			if (!arenas || arenas->m_Battlegrounds.empty())
++				continue;
++
++			for (BattlegroundContainer::const_iterator itr = arenas->m_Battlegrounds.begin(); itr != arenas->m_Battlegrounds.end(); ++itr)
++			{
++				Battleground* arena = itr->second;
++				Player* target = ObjectAccessor::FindPlayer(GetFirstPlayerGuid(arena));
++				if (target && (target->HasAura(32728) || target->HasAura(32727)))
++					continue;
++
++				if (!arena->GetPlayersSize())
++					continue;
++
++				if (arena->GetArenaType() == ARENA_TYPE_2v2)
++				{
++					mmr = arena->GetArenaMatchmakerRating(0);
++					firstTeamId = target->GetArenaTeamId(0);
++					Battleground::BattlegroundPlayerMap::const_iterator citr = arena->GetPlayers().begin();
++					for (; citr != arena->GetPlayers().end(); ++citr)
++						if (Player* plrs = ObjectAccessor::FindPlayer(citr->first))
++							if (plrs->GetArenaTeamId(0) != firstTeamId)
++								mmrTwo = arena->GetArenaMatchmakerRating(citr->second.Team);
++				}
++				else if (arena->GetArenaType() == ARENA_TYPE_3v3)
++				{
++					mmr = arena->GetArenaMatchmakerRating(1);
++					firstTeamId = target->GetArenaTeamId(1);
++					Battleground::BattlegroundPlayerMap::const_iterator citr = arena->GetPlayers().begin();
++					for (; citr != arena->GetPlayers().end(); ++citr)
++						if (Player* plrs = ObjectAccessor::FindPlayer(citr->first))
++							if (plrs->GetArenaTeamId(1) != firstTeamId)
++								mmrTwo = arena->GetArenaMatchmakerRating(citr->second.Team);
++				}
++				else if (arena->GetArenaType() == ARENA_TYPE_5v5)
++				{
++					mmr = arena->GetArenaMatchmakerRating(2);
++					firstTeamId = target->GetArenaTeamId(2);
++					Battleground::BattlegroundPlayerMap::const_iterator citr = arena->GetPlayers().begin();
++					for (; citr != arena->GetPlayers().end(); ++citr)
++						if (Player* plrs = ObjectAccessor::FindPlayer(citr->first))
++							if (plrs->GetArenaTeamId(2) != firstTeamId)
++								mmrTwo = arena->GetArenaMatchmakerRating(citr->second.Team);
++				}
++
++				if (IsTop == 1 && arena->GetArenaType() == ARENA_TYPE_2v2)
++				{
++					TypeOne++;
++					if (TypeOne > (page + 1) * GamesOnPage)
++					{
++						haveNextPage = true;
++						break;
++					}
++
++					if (TypeOne >= page * GamesOnPage)
++						player->ADD_GOSSIP_ITEM(GOSSIP_ICON_BATTLE, GetGamesStringData(arena, mmr, mmrTwo), GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_SELECTED_PLAYER + GetFirstPlayerGuid(arena));
++				}
++				else if (IsTop == 2 && arena->GetArenaType() == ARENA_TYPE_3v3)
++				{
++					TypeTwo++;
++					if (TypeTwo > (page + 1) * GamesOnPage)
++					{
++						haveNextPage = true;
++						break;
++					}
++
++					if (TypeTwo >= page * GamesOnPage)
++						player->ADD_GOSSIP_ITEM(GOSSIP_ICON_BATTLE, GetGamesStringData(arena, mmr, mmrTwo), GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_SELECTED_PLAYER + GetFirstPlayerGuid(arena));
++				}
++
++				else if (IsTop == 3 && arena->GetArenaType() == ARENA_TYPE_5v5)
++				{
++					TypeThree++;
++					if (TypeThree > (page + 1) * GamesOnPage)
++					{
++						haveNextPage = true;
++						break;
++					}
++					if (TypeThree >= page * GamesOnPage)
++						player->ADD_GOSSIP_ITEM(GOSSIP_ICON_BATTLE, GetGamesStringData(arena, mmr, mmrTwo), GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_SELECTED_PLAYER + GetFirstPlayerGuid(arena));
++				}
++			}
++		}
++
++		if (page > 0)
++		{
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Prev..", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_2V2_GAMES + page - 1);
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Prev..", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_3V3_GAMES + page - 1);
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Prev..", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_5V5_GAMES + page - 1);
++		}
++
++		if (haveNextPage)
++		{
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Next..", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_2V2_GAMES + page + 1);
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Next..", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_3V3_GAMES + page + 1);
++			player->ADD_GOSSIP_ITEM(GOSSIP_ICON_DOT, "Next..", GOSSIP_SENDER_MAIN, NPC_SPECTATOR_ACTION_5V5_GAMES + page + 1);
++		}
++	}
++
++	bool OnGossipSelectCode(Player* player, Creature* creature, uint32 sender, uint32 action, const char* code)
++	{
++		if (!player)
++			return true;
++
++		player->PlayerTalkClass->ClearMenus();
++		player->CLOSE_GOSSIP_MENU();
++		if (sender == GOSSIP_SENDER_MAIN)
++		{
++			switch (action)
++			{
++			case NPC_SPECTATOR_ACTION_SPECIFIC: // choosing a player
++
++				const char* plrName = code;
++
++				char playerName[50];
++				strcpy(playerName, plrName);
++
++				for (int i = 0; i < 13; i++)
++				{
++					if (playerName[i] == NULL)
++						break;
++					if (i == 0 && playerName[i] > 96)
++						playerName[0] -= 32;
++					else if (playerName[i] < 97)
++						playerName[i] += 32;
++				}
++
++				if (Player* target = ObjectAccessor::FindPlayerByName(playerName))
++				{
++					ChatHandler handler(player->GetSession());
++					char const* pTarget = target->GetName().c_str();
++					arena_spectator_commands::HandleSpectateCommand(&handler, pTarget);
++				}
++				ChatHandler(player->GetSession()).PSendSysMessage("Player is not online or does not exist.");
++				return true;
++			}
++		}
++
++		return false;
++	}
++};
++
++
++void AddSC_arena_spectator_script()
++{
++	new arena_spectator_commands();
++	new npc_arena_spectator();
++}
+\ No newline at end of file
+-- 
+2.1.4
+

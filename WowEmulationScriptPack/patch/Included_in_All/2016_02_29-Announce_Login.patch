@@ -1,0 +1,71 @@
+From 3f2bdac3d9565231dc9221e16afb56b8f12b37d7 Mon Sep 17 00:00:00 2001
+From: LordPsyan <realmsofwarcraft@gmail.com>
+Date: Mon, 29 Feb 2016 08:06:10 -0600
+Subject: [PATCH] 2016_02_29-Announce_Login
+
+---
+ src/server/scripts/Custom/announce_login.cpp       | 26 ++++++++++++++++++++++
+ src/server/scripts/Custom/custom_script_loader.cpp |  6 +++--
+ 2 files changed, 30 insertions(+), 2 deletions(-)
+ create mode 100644 src/server/scripts/Custom/announce_login.cpp
+
+diff --git a/src/server/scripts/Custom/announce_login.cpp b/src/server/scripts/Custom/announce_login.cpp
+new file mode 100644
+index 0000000..3eb37a9
+--- /dev/null
++++ b/src/server/scripts/Custom/announce_login.cpp
+@@ -0,0 +1,26 @@
++class announce_login : public PlayerScript
++{
++public:
++    announce_login() : PlayerScript("announce_login") { }
++
++    void OnLogin(Player* player, bool /*loginFirst*/)
++    {
++        if (player->GetTeam() == ALLIANCE)
++                {
++            std::ostringstream ss;
++                        ss << "|cff3DAEFF[ Login Announcer ]|cffFFD800 : Player|cff4CFF00 " << player->GetName() << " |cffFFD800Is Online. This Player is|cff0026FF Alliance";
++            sWorld->SendServerMessage(SERVER_MSG_STRING, ss.str().c_str());
++                }
++                else
++                {
++            std::ostringstream ss;
++                        ss << "|cff3DAEFF[ Login Announcer ]|cffFFD800 : Player|cff4CFF00 " << player->GetName() << " |cffFFD800Is Online. This Player is|cffFF0000 Horde" ;
++            sWorld->SendServerMessage(SERVER_MSG_STRING, ss.str().c_str());
++                }
++        }
++};
++
++void AddSC_announce_login()
++{
++    new announce_login;
++}
+\ No newline at end of file
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 0592bb5..1eafd5a 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -108,7 +108,8 @@
+ // start90
+ // start91
+ // start92
+-// start93
++// Announce Login
++void AddSC_announce_login();
+ // start94
+ // start95
+ // start96
+@@ -313,7 +314,8 @@ void AddCustomScripts()
+ // end90
+ // end91
+ // end92
+-// end93
++// Announce Login
++    AddSC_announce_login();
+ // end94
+ // end95
+ // end96
+-- 
+2.1.4
+

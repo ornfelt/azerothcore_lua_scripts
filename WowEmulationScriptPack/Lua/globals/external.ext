@@ -1,0 +1,18 @@
+-- filename.ext files are loaded before normal .lua files
+
+-- This file will contain functions that will act as shortcuts to commonly used code, but only for Lua code that have external dependencies that are not Eluna.
+-- Add a comment on the same line as the function start, AND EXPLAIN WHAT IT DOES AND WHY IT EXISTS!
+
+function SendToDiscordAlert(message)
+    -- Runs a shell script that pushes a message to a Discord webhook
+    -- Maybe one day I'll add the LUA Socket lib to Eluna.
+    os.execute("bash /home/lcore/bashwebhook/alert/discord.sh --text \"" .. message .. "\" &")
+    PrintInfo("We tried to send the following to Discord: " .. message)
+end
+
+function SendToDiscordLog(message)
+    -- Runs a shell script that pushes a message to a Discord webhook
+    -- Maybe one day I'll add the LUA Socket lib to Eluna.
+    os.execute("bash /home/lcore/bashwebhook/log/discord.sh --text \"" .. message .. "\" &")
+    PrintInfo("We tried to send the following to Discord: " .. message)
+end

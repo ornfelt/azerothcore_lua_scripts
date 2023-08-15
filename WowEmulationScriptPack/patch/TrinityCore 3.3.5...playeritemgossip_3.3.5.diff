@@ -1,0 +1,321 @@
+diff --git a/src/server/game/Handlers/MiscHandler.cpp b/src/server/game/Handlers/MiscHandler.cpp
+index f549f75b49f1..841742e34bb7 100644
+--- a/src/server/game/Handlers/MiscHandler.cpp
++++ b/src/server/game/Handlers/MiscHandler.cpp
+@@ -36,6 +36,7 @@
+ #include "GossipDef.h"
+ #include "Group.h"
+ #include "GuildMgr.h"
++#include "Item.h"
+ #include "Language.h"
+ #include "Log.h"
+ #include "MapManager.h"
+@@ -108,6 +109,7 @@ void WorldSession::HandleGossipSelectOptionOpcode(WorldPacket& recvData)
+     if (_player->PlayerTalkClass->GetGossipMenu().GetSenderGUID() != guid)
+         return;
+ 
++    Item* item = nullptr;
+     Creature* unit = nullptr;
+     GameObject* go = nullptr;
+     if (guid.IsCreatureOrVehicle())
+@@ -128,6 +130,23 @@ void WorldSession::HandleGossipSelectOptionOpcode(WorldPacket& recvData)
+             return;
+         }
+     }
++    else if (guid.IsItem())
++    {
++        item = _player->GetItemByGuid(guid);
++        if (!item || _player->IsBankPos(item->GetPos()))
++        {
++            TC_LOG_DEBUG("network", "WORLD: HandleGossipSelectOptionOpcode - %s not found.", guid.ToString().c_str());
++            return;
++        }
++    }
++    else if (guid.IsPlayer())
++    {
++        if (guid != _player->GetGUID() || menuId != _player->PlayerTalkClass->GetGossipMenu().GetMenuId())
++        {
++            TC_LOG_DEBUG("network", "WORLD: HandleGossipSelectOptionOpcode - %s not found.", guid.ToString().c_str());
++            return;
++        }
++    }
+     else
+     {
+         TC_LOG_DEBUG("network", "WORLD: HandleGossipSelectOptionOpcode - unsupported %s.", guid.ToString().c_str());
+@@ -155,11 +174,19 @@ void WorldSession::HandleGossipSelectOptionOpcode(WorldPacket& recvData)
+             if (!unit->AI()->OnGossipSelectCode(_player, menuId, gossipListId, code.c_str()))
+                 _player->OnGossipSelect(unit, gossipListId, menuId);
+         }
+-        else
++        else if (go)
+         {
+             if (!go->AI()->OnGossipSelectCode(_player, menuId, gossipListId, code.c_str()))
+                 _player->OnGossipSelect(go, gossipListId, menuId);
+         }
++        else if (item)
++        {
++            sScriptMgr->OnGossipSelectCode(_player, item, _player->PlayerTalkClass->GetGossipOptionSender(gossipListId), _player->PlayerTalkClass->GetGossipOptionAction(gossipListId), code.c_str());
++        }
++        else
++        {
++            sScriptMgr->OnGossipSelectCode(_player, menuId, _player->PlayerTalkClass->GetGossipOptionSender(gossipListId), _player->PlayerTalkClass->GetGossipOptionAction(gossipListId), code.c_str());
++        }
+     }
+     else
+     {
+@@ -168,11 +195,19 @@ void WorldSession::HandleGossipSelectOptionOpcode(WorldPacket& recvData)
+             if (!unit->AI()->OnGossipSelect(_player, menuId, gossipListId))
+                 _player->OnGossipSelect(unit, gossipListId, menuId);
+         }
+-        else
++        else if (go)
+         {
+             if (!go->AI()->OnGossipSelect(_player, menuId, gossipListId))
+                 _player->OnGossipSelect(go, gossipListId, menuId);
+         }
++        else if (item)
++        {
++            sScriptMgr->OnGossipSelect(_player, item, _player->PlayerTalkClass->GetGossipOptionSender(gossipListId), _player->PlayerTalkClass->GetGossipOptionAction(gossipListId));
++        }
++        else
++        {
++            sScriptMgr->OnGossipSelect(_player, menuId, _player->PlayerTalkClass->GetGossipOptionSender(gossipListId), _player->PlayerTalkClass->GetGossipOptionAction(gossipListId));
++        }
+     }
+ }
+ 
+diff --git a/src/server/game/Scripting/ScriptMgr.cpp b/src/server/game/Scripting/ScriptMgr.cpp
+index be8494df7ebe..8c6aa20bc7ea 100644
+--- a/src/server/game/Scripting/ScriptMgr.cpp
++++ b/src/server/game/Scripting/ScriptMgr.cpp
+@@ -1574,6 +1574,24 @@ bool ScriptMgr::OnCastItemCombatSpell(Player* player, Unit* victim, SpellInfo co
+     return tmpscript->OnCastItemCombatSpell(player, victim, spellInfo, item);
+ }
+ 
++void ScriptMgr::OnGossipSelect(Player* player, Item* item, uint32 sender, uint32 action)
++{
++    ASSERT(player);
++    ASSERT(item);
++
++    GET_SCRIPT(ItemScript, item->GetScriptId(), tmpscript);
++    tmpscript->OnGossipSelect(player, item, sender, action);
++}
++
++void ScriptMgr::OnGossipSelectCode(Player* player, Item* item, uint32 sender, uint32 action, const char* code)
++{
++    ASSERT(player);
++    ASSERT(item);
++
++    GET_SCRIPT(ItemScript, item->GetScriptId(), tmpscript);
++    tmpscript->OnGossipSelectCode(player, item, sender, action, code);
++}
++
+ CreatureAI* ScriptMgr::GetCreatureAI(Creature* creature)
+ {
+     ASSERT(creature);
+@@ -1958,6 +1976,16 @@ void ScriptMgr::OnPlayerUpdateZone(Player* player, uint32 newZone, uint32 newAre
+     FOREACH_SCRIPT(PlayerScript)->OnUpdateZone(player, newZone, newArea);
+ }
+ 
++void ScriptMgr::OnGossipSelect(Player* player, uint32 menu_id, uint32 sender, uint32 action)
++{
++    FOREACH_SCRIPT(PlayerScript)->OnGossipSelect(player, menu_id, sender, action);
++}
++
++void ScriptMgr::OnGossipSelectCode(Player* player, uint32 menu_id, uint32 sender, uint32 action, const char* code)
++{
++    FOREACH_SCRIPT(PlayerScript)->OnGossipSelectCode(player, menu_id, sender, action, code);
++}
++
+ void ScriptMgr::OnQuestStatusChange(Player* player, uint32 questId)
+ {
+     FOREACH_SCRIPT(PlayerScript)->OnQuestStatusChange(player, questId);
+diff --git a/src/server/game/Scripting/ScriptMgr.h b/src/server/game/Scripting/ScriptMgr.h
+index b0f641b80e42..d436a8f98257 100644
+--- a/src/server/game/Scripting/ScriptMgr.h
++++ b/src/server/game/Scripting/ScriptMgr.h
+@@ -388,6 +388,12 @@ class TC_GAME_API ItemScript : public ScriptObject
+ 
+         // Called before casting a combat spell from this item (chance on hit spells of item template, can be used to prevent cast if returning false)
+         virtual bool OnCastItemCombatSpell(Player* /*player*/, Unit* /*victim*/, SpellInfo const* /*spellInfo*/, Item* /*item*/) { return true; }
++
++        // Called when a player selects an option in an item gossip window
++        virtual void OnGossipSelect(Player* /*player*/, Item* /*item*/, uint32 /*sender*/, uint32 /*action*/) { }
++
++        // Called when a player selects an option in an item gossip window
++        virtual void OnGossipSelectCode(Player* /*player*/, Item* /*item*/, uint32 /*sender*/, uint32 /*action*/, const char* /*code*/) { }
+ };
+ 
+ class TC_GAME_API UnitScript : public ScriptObject
+@@ -714,6 +720,12 @@ class TC_GAME_API PlayerScript : public ScriptObject
+         // Called when a player changes to a new map (after moving to new map)
+         virtual void OnMapChanged(Player* /*player*/) { }
+ 
++        // Called when a player selects an option in a player gossip window
++        virtual void OnGossipSelect(Player* /*player*/, uint32 /*menu_id*/, uint32 /*sender*/, uint32 /*action*/) { }
++
++        // Called when a player selects an option in a player gossip window
++        virtual void OnGossipSelectCode(Player* /*player*/, uint32 /*menu_id*/, uint32 /*sender*/, uint32 /*action*/, const char* /*code*/) { }
++
+         // Called when a player obtains progress on a quest's objective
+         virtual void OnQuestObjectiveProgress(Player* /*player*/, Quest const* /*quest*/, uint32 /*objectiveIndex*/, uint16 /*progress*/) { }
+ 
+@@ -935,6 +947,8 @@ class TC_GAME_API ScriptMgr
+         bool OnItemExpire(Player* player, ItemTemplate const* proto);
+         bool OnItemRemove(Player* player, Item* item);
+         bool OnCastItemCombatSpell(Player* player, Unit* victim, SpellInfo const* spellInfo, Item* item);
++        void OnGossipSelect(Player* player, Item* item, uint32 sender, uint32 action);
++        void OnGossipSelectCode(Player* player, Item* item, uint32 sender, uint32 action, const char* code);
+ 
+     public: /* CreatureScript */
+ 
+@@ -1036,6 +1050,8 @@ class TC_GAME_API ScriptMgr
+         void OnPlayerSave(Player* player);
+         void OnPlayerBindToInstance(Player* player, Difficulty difficulty, uint32 mapid, bool permanent, uint8 extendState);
+         void OnPlayerUpdateZone(Player* player, uint32 newZone, uint32 newArea);
++        void OnGossipSelect(Player* player, uint32 menu_id, uint32 sender, uint32 action);
++        void OnGossipSelectCode(Player* player, uint32 menu_id, uint32 sender, uint32 action, const char* code);
+         void OnQuestObjectiveProgress(Player* player, Quest const* quest, uint32 objectiveIndex, uint16 progress);
+         void OnQuestStatusChange(Player* player, uint32 questId);
+         void OnMovieComplete(Player* player, uint32 movieId);
+diff --git a/src/server/scripts/Custom/Player and Item Gossip/ExampleItemGossip.cpp b/src/server/scripts/Custom/Player and Item Gossip/ExampleItemGossip.cpp
+new file mode 100644
+index 000000000000..1aeadaa35801
+--- /dev/null
++++ b/src/server/scripts/Custom/Player and Item Gossip/ExampleItemGossip.cpp	
+@@ -0,0 +1,43 @@
++#include "Define.h"
++#include "GossipDef.h"
++#include "Item.h"
++#include "Player.h"
++#include "ScriptedGossip.h"
++#include "ScriptMgr.h"
++#include "Spell.h"
++
++class example_ItemGossip : public ItemScript
++{
++public:
++    example_ItemGossip() : ItemScript("example_ItemGossip") { }
++
++    bool OnUse(Player* player, Item* item, SpellCastTargets const& /*targets*/) override // Any hook here
++    {
++        ClearGossipMenuFor(player); // Clears old options
++        AddGossipItemFor(player, 0, "Morph", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 1);
++        AddGossipItemFor(player, 0, "Demorph", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 2);
++        SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, item->GetGUID());
++        return false; // Cast the spell on use normally
++    }
++
++    void OnGossipSelect(Player* player, Item* /*item*/, uint32 /*sender*/, uint32 action) override
++    {
++        ClearGossipMenuFor(player);
++
++        switch (action)
++        {
++            case GOSSIP_ACTION_INFO_DEF + 1:
++                player->SetDisplayId(999);
++                break;
++            case GOSSIP_ACTION_INFO_DEF + 2:
++                player->DeMorph();
++                break;
++        }
++        CloseGossipMenuFor(player);
++    }
++};
++
++void AddSC_example_ItemGossip() // Add to scriptloader normally
++{
++    new example_ItemGossip();
++}
+diff --git a/src/server/scripts/Custom/Player and Item Gossip/ExamplePlayerGossip.cpp b/src/server/scripts/Custom/Player and Item Gossip/ExamplePlayerGossip.cpp
+new file mode 100644
+index 000000000000..100717d5d130
+--- /dev/null
++++ b/src/server/scripts/Custom/Player and Item Gossip/ExamplePlayerGossip.cpp	
+@@ -0,0 +1,46 @@
++#include "Define.h"
++#include "GossipDef.h"
++#include "Player.h"
++#include "ScriptedGossip.h"
++#include "ScriptMgr.h"
++
++#define MENU_ID 123 // Our menuID used to match the sent menu to select hook (playerscript)
++
++class example_PlayerGossip : public PlayerScript
++{
++public: 
++    example_PlayerGossip() : PlayerScript("example_PlayerGossip") {}
++
++    void OnLevelChanged(Player* player, uint8 /*oldlevel*/) override            // Any hook here
++    {
++        ClearGossipMenuFor(player);                              // Clears old options
++        AddGossipItemFor(player, 0, "Morph", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF+1);
++        AddGossipItemFor(player, 0, "Demorph", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF+2);
++                                                                            // SetMenuId must be after clear menu and before send menu!!
++        player->PlayerTalkClass->GetGossipMenu().SetMenuId(MENU_ID);        // Sets menu ID so we can identify our menu in Select hook. Needs unique number for the menu
++        SendGossipMenuFor(player, DEFAULT_GOSSIP_MESSAGE, player->GetGUID());
++    }
++
++    void OnGossipSelect(Player* player, uint32 menu_id, uint32 /*sender*/, uint32 action) override
++    {
++        if (menu_id != MENU_ID) // Not the menu coded here? stop.
++            return;
++        ClearGossipMenuFor(player);
++
++        switch(action)
++        {
++        case GOSSIP_ACTION_INFO_DEF+1:
++            player->SetDisplayId(999);
++            break;
++        case GOSSIP_ACTION_INFO_DEF+2:
++            player->DeMorph();
++            break;
++        }
++        CloseGossipMenuFor(player);
++    }
++};
++
++void AddSC_example_PlayerGossip() // Add to scriptloader normally
++{
++    new example_PlayerGossip();
++}
+diff --git a/src/server/scripts/Custom/Player and Item Gossip/README.md b/src/server/scripts/Custom/Player and Item Gossip/README.md
+new file mode 100644
+index 000000000000..e3eafb8b459b
+--- /dev/null
++++ b/src/server/scripts/Custom/Player and Item Gossip/README.md	
+@@ -0,0 +1,34 @@
++# Player and Item Gossip [![Build Status](https://travis-ci.org/Rochet2/TrinityCore.svg?branch=playeritemgossip_3.3.5)](https://travis-ci.org/Rochet2/TrinityCore)
++
++#### About
++Enables Item and Player gossip for TrinityCore.<br />
++Source: http://rochet2.github.io/Player-and-Item-Gossip.html
++
++#### Installation
++
++Available as:
++- Direct merge: https://github.com/Rochet2/TrinityCore/tree/playeritemgossip_3.3.5
++- Diff: https://github.com/Rochet2/TrinityCore/compare/TrinityCore:3.3.5...playeritemgossip_3.3.5.diff
++- Diff in github view: https://github.com/Rochet2/TrinityCore/compare/TrinityCore:3.3.5...playeritemgossip_3.3.5
++
++Using direct merge:
++- open git bash to source location
++- do `git remote add rochet2 https://github.com/Rochet2/TrinityCore.git`
++- do `git pull rochet2 playeritemgossip_3.3.5`
++- use cmake and compile
++
++Using diff:
++- DO NOT COPY THE DIFF DIRECTLY! It causes apply to fail.
++- download the diff by __right clicking__ the link and select __Save link as__
++- place the downloaded `playeritemgossip_3.3.5.diff` to the source root folder
++- open git bash to source location
++- do `git apply playeritemgossip_3.3.5.diff`
++- use cmake and compile
++
++#### Usage
++Make a gossip script for player or item like the example scripts.<br/>
++If making item script, add the scriptname to DB.<br/>
++Compile and test.
++
++#### Bugs and Contact
++Report issues and similar to https://rochet2.github.io/

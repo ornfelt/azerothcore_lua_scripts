@@ -1,0 +1,15 @@
+Edit CharTitles.dbc and add this line at the end.
+edit ID/MaskID where needed.
+
+200,0,"<Prem>%s",,,,,,,,,,,,,,,,0xFF01FE,"<Prem>%s",,,,,,,,,,,,,,,,0xFF01FE,143,
+
+										
+title id : 200
+MaskID : 143
+
+worldserver.conf
+PREM.TITLE_ID = 200
+PREM.TITLE_MASK_ID = 143
+edit and change ID/MaskID where needed.
+
+you will need to add this to your custom patch for users to see the custom title.

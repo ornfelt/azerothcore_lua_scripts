@@ -1,0 +1,1414 @@
+diff --git a/src/server/game/Entities/GameObject/GOMove.cpp b/src/server/game/Entities/GameObject/GOMove.cpp
+new file mode 100644
+index 000000000000..67c3b3a24613
+--- /dev/null
++++ b/src/server/game/Entities/GameObject/GOMove.cpp
+@@ -0,0 +1,225 @@
++/*
++GOMove By Rochet2
++Original idea by Mordred
++
++http://rochet2.github.io/
++*/
++
++#include <math.h>
++#include <set>
++#include <sstream>
++#include <string>
++#include "Chat.h"
++#include "GameObject.h"
++#include "Language.h"
++#include "Map.h"
++#include "MapManager.h"
++#include "Object.h"
++#include "ObjectMgr.h"
++#include "Player.h"
++#include "Position.h"
++#include "ScriptMgr.h"
++#include "WorldPacket.h"
++#include "GOMove.h"
++#include "Cell.h"
++#include "CellImpl.h"
++#include "GridNotifiers.h"
++#include "GridNotifiersImpl.h"
++#include "ObjectAccessor.h"
++#include "DBCStores.h"
++
++GameObjectStore GOMove::Store;
++
++void GOMove::SendAddonMessage(Player * player, const char * msg)
++{
++    if (!player || !msg)
++        return;
++
++    char buf[256];
++    snprintf(buf, 256, "GOMOVE\t%s", msg);
++
++    // copy paste addon message packet
++    WorldPacket data; // Needs a custom built packet since TC doesnt send guid
++    uint32 messageLength = static_cast<uint32>(std::strlen(buf) + 1);
++    data.Initialize(SMSG_MESSAGECHAT, 100);
++    data << uint8(CHAT_MSG_SYSTEM);
++    data << int32(LANG_ADDON);
++    data << uint64(player->GetGUID());
++    data << uint32(0);
++    data << uint64(player->GetGUID());
++    data << uint32(messageLength);
++    data << buf;
++    data << uint8(0);
++    player->GetSession()->SendPacket(&data);
++}
++
++GameObject * GOMove::GetGameObject(Player * player, ObjectGuid::LowType lowguid)
++{
++    return ChatHandler(player->GetSession()).GetObjectFromPlayerMapByDbGuid(lowguid);
++}
++
++void GOMove::SendAdd(Player * player, ObjectGuid::LowType lowguid)
++{
++    GameObjectData const* data = sObjectMgr->GetGameObjectData(lowguid);
++    if (!data)
++        return;
++    GameObjectTemplate const* temp = sObjectMgr->GetGameObjectTemplate(data->id);
++    if (!temp)
++        return;
++    char msg[256];
++    snprintf(msg, 256, "ADD|%u|%s|%u", lowguid, temp->name.c_str(), data->id);
++    SendAddonMessage(player, msg);
++}
++
++void GOMove::SendRemove(Player * player, ObjectGuid::LowType lowguid)
++{
++    char msg[256];
++    snprintf(msg, 256, "REMOVE|%u||0", lowguid);
++
++    SendAddonMessage(player, msg);
++}
++
++void GOMove::DeleteGameObject(GameObject * object)
++{
++    if (!object)
++        return;
++
++    // copy paste .gob del command
++    auto spawnid = object->GetSpawnId();
++    if (ObjectGuid ownerGuid = object->GetOwnerGUID())
++    {
++        Unit* owner = ObjectAccessor::GetUnit(*object, ownerGuid);
++        if (owner && ownerGuid.IsPlayer())
++            owner->RemoveGameObject(object, false);
++    }
++    GameObject::DeleteFromDB(spawnid);
++}
++
++GameObject * GOMove::SpawnGameObject(Player* player, float x, float y, float z, float o, uint32 p, uint32 entry)
++{
++    if (!player || !entry)
++        return nullptr;
++
++    if (!MapManager::IsValidMapCoord(player->GetMapId(), x, y, z))
++        return nullptr;
++
++    Position pos(x, y, z, o);
++
++    // copy paste .gob add command
++    GameObjectTemplate const* objectInfo = sObjectMgr->GetGameObjectTemplate(entry);
++    if (!objectInfo)
++        return nullptr;
++
++    if (objectInfo->displayId && !sGameObjectDisplayInfoStore.LookupEntry(objectInfo->displayId))
++        return nullptr;
++
++    Map* map = player->GetMap();
++
++    GameObject* object = new GameObject();
++    ObjectGuid::LowType guidLow = map->GenerateLowGuid<HighGuid::GameObject>();
++
++    QuaternionData rot = QuaternionData::fromEulerAnglesZYX(pos.GetOrientation(), 0.f, 0.f);
++    if (!object->Create(guidLow, objectInfo->entry, map, player->GetPhaseMaskForSpawn(), pos, rot, 255, GO_STATE_READY))
++    {
++        delete object;
++        return nullptr;
++    }
++
++    // fill the gameobject data and save to the db
++    object->SaveToDB(map->GetId(), (1 << map->GetSpawnMode()), p);
++    guidLow = object->GetSpawnId();
++
++    // delete the old object and do a clean load from DB with a fresh new GameObject instance.
++    // this is required to avoid weird behavior and memory leaks
++    delete object;
++
++    object = new GameObject();
++    // this will generate a new guid if the object is in an instance
++    if (!object->LoadFromDB(guidLow, map, true))
++    {
++        delete object;
++        return nullptr;
++    }
++
++    /// @todo is it really necessary to add both the real and DB table guid here ?
++    sObjectMgr->AddGameobjectToGrid(guidLow, sObjectMgr->GetGameObjectData(guidLow));
++
++    if (object)
++        SendAdd(player, guidLow);
++    return object;
++}
++
++GameObject * GOMove::MoveGameObject(Player* player, float x, float y, float z, float o, uint32 p, ObjectGuid::LowType lowguid)
++{
++    if (!player)
++        return nullptr;
++    GameObject* object = ChatHandler(player->GetSession()).GetObjectFromPlayerMapByDbGuid(lowguid);
++    if (!object)
++    {
++        SendRemove(player, lowguid);
++        return nullptr;
++    }
++
++    Map* map = object->GetMap();
++    if (!MapManager::IsValidMapCoord(object->GetMapId(), x, y, z))
++        return nullptr;
++
++    // copy paste .gob move command
++    // copy paste .gob turn command
++    object->Relocate(x, y, z, o);
++    object->SetLocalRotationAngles(o, 0, 0);
++    object->SaveToDB();
++
++    // Generate a completely new spawn with new guid
++    // 3.3.5a client caches recently deleted objects and brings them back to life
++    // when CreateObject block for this guid is received again
++    // however it entirely skips parsing that block and only uses already known location
++    object->Delete();
++
++    object = new GameObject();
++    if (!object->LoadFromDB(lowguid, map, true))
++    {
++        delete object;
++        SendRemove(player, lowguid);
++        return nullptr;
++    }
++
++    // copy paste from .gob phase command
++    object->SetPhaseMask(p, true);
++    object->SaveToDB();
++
++    return object;
++}
++
++void GameObjectStore::SpawnQueAdd(ObjectGuid const & guid, uint32 entry)
++{
++    WriteGuard lock(_objectsToSpawnLock);
++    objectsToSpawn[guid] = entry;
++}
++
++void GameObjectStore::SpawnQueRem(ObjectGuid const & guid)
++{
++    WriteGuard lock(_objectsToSpawnLock);
++    objectsToSpawn.erase(guid);
++}
++
++uint32 GameObjectStore::SpawnQueGet(ObjectGuid const & guid)
++{
++    WriteGuard lock(_objectsToSpawnLock);
++    auto it = objectsToSpawn.find(guid);
++    if (it != objectsToSpawn.end())
++        return it->second;
++    return 0;
++}
++
++std::list<GameObject*> GOMove::GetNearbyGameObjects(Player* player, float range)
++{
++    float x, y, z;
++    player->GetPosition(x, y, z);
++
++    std::list<GameObject*> objects;
++    Trinity::GameObjectInRangeCheck check(x, y, z, range);
++    Trinity::GameObjectListSearcher<Trinity::GameObjectInRangeCheck> searcher(player, objects, check);
++    Cell::VisitGridObjects(player, searcher, SIZE_OF_GRIDS);
++    return objects;
++}
+diff --git a/src/server/game/Entities/GameObject/GOMove.h b/src/server/game/Entities/GameObject/GOMove.h
+new file mode 100644
+index 000000000000..ad441223905a
+--- /dev/null
++++ b/src/server/game/Entities/GameObject/GOMove.h
+@@ -0,0 +1,51 @@
++/*
++GOMove By Rochet2
++Original idea by Mordred
++
++http://rochet2.github.io/
++*/
++
++#ifndef GOMOVE_H
++#define GOMOVE_H
++
++#include "Define.h"
++#include "ObjectGuid.h"
++#include <memory>
++#include <mutex>
++#include <unordered_map>
++
++class Player;
++class GameObject;
++
++class TC_GAME_API GameObjectStore
++{
++public:
++    typedef std::mutex LockType;
++    typedef std::lock_guard<LockType> WriteGuard;
++
++    void SpawnQueAdd(ObjectGuid const& guid, uint32 entry);
++    void SpawnQueRem(ObjectGuid const& guid);
++    uint32 SpawnQueGet(ObjectGuid const& guid);
++
++private:
++    LockType _objectsToSpawnLock;
++    std::unordered_map<ObjectGuid, uint32> objectsToSpawn;
++};
++
++class TC_GAME_API GOMove
++{
++public:
++    static GameObjectStore Store;
++
++    static void SendAdd(Player* player, ObjectGuid::LowType lowguid);
++    static void SendRemove(Player* player, ObjectGuid::LowType lowguid);
++    static void SendAddonMessage(Player* player, const char* msg);
++
++    static void DeleteGameObject(GameObject* object);
++    static GameObject* GetGameObject(Player* player, ObjectGuid::LowType lowguid);
++    static GameObject* SpawnGameObject(Player* player, float x, float y, float z, float o, uint32 p, uint32 entry);
++    static GameObject* MoveGameObject(Player* player, float x, float y, float z, float o, uint32 p, ObjectGuid::LowType lowguid);
++    static std::list<GameObject*> GetNearbyGameObjects(Player* player, float range);
++};
++
++#endif
+diff --git a/src/server/scripts/Custom/GOMove/GOMove/GOMove.toc b/src/server/scripts/Custom/GOMove/GOMove/GOMove.toc
+new file mode 100644
+index 000000000000..8fd4a9c3b9b4
+--- /dev/null
++++ b/src/server/scripts/Custom/GOMove/GOMove/GOMove.toc
+@@ -0,0 +1,10 @@
++## Interface: 30300
++## Title: GOMove UI Interface Addon
++## Author: Rochet2
++
++## SavedVariables: GOMoveSV
++# change SavedVariables to SavedVariablesPerCharacter if you want favourite list per char
++
++GOMoveFunctions.lua
++GOMoveScripts.lua
++MapButton.xml
+diff --git a/src/server/scripts/Custom/GOMove/GOMove/GOMoveFunctions.lua b/src/server/scripts/Custom/GOMove/GOMove/GOMoveFunctions.lua
+new file mode 100644
+index 000000000000..36ad785572eb
+--- /dev/null
++++ b/src/server/scripts/Custom/GOMove/GOMove/GOMoveFunctions.lua
+@@ -0,0 +1,231 @@
++GOMove = {Frames = {}, Inputs = {}}
++
++function GOMove:Update()
++    for k, Frame in ipairs(GOMove.Frames) do
++        if(Frame.Update) then
++            Frame:Update()
++        end
++    end
++end
++
++function GOMove:CreateFrame(name, width, height, DataTable, both)
++    local Frame = CreateFrame("Frame", name, UIParent)
++    Frame:SetMovable(true)
++    Frame:EnableMouse(true)
++    Frame:SetClampedToScreen(true);
++    Frame:RegisterForDrag("LeftButton")
++    Frame:SetScript("OnDragStart", Frame.StartMoving)
++    Frame:SetScript("OnDragStop", Frame.StopMovingOrSizing)
++    Frame:SetScript("OnHide", Frame.StopMovingOrSizing)
++    Frame:SetSize(width, height)
++    Frame:SetPoint("CENTER")
++    Frame.ButtonCount = math.floor((height-32)/16)
++    Frame:SetBackdrop({
++        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", tile = true, tileSize = 16,
++        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 16,
++        insets = { left = 4, right = 4, top = 4, bottom = 4 },
++    })
++    local NameFrame = CreateFrame("Frame", name.."_Name", Frame)
++    NameFrame:SetHeight(16)
++    NameFrame:SetWidth(width-16)
++    NameFrame.text = NameFrame:CreateFontString()
++    NameFrame.text:SetFont("Fonts\\MORPHEUS.ttf", 14)
++    NameFrame.text:SetTextColor(0.8, 0.2, 0.2)
++    NameFrame.text:SetJustifyH("LEFT")
++    NameFrame.text:SetAllPoints()
++    NameFrame.text:SetText(name:gsub("_", " "))
++    NameFrame:SetPoint("TOPLEFT", Frame, "TOPLEFT", 8, -8)
++    NameFrame:Show()
++    Frame.NameFrame = NameFrame
++    local CloseButton = CreateFrame("Button", name.."_CloseButton", Frame)
++    CloseButton:SetSize(25, 25)
++    CloseButton:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
++    CloseButton:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
++    CloseButton:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
++    CloseButton:SetPoint("TOPRIGHT", Frame, "TOPRIGHT", 0, 0)
++    CloseButton:SetScript("OnClick", function() Frame:Hide() end)
++
++    if(DataTable) then
++        Frame.DataTable = DataTable
++        function Frame:Update()
++            local maxValue = #DataTable
++            FauxScrollFrame_Update(self.ScrollBar, maxValue, self.ButtonCount, 16, nil, nil, nil, nil, nil, nil, true)
++            local offset = FauxScrollFrame_GetOffset(self.ScrollBar)
++            for Button = 1, self.ButtonCount do
++                local value = Button + offset
++                if value <= maxValue then
++                    local Button = self.Buttons[Button]
++                    local Label = DataTable[value][1]
++                    if(DataTable.NameWidth and strlen(DataTable[value][1]) > DataTable.NameWidth) then
++                        Label = DataTable[value][1]:sub(0, DataTable.NameWidth-2)..".."
++                    end
++                    if(not both) then
++                        Button:SetText(Label)
++                    else
++                        Button:SetText(DataTable[value][2].." "..Label)
++                    end
++                    Button.MiscButton:Show()
++                    Button:Show()
++                else
++                    self.Buttons[Button]:Hide()
++                    self.Buttons[Button].MiscButton:Hide()
++                end
++                if(Frame.UpdateScript) then
++                    Frame:UpdateScript(Button)
++                end
++            end
++        end
++
++        local ScrollBar = CreateFrame("ScrollFrame", "$parent_ScrollBar", Frame, "FauxScrollFrameTemplate")
++        ScrollBar:SetPoint("TOPLEFT", 0, -24) -- -8
++        ScrollBar:SetPoint("BOTTOMRIGHT", -30, 8)
++
++        ScrollBar:SetScript("OnVerticalScroll", function(self, offset)
++            self.offset = math.floor(offset / 16 + 0.5)
++            Frame:Update()
++        end)
++
++        ScrollBar:SetScript("OnShow", function()
++            Frame:Update()
++        end)
++
++        Frame.ScrollBar = ScrollBar
++
++        local Buttons = setmetatable({}, { __index = function(t, i)
++            local Button = CreateFrame("Button", "$parent_Button"..i, Frame)
++            Button:SetSize(width-55, 16)
++            Button:SetNormalFontObject(GameFontHighlightLeft)
++            if i == 1 then
++                Button:SetPoint("TOPLEFT", ScrollBar, 8, 0)
++            else
++                Button:SetPoint("TOPLEFT", Frame.Buttons[i-1], "BOTTOMLEFT")
++            end
++            Button:SetScript("OnClick", function(self) if(Frame.ButtonOnClick) then Frame:ButtonOnClick(i) end end)
++            local MiscButton = CreateFrame("Button", "$parent_Button"..i.."_Misc", Frame)
++            MiscButton:SetSize(16, 16)
++            MiscButton:SetNormalTexture("Interface\\Buttons\\UI-MinusButton-Disabled")
++            MiscButton:SetPushedTexture("Interface\\Buttons\\UI-MinusButton-Down")
++            MiscButton:SetHighlightTexture("Interface\\Buttons\\UI-MinusButton-Up")
++            MiscButton:SetNormalFontObject(GameFontHighlightLeft)
++            MiscButton:SetPoint("TOPLEFT", Button, "TOPRIGHT", 0, 0)
++            MiscButton:SetScript("OnClick", function(self) if(Frame.MiscOnClick) then Frame:MiscOnClick(i) end end)
++            Button.MiscButton = MiscButton
++            rawset(t, i, Button)
++            return Button
++        end })
++
++        Frame.Buttons = Buttons
++        Frame:Update()
++    end
++    function Frame:Position(FramePoint, Parent, ParentPoint, Ox, Oy)
++        Frame.Default = {FramePoint, Parent, ParentPoint, Ox, Oy}
++        Frame:SetPoint(FramePoint, Parent, ParentPoint, Ox, Oy)
++    end
++    table.insert(GOMove.Frames, Frame)
++    return Frame
++end
++
++function GOMove:CreateButton(Frame, name, width, height, Ox, Oy)
++    local Button = CreateFrame("Button", Frame:GetName().."_"..name, Frame, "UIPanelButtonTemplate")
++    Button:SetSize(width, height)
++    Button:SetText(name)
++    Button:SetPoint("TOP", Frame, "TOP", Ox, Oy-10)
++    Button:SetScript("OnClick", function(self) if(self.OnClick) then self:OnClick(Frame) end end)
++    return Button
++end
++
++function GOMove:CreateInput(Frame, name, width, height, Ox, Oy, letters, default)
++    local Input = CreateFrame("EditBox", Frame:GetName().."_"..name, Frame, "InputBoxTemplate")
++    Input:SetSize(width, height)
++    Input:SetPoint("TOP", Frame, "TOP", Ox+2.5, Oy-10)
++    Input:SetAutoFocus(false)
++    Input:SetNumeric(true)
++    Input:SetMaxLetters(letters)
++    Input:SetScript("OnEnterPressed", function() Input:ClearFocus() end)
++    Input:SetScript("OnEscapePressed", function() Input:ClearFocus() end)
++    if(default) then
++        Input:SetNumber(default)
++    end
++    table.insert(GOMove.Inputs, Input)
++    return Input
++end
++
++local trinityID = {}
++local TIDs = 0
++local function TID(name, reqguid, onetime)
++    trinityID[name] = {TIDs, reqguid, onetime}
++    TIDs = TIDs+1
++end
++
++-- NEED to be in order(same as core)
++TID("TEST"              ,   false   ,   true    ) -- unused
++TID("SELECTNEAR"        ,   false   ,   true    )
++TID("DELETE"            ,   true    ,   true    )
++TID("X"                 ,   true    ,   false   )
++TID("Y"                 ,   true    ,   false   )
++TID("Z"                 ,   true    ,   false   )
++TID("O"                 ,   true    ,   false   )
++TID("GROUND"            ,   true    ,   false   )
++TID("FLOOR"             ,   true    ,   false   )
++TID("RESPAWN"           ,   true    ,   true    )
++TID("GOTO"              ,   true    ,   true    )
++TID("FACE"              ,   false   ,   true    )
++--TID("SAVE"            ,   true    ,   true    )
++
++TID("SPAWN"             ,   false   ,   true    )
++TID("NORTH"             ,   true    ,   false   )
++TID("EAST"              ,   true    ,   false   )
++TID("SOUTH"             ,   true    ,   false   )
++TID("WEST"              ,   true    ,   false   )
++TID("NORTHEAST"         ,   true    ,   false   )
++TID("NORTHWEST"         ,   true    ,   false   )
++TID("SOUTHEAST"         ,   true    ,   false   )
++TID("SOUTHWEST"         ,   true    ,   false   )
++TID("UP"                ,   true    ,   false   )
++TID("DOWN"              ,   true    ,   false   )
++TID("LEFT"              ,   true    ,   false   )
++TID("RIGHT"             ,   true    ,   false   )
++TID("PHASE"             ,   true    ,   false   )
++TID("SELECTALLNEAR"     ,   false   ,   true    )
++TID("SPAWNSPELL"        ,   false   ,   true    )
++--TID("COPYSEL"         ,   false   ,   false   )
++--TID("COPY"            ,   false   ,   false   )
++--TID("BIG"             ,   false   ,   false   )
++--TID("SMALL"           ,   false   ,   false   )
++
++function GOMove:Move(ID, input)
++    if(UnitIsDeadOrGhost("player")) then
++        NotWhileDeadError()
++        return
++    end
++    for k, inputfield in ipairs(GOMove.Inputs) do
++        inputfield:ClearFocus()
++    end
++    local ARG = 0
++    if(input) then
++        ARG = input
++    end
++    if(not trinityID[ID] or not tonumber(trinityID[ID][1])) then
++        return
++    end
++    if(not trinityID[ID][2]) then
++        SendChatMessage(".gomove "..trinityID[ID][1].." "..(0).." "..ARG)
++    elseif(trinityID[ID][3] and tonumber(ARG) and tonumber(ARG) > 0) then
++        SendChatMessage(".gomove "..trinityID[ID][1].." "..ARG.." "..(0))
++    else
++        local did = false
++        for GUID, NAME in pairs(GOMove.Selected) do
++            if(tonumber(GUID)) then
++                SendChatMessage(".gomove "..trinityID[ID][1].." "..GUID.." "..ARG)
++                if(ID == "GOTO") then
++                    return
++                end
++                did = true
++            end
++        end
++        if(not did) then
++            UIErrorsFrame:AddMessage("No objects selected", 1.0, 0.0, 0.0, 53, 2)
++            return
++        end
++    end
++end
+diff --git a/src/server/scripts/Custom/GOMove/GOMove/GOMoveScripts.lua b/src/server/scripts/Custom/GOMove/GOMove/GOMoveScripts.lua
+new file mode 100644
+index 000000000000..8f651576dc24
+--- /dev/null
++++ b/src/server/scripts/Custom/GOMove/GOMove/GOMoveScripts.lua
+@@ -0,0 +1,422 @@
++GOMove.FavL = {NameWidth = 17}
++function GOMove.FavL:Add(name, guid)
++    self:Del(guid)
++    table.insert(self, 1, {name, guid})
++    GOMoveSV.FavL = self
++end
++function GOMove.FavL:Del(guid)
++    for k,v in ipairs(self) do
++        if(v[2] == guid) then
++            table.remove(self, k)
++            break
++        end
++    end
++    GOMoveSV.FavL = self
++end
++
++GOMove.SelL = {NameWidth = 17}
++function GOMove.SelL:Add(name, guid, entry)
++    table.insert(self, 1, {name, guid, entry})
++end
++function GOMove.SelL:Del(guid)
++    for k,v in ipairs(self) do
++        if(v[2] == guid) then
++            table.remove(self, k)
++            break
++        end
++    end
++end
++
++GOMove.Selected = {}
++function GOMove.Selected:Add(name, guid)
++    self[guid] = name
++end
++function GOMove.Selected:Del(guid)
++    self[guid] = nil
++end
++
++-- FAVOURITE LIST
++local FavFrame = GOMove:CreateFrame("Favourite_List", 200, 280, GOMove.FavL, true)
++FavFrame:Position("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", 0, 0)
++function FavFrame:ButtonOnClick(ID)
++    GOMove:Move("SPAWN", self.DataTable[FauxScrollFrame_GetOffset(self.ScrollBar) + ID][2])
++end
++function FavFrame:MiscOnClick(ID)
++    self.DataTable:Del(self.DataTable[FauxScrollFrame_GetOffset(self.ScrollBar) + ID][2])
++    self:Update()
++end
++
++-- SELECTION LIST
++local SelFrame = GOMove:CreateFrame("Selection_List", 250, 280, GOMove.SelL, true)
++SelFrame:Position("BOTTOMRIGHT", FavFrame, "TOPRIGHT", 0, 0)
++function SelFrame:ButtonOnClick(ID)
++    local DATAID = FauxScrollFrame_GetOffset(self.ScrollBar) + ID
++    if(GOMove.Selected[self.DataTable[DATAID][2]]) then
++        GOMove.Selected:Del(self.DataTable[DATAID][2])
++    else
++        GOMove.Selected:Add(self.DataTable[DATAID][1], self.DataTable[DATAID][2])
++    end
++    self:Update()
++end
++function SelFrame:MiscOnClick(ID)
++    local DATAID = FauxScrollFrame_GetOffset(self.ScrollBar) + ID
++    GOMove.Selected:Del(self.DataTable[DATAID][2])
++    self.DataTable:Del(self.DataTable[DATAID][2])
++    self:Update()
++end
++function SelFrame:UpdateScript(ID)
++    local DATAID = FauxScrollFrame_GetOffset(self.ScrollBar) + ID
++    if(self.DataTable[DATAID]) then
++        if(GOMove.Selected[self.DataTable[DATAID][2]]) then
++            self.Buttons[ID]:GetFontString():SetTextColor(1, 0.8, 0)
++        else
++            self.Buttons[ID]:GetFontString():SetTextColor(1, 1, 1)
++        end
++    end
++end
++local ClearButton = CreateFrame("Button", SelFrame:GetName().."_ToggleSelect", SelFrame)
++ClearButton:SetSize(16, 16)
++ClearButton:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Disabled")
++ClearButton:SetPushedTexture("Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
++ClearButton:SetHighlightTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
++ClearButton:SetPoint("TOPRIGHT", SelFrame, "TOPRIGHT", -30, -5)
++ClearButton:SetScript("OnClick", function()
++    local empty = true
++    for k,v in pairs(GOMove.Selected) do
++        if(tonumber(k)) then
++            empty = false
++        end
++    end
++    if(empty) then
++        for k, tbl in ipairs(SelFrame.DataTable) do
++            GOMove.Selected:Add(tbl[1], tbl[2])
++        end
++    else
++        for k,v in pairs(GOMove.Selected) do
++            if(tonumber(k)) then
++                GOMove.Selected:Del(k)
++            end
++        end
++    end
++    SelFrame:Update()
++end)
++for i = 1, SelFrame.ButtonCount do
++    local Button = SelFrame.Buttons[i]
++    local MiscButton = Button.MiscButton
++    local FavButton = CreateFrame("Button", Button:GetName().."_Favourite", MiscButton)
++    FavButton:SetSize(16, 16)
++    FavButton:SetNormalTexture("Interface\\Buttons\\UI-PlusButton-Up")
++    FavButton:SetPushedTexture("Interface\\Buttons\\UI-PlusButton-Down")
++    FavButton:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilighted")
++    FavButton:SetPoint("TOPRIGHT", MiscButton, "TOPLEFT", 0, 0)
++    FavButton:SetScript("OnClick", function()
++        local DATAID = FauxScrollFrame_GetOffset(SelFrame.ScrollBar) + i
++        FavFrame.DataTable:Add(SelFrame.DataTable[DATAID][1], SelFrame.DataTable[DATAID][3])
++        FavFrame:Update()
++    end)
++    local DeleteButton = CreateFrame("Button", Button:GetName().."_Delete", FavButton)
++    DeleteButton:SetSize(16, 16)
++    DeleteButton:SetNormalTexture("Interface\\PaperDollInfoFrame\\SpellSchoolIcon5")
++    DeleteButton:SetPushedTexture("Interface\\PaperDollInfoFrame\\SpellSchoolIcon7")
++    DeleteButton:SetHighlightTexture("Interface\\PaperDollInfoFrame\\SpellSchoolIcon3")
++    DeleteButton:SetPoint("TOPRIGHT", FavButton, "TOPLEFT", 0, 0)
++    DeleteButton:SetScript("OnClick", function()
++        GOMove:Move("DELETE", SelFrame.DataTable[FauxScrollFrame_GetOffset(SelFrame.ScrollBar) + i][2])
++    end)
++    local SpawnButton = CreateFrame("Button", Button:GetName().."_Spawn", DeleteButton)
++    SpawnButton:SetSize(16, 16)
++    SpawnButton:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Disabled")
++    SpawnButton:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Down")
++    SpawnButton:SetHighlightTexture("Interface\\Buttons\\UI-SpellbookIcon-PrevPage-Up")
++    SpawnButton:SetPoint("TOPRIGHT", DeleteButton, "TOPLEFT", 0, 0)
++    SpawnButton:SetScript("OnClick", function()
++        GOMove:Move("RESPAWN", SelFrame.DataTable[FauxScrollFrame_GetOffset(SelFrame.ScrollBar) + i][2])
++    end)
++end
++local EmptyButton = CreateFrame("Button", SelFrame:GetName().."_EmptyButton", SelFrame)
++EmptyButton:SetSize(30, 30)
++EmptyButton:SetNormalTexture("Interface\\Buttons\\CancelButton-Up")
++EmptyButton:SetPushedTexture("Interface\\Buttons\\CancelButton-Down")
++EmptyButton:SetHighlightTexture("Interface\\Buttons\\CancelButton-Highlight")
++EmptyButton:SetPoint("TOPRIGHT", SelFrame, "TOPRIGHT", -45, 0)
++EmptyButton:SetHitRectInsets(9, 7, 7, 10)
++EmptyButton:SetScript("OnClick", function()
++    for k,v in pairs(GOMove.Selected) do
++        if(tonumber(k)) then
++            GOMove.Selected:Del(k)
++        end
++    end
++    for i = #SelFrame.DataTable, 1, -1 do
++        SelFrame.DataTable:Del(SelFrame.DataTable[i][2])
++    end
++    SelFrame:Update()
++end)
++
++-- MAIN FRAME
++local MainFrame = GOMove:CreateFrame("GOMove_UI", 170, 455)
++GOMove.MainFrame = MainFrame
++MainFrame:Position("LEFT", UIParent, "LEFT", 0, 85)
++
++local NEWS = GOMove:CreateInput(MainFrame, "NEWS", 40, 25, 0, -50, 4, 30)
++
++local NORTH = GOMove:CreateButton(MainFrame, "N", 50, 25, 0, -25)
++function NORTH:OnClick()
++    GOMove:Move("NORTH", NEWS:GetNumber())
++end
++local EAST = GOMove:CreateButton(MainFrame, "E", 50, 25, 50, -50)
++function EAST:OnClick()
++    GOMove:Move("EAST", NEWS:GetNumber())
++end
++local SOUTH = GOMove:CreateButton(MainFrame, "S", 50, 25, 0, -75)
++function SOUTH:OnClick()
++    GOMove:Move("SOUTH", NEWS:GetNumber())
++end
++local WEST = GOMove:CreateButton(MainFrame, "W", 50, 25, -50, -50)
++function WEST:OnClick()
++    GOMove:Move("WEST", NEWS:GetNumber())
++end
++
++local NORTHEAST = GOMove:CreateButton(MainFrame, "NE", 40, 20, 45, -30)
++function NORTHEAST:OnClick()
++    GOMove:Move("NORTHEAST", NEWS:GetNumber())
++end
++local NORTHWEST = GOMove:CreateButton(MainFrame, "NW", 40, 20, -45, -30)
++function NORTHWEST:OnClick()
++    GOMove:Move("NORTHWEST", NEWS:GetNumber())
++end
++local SOUTHEAST = GOMove:CreateButton(MainFrame, "SE", 40, 20, 45, -75)
++function SOUTHEAST:OnClick()
++    GOMove:Move("SOUTHEAST", NEWS:GetNumber())
++end
++local SOUTHWEST = GOMove:CreateButton(MainFrame, "SW", 40, 20, -45, -75)
++function SOUTHWEST:OnClick()
++    GOMove:Move("SOUTHWEST", NEWS:GetNumber())
++end
++
++local X = GOMove:CreateButton(MainFrame, "X", 35, 20, -60, -105)
++function X:OnClick()
++    GOMove:Move("X")
++end
++local Y = GOMove:CreateButton(MainFrame, "Y", 35, 20, -20, -105)
++function Y:OnClick()
++    GOMove:Move("Y")
++end
++local Z = GOMove:CreateButton(MainFrame, "Z", 35, 20, 20, -105)
++function Z:OnClick()
++    GOMove:Move("Z")
++end
++local O = GOMove:CreateButton(MainFrame, "O", 35, 20, 60, -105)
++function O:OnClick()
++    GOMove:Move("O")
++end
++
++local ROTHEI = GOMove:CreateInput(MainFrame, "ROTHEI", 40, 25, 0, -155, 4, 30)
++local UP = GOMove:CreateButton(MainFrame, "Up", 40, 25, 0, -130)
++function UP:OnClick()
++    GOMove:Move("UP", ROTHEI:GetNumber())
++end
++local DOWN = GOMove:CreateButton(MainFrame, "Down", 40, 25, 0, -180)
++function DOWN:OnClick()
++    GOMove:Move("DOWN", ROTHEI:GetNumber())
++end
++local RIGHT = GOMove:CreateButton(MainFrame, "Right", 40, 25, 45, -155)
++function RIGHT:OnClick()
++    GOMove:Move("RIGHT", ROTHEI:GetNumber())
++end
++local LEFT = GOMove:CreateButton(MainFrame, "Left", 40, 25, -45, -155)
++function LEFT:OnClick()
++    GOMove:Move("LEFT", ROTHEI:GetNumber())
++end
++
++local RESPAWN = GOMove:CreateButton(MainFrame, "Respawn", 65, 25, -35, -237.5)
++function RESPAWN:OnClick()
++    GOMove:Move("RESPAWN")
++end
++local FLOOR = GOMove:CreateButton(MainFrame, "Floor", 65, 25, 35, -237.5)
++function FLOOR:OnClick()
++    GOMove:Move("FLOOR")
++end
++local SELECTNEAR = GOMove:CreateButton(MainFrame, "Target", 50, 25, 55, -210)
++function SELECTNEAR:OnClick()
++    GOMove:Move("SELECTNEAR")
++end
++local FACE = GOMove:CreateButton(MainFrame, "Snap", 50, 25, 0, -210)
++function FACE:OnClick()
++    GOMove:Move("FACE")
++end
++local DELETE = GOMove:CreateButton(MainFrame, "Delete", 50, 25, -55, -210)
++function DELETE:OnClick()
++    GOMove:Move("DELETE")
++end
++
++local GROUND = GOMove:CreateButton(MainFrame, "Ground", 70, 25, -40, -265)
++function GROUND:OnClick()
++    GOMove:Move("GROUND")
++end
++local GOTO = GOMove:CreateButton(MainFrame, "Go to", 70, 25, 40, -265)
++function GOTO:OnClick()
++    GOMove:Move("GOTO")
++end
++
++local ENTRY = GOMove:CreateInput(MainFrame, "ENTRY", 65, 25, -30, -295, 10)
++local SPAWN = GOMove:CreateButton(MainFrame, "Spawn", 50, 25, 40, -295)
++function SPAWN:OnClick()
++    GOMove:Move("SPAWN", ENTRY:GetNumber())
++end
++
++local RADIUS = GOMove:CreateInput(MainFrame, "RADIUS", 40, 25, -55, -325, 4)
++local SELECTALLNEAR = GOMove:CreateButton(MainFrame, "Select by radius", 110, 25, 25, -325)
++function SELECTALLNEAR:OnClick()
++    GOMove:Move("SELECTALLNEAR", RADIUS:GetNumber())
++end
++
++local MASK = GOMove:CreateInput(MainFrame, "MASK", 65, 25, -30, -355, 10)
++local PHASE = GOMove:CreateButton(MainFrame, "Phase", 50, 25, 40, -355)
++function PHASE:OnClick()
++    GOMove:Move("PHASE", MASK:GetNumber())
++end
++
++local FAVOURITES = GOMove:CreateButton(MainFrame, "Favourites", 80, 25, -40, -385)
++function FAVOURITES:OnClick()
++    if(FavFrame:IsVisible()) then
++        FavFrame:Hide()
++    else
++        FavFrame:Show()
++    end
++end
++local SELECTIONS = GOMove:CreateButton(MainFrame, "Selections", 80, 25, 40, -385)
++function SELECTIONS:OnClick()
++    if(SelFrame:IsVisible()) then
++        SelFrame:Hide()
++    else
++        SelFrame:Show()
++    end
++end
++
++local SPELLENTRY = GOMove:CreateInput(MainFrame, "SPELLENTRY", 65, 25, -30, -415, 10)
++local SPELLSPAWN = GOMove:CreateButton(MainFrame, "Send", 50, 25, 40, -415)
++function SPELLSPAWN:OnClick()
++    GOMove:Move("SPAWNSPELL", SPELLENTRY:GetNumber())
++end
++
++GOMove.SCMD = {}
++function GOMove.SCMD.help()
++    for k, v in pairs(GOMove.SCMD) do
++        print(k)
++    end
++end
++function GOMove.SCMD.reset()
++    for k, inputfield in ipairs(GOMove.Inputs) do
++        inputfield:ClearFocus()
++    end
++    print("Frames reset")
++    for k, Frame in pairs(GOMove.Frames) do
++        if(Frame.Default) then
++            Frame:ClearAllPoints()
++            Frame:SetPoint(Frame.Default[1], Frame.Default[2], Frame.Default[3], Frame.Default[4], Frame.Default[5])
++        end
++        Frame:Show()
++    end
++end
++function GOMove.SCMD.invertselection()
++    local sel = {}
++    for GUID, NAME in pairs(GOMove.Selected) do
++        if(tonumber(GUID)) then
++            table.insert(sel, GUID)
++        end
++    end
++    for k, tbl in ipairs(SelFrame.DataTable) do
++        GOMove.Selected:Add(tbl[1], tbl[2])
++    end
++    for k,v in ipairs(sel) do
++        GOMove.Selected:Del(v)
++    end
++    SelFrame:Update()
++end
++
++SLASH_GOMOVE1 = '/gomove'
++function SlashCmdList.GOMOVE(msg, editBox)
++    if(msg ~= '') then
++        for k, v in pairs(GOMove.SCMD) do
++            if(type(k) == "string" and string.find(k, msg:lower()) == 1 and type(v) == "function") then
++                v()
++                break;
++            end
++        end
++        return
++    end
++    if(MainFrame:IsVisible()) then
++        MainFrame:Hide()
++    else
++        MainFrame:Show()
++    end
++end
++
++local EventFrame = CreateFrame("Frame")
++EventFrame:RegisterEvent("ADDON_LOADED")
++EventFrame:RegisterEvent("CHAT_MSG_ADDON")
++
++EventFrame:SetScript("OnEvent",
++    function(self, event, MSG, MSG2, Type, Sender)
++        if(event == "CHAT_MSG_ADDON" and Sender == UnitName("player")) then
++            if MSG ~= "GOMOVE" then return end
++            local ID, ENTRYORGUID, ARG2, ARG3 = MSG2:match("^(.+)|([%a%d]+)|(.*)|([%a%d]+)$")
++            if(ID) then
++                --if(ID == "USED") then
++                --    for k,v in ipairs(GOMove.UseL) do
++                --        if(ENTRYORGUID == v[2]) then
++                --            return
++                --        end
++                --    end
++                --    GOMove.UseL:Add(ARG2, ENTRYORGUID)
++                --    GOMove:Update()
++                if(ID == "REMOVE") then
++                    local guid = ENTRYORGUID
++                    GOMove.Selected:Del(guid)
++                    for k,tbl in ipairs(GOMove.SelL) do
++                        if(tbl[2] == guid) then
++                            GOMove.SelL:Del(guid)
++                            break
++                        end
++                    end
++                    GOMove:Update()
++                elseif(ID == "ADD") then
++                    local guid = ENTRYORGUID
++                    GOMove.Selected:Add(ARG2, guid)
++                    local exists = false
++                    for k, tbl in ipairs(GOMove.SelL) do
++                        if(tbl[2] == guid) then
++                            exists = true
++                            break
++                        end
++                    end
++                    if(not exists) then
++                        GOMove.SelL:Add(ARG2, guid, ARG3)
++                    end
++                    GOMove:Update()
++                elseif(ID == "SWAP") then
++                    local oldGUID, newGUID = ENTRYORGUID, ARG3
++                    GOMove.Selected:Add(GOMove.Selected[oldGUID], newGUID)
++                    GOMove.Selected:Del(oldGUID)
++                    for k,tbl in ipairs(GOMove.SelL) do
++                        if(tbl[2] == oldGUID) then
++                            tbl[2] = newGUID
++                            break
++                        end
++                    end
++                    GOMove:Update()
++                end
++            end
++        elseif(MSG == "GOMove" and event == "ADDON_LOADED") then
++            if(not GOMoveSV or type(GOMoveSV) ~= "table") then
++                GOMoveSV = {}
++            end
++            if(GOMoveSV.FavL) then
++                for k,v in ipairs(GOMoveSV.FavL) do
++                    GOMove.FavL[k] = v
++                end
++            end
++            GOMove:Update()
++        end
++    end
++)
+diff --git a/src/server/scripts/Custom/GOMove/GOMove/MapButton.xml b/src/server/scripts/Custom/GOMove/GOMove/MapButton.xml
+new file mode 100644
+index 000000000000..db7280bfb872
+--- /dev/null
++++ b/src/server/scripts/Custom/GOMove/GOMove/MapButton.xml
+@@ -0,0 +1,75 @@
++<Ui>
++    <Button name="GOMove_UI_MapButton" text="G" parent="Minimap" toplevel="true" movable="true" frameStrata="LOW" enableMouse="true">
++        <Size x="27" y="27" />
++        <Anchors>
++            <Anchor point="TOPLEFT" x="-25" y="-60" />
++        </Anchors>
++        <Scripts>
++            <OnLoad>
++                this:RegisterForClicks("LeftButtonUp","RightButtonUp","MiddleButtonUp");
++                this:RegisterForDrag("RightButton");
++            </OnLoad>
++            <OnEnter>
++                GameTooltip:SetOwner(this, "ANCHOR_LEFT");
++                GameTooltip:AddLine("GOMove UI");
++                GameTooltip:AddLine("Type /gomove to show or hide the GOMove window");
++                GameTooltip:AddLine("Type /gomove reset to reset the gomove UI positions");
++                GameTooltip:AddLine(" ");
++                GameTooltip:AddLine("Left click to show/hide");
++                GameTooltip:AddLine("Right click to drag this");
++                GameTooltip:Show();
++            </OnEnter>
++            <OnLeave>
++                GameTooltip:Hide();
++            </OnLeave>
++            <OnClick>
++                if(GOMove.MainFrame:IsVisible()) then
++                    GOMove.MainFrame:Hide()
++                else
++                    GOMove.MainFrame:Show()
++                end
++            </OnClick>
++            <OnDragStart>
++                this:StartMoving();
++            </OnDragStart>
++            <OnDragStop>
++                this:StopMovingOrSizing();
++            </OnDragStop>
++        </Scripts>
++        <Layers>
++            <Layer level="OVERLAY">
++                <Texture name="Texture1" file="Interface\Minimap\MiniMap-TrackingBorder">
++                    <Size>
++                        <AbsDimension x="46" y="46" />
++                    </Size>
++                    <Anchors>
++                        <Anchor point="TOPLEFT" />
++                    </Anchors>
++                </Texture>
++            </Layer>
++            <Layer level="BACKGROUND">
++                <Texture name="$parent_Texture">
++                    <Size>
++                        <AbsDimension x="15" y="15" />
++                    </Size>
++                    <Anchors>
++                        <Anchor point="TOPLEFT">
++                            <Offset>
++                                <AbsDimension x="6" y="-6" />
++                            </Offset>
++                        </Anchor>
++                    </Anchors>
++                    <TexCoords left="0.075" right="0.925" top="0.075" bottom="0.925" />
++                </Texture>
++            </Layer>
++        </Layers>
++        <ButtonText name="$parentText">
++            <FontHeight>
++                <AbsValue val="10" />
++            </FontHeight>
++        </ButtonText>
++        <NormalFont style="GameFontNormal" />
++        <HighlightFont style="GameFontHighlight" />
++        <DisabledFont style="GameFontDisable" />
++    </Button>
++</Ui>
+diff --git a/src/server/scripts/Custom/GOMove/GOMoveScripts.cpp b/src/server/scripts/Custom/GOMove/GOMoveScripts.cpp
+new file mode 100644
+index 000000000000..63a6082ef936
+--- /dev/null
++++ b/src/server/scripts/Custom/GOMove/GOMoveScripts.cpp
+@@ -0,0 +1,279 @@
++/*
++GOMove By Rochet2
++Original idea by Mordred
++
++http://rochet2.github.io/
++*/
++
++#include "GOMove.h"
++#include <math.h>
++#include <set>
++#include <sstream>
++#include <string>
++#include "Chat.h"
++#include "ChatCommand.h"
++#include "GameObject.h"
++#include "Language.h"
++#include "Map.h"
++#include "MapManager.h"
++#include "Object.h"
++#include "ObjectMgr.h"
++#include "Player.h"
++#include "Position.h"
++#include "RBAC.h"
++#include "ScriptMgr.h"
++#include "SpellScript.h"
++#include "WorldPacket.h"
++#include "WorldSession.h"
++
++using namespace Trinity::ChatCommands;
++
++class GOMove_commandscript : public CommandScript
++{
++public:
++    GOMove_commandscript() : CommandScript("GOMove_commandscript")
++    {
++    }
++
++    enum commandIDs
++    {
++        TEST,
++        SELECTNEAR,
++        DELET,
++        X,
++        Y,
++        Z,
++        O,
++        GROUND,
++        FLOOR,
++        RESPAWN,
++        GOTO,
++        FACE,
++
++        SPAWN,
++        NORTH,
++        EAST,
++        SOUTH,
++        WEST,
++        NORTHEAST,
++        NORTHWEST,
++        SOUTHEAST,
++        SOUTHWEST,
++        UP,
++        DOWN,
++        LEFT,
++        RIGHT,
++        PHASE,
++        SELECTALLNEAR,
++        SPAWNSPELL,
++    };
++
++    ChatCommandTable GetCommands() const override
++    {
++        static ChatCommandTable GOMoveCommandTable =
++        {
++            { "gomove", GOMove_Command, rbac::RBAC_PERM_COMMAND_GOBJECT_ADD_TEMP, Console::No },
++        };
++        return GOMoveCommandTable;
++    }
++
++    static bool GOMove_Command(ChatHandler* handler, uint32 ID, Optional<uint32> cLowguid, Optional<uint32> ARG_t)
++    {
++        uint32 lowguid = 0;
++        if (cLowguid)
++            lowguid = *cLowguid;
++
++        uint32 ARG = 0;
++        if (ARG_t)
++            ARG = *ARG_t;
++
++        WorldSession* session = handler->GetSession();
++        if (!session)
++            return false;
++        Player* player = session->GetPlayer();
++
++        if (ID < SPAWN) // no args
++        {
++            if (ID >= DELET && ID <= GOTO) // has target (needs retrieve gameobject)
++            {
++                GameObject* target = GOMove::GetGameObject(player, lowguid);
++                if (!target)
++                    ChatHandler(player->GetSession()).PSendSysMessage("Object GUID: %u not found.", lowguid);
++                else
++                {
++                    float x, y, z, o;
++                    target->GetPosition(x, y, z, o);
++                    uint32 p = target->GetPhaseMask();
++                    switch (ID)
++                    {
++                    case DELET: GOMove::DeleteGameObject(target); GOMove::SendRemove(player, lowguid); break;
++                    case X: GOMove::MoveGameObject(player, player->GetPositionX(), y, z, o, p, lowguid);       break;
++                    case Y: GOMove::MoveGameObject(player, x, player->GetPositionY(), z, o, p, lowguid);       break;
++                    case Z: GOMove::MoveGameObject(player, x, y, player->GetPositionZ(), o, p, lowguid);       break;
++                    case O: GOMove::MoveGameObject(player, x, y, z, player->GetOrientation(), p, lowguid);     break;
++                    case RESPAWN: GOMove::SpawnGameObject(player, x, y, z, o, p, target->GetEntry());                   break;
++                    case GOTO:
++                    {
++                        // stop flight if need
++                        if (player->IsInFlight())
++                            player->FinishTaxiFlight();
++                        else
++                            player->SaveRecallPosition(); // save only in non-flight case
++                        player->TeleportTo(target->GetMapId(), x, y, z, o);
++                    } break;
++                    case GROUND:
++                    {
++                        float ground = target->GetMap()->GetHeight(target->GetPhaseMask(), x, y, MAX_HEIGHT);
++                        if (ground != INVALID_HEIGHT)
++                            GOMove::MoveGameObject(player, x, y, ground, o, p, lowguid);
++                    } break;
++                    case FLOOR:
++                    {
++                        float floor = target->GetMap()->GetHeight(target->GetPhaseMask(), x, y, z);
++                        if (floor != INVALID_HEIGHT)
++                            GOMove::MoveGameObject(player, x, y, floor, o, p, lowguid);
++                    } break;
++                    }
++                }
++            }
++            else
++            {
++                switch (ID)
++                {
++                case TEST:
++                    session->SendAreaTriggerMessage("%s", player->GetName().c_str());
++                    break;
++                case FACE:
++                {
++                    float const piper2 = float(M_PI) / 2.0f;
++                    float const multi = player->GetOrientation() / piper2;
++                    float const multi_int = floor(multi);
++                    float const new_ori = (multi - multi_int > 0.5f) ? (multi_int + 1)*piper2 : multi_int*piper2;
++                    player->SetFacingTo(new_ori);
++                } break;
++                case SELECTNEAR:
++                {
++                    GameObject* object = handler->GetNearbyGameObject();
++                    if (!object)
++                        ChatHandler(player->GetSession()).PSendSysMessage("No objects found");
++                    else
++                    {
++                        GOMove::SendAdd(player, object->GetSpawnId());
++                        session->SendAreaTriggerMessage("Selected %s", object->GetName().c_str());
++                    }
++                } break;
++                }
++            }
++        }
++        else if (ARG && ID >= SPAWN)
++        {
++            if (ID >= NORTH && ID <= PHASE)
++            {
++                GameObject* target = GOMove::GetGameObject(player, lowguid);
++                if (!target)
++                    ChatHandler(player->GetSession()).PSendSysMessage("Object GUID: %u not found", lowguid);
++                else
++                {
++                    float x, y, z, o;
++                    target->GetPosition(x, y, z, o);
++                    uint32 p = target->GetPhaseMask();
++                    switch (ID)
++                    {
++                    case NORTH: GOMove::MoveGameObject(player, x + ((float)ARG / 100), y, z, o, p, lowguid);                            break;
++                    case EAST: GOMove::MoveGameObject(player, x, y - ((float)ARG / 100), z, o, p, lowguid);                             break;
++                    case SOUTH: GOMove::MoveGameObject(player, x - ((float)ARG / 100), y, z, o, p, lowguid);                            break;
++                    case WEST: GOMove::MoveGameObject(player, x, y + ((float)ARG / 100), z, o, p, lowguid);                             break;
++                    case NORTHEAST: GOMove::MoveGameObject(player, x + ((float)ARG / 100), y - ((float)ARG / 100), z, o, p, lowguid);   break;
++                    case SOUTHEAST: GOMove::MoveGameObject(player, x - ((float)ARG / 100), y - ((float)ARG / 100), z, o, p, lowguid);   break;
++                    case SOUTHWEST: GOMove::MoveGameObject(player, x - ((float)ARG / 100), y + ((float)ARG / 100), z, o, p, lowguid);   break;
++                    case NORTHWEST: GOMove::MoveGameObject(player, x + ((float)ARG / 100), y + ((float)ARG / 100), z, o, p, lowguid);   break;
++                    case UP: GOMove::MoveGameObject(player, x, y, z + ((float)ARG / 100), o, p, lowguid);                               break;
++                    case DOWN: GOMove::MoveGameObject(player, x, y, z - ((float)ARG / 100), o, p, lowguid);                             break;
++                    case RIGHT: GOMove::MoveGameObject(player, x, y, z, o - ((float)ARG / 100), p, lowguid);                            break;
++                    case LEFT: GOMove::MoveGameObject(player, x, y, z, o + ((float)ARG / 100), p, lowguid);                             break;
++                    case PHASE: GOMove::MoveGameObject(player, x, y, z, o, ARG, lowguid);                                               break;
++                    }
++                }
++            }
++            else
++            {
++                switch (ID)
++                {
++                case SPAWN:
++                {
++                    if (GOMove::SpawnGameObject(player, player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(), player->GetOrientation(), player->GetPhaseMaskForSpawn(), ARG))
++                        GOMove::Store.SpawnQueAdd(player->GetGUID(), ARG);
++                } break;
++                case SPAWNSPELL:
++                {
++                    GOMove::Store.SpawnQueAdd(player->GetGUID(), ARG);
++                } break;
++                case SELECTALLNEAR:
++                {
++                    for (GameObject const * go : GOMove::GetNearbyGameObjects(player, static_cast<float>(ARG)))
++                        GOMove::SendAdd(player, go->GetSpawnId());
++                } break;
++                }
++            }
++        }
++        else
++            return false;
++        return true;
++    }
++};
++
++// possible spells:
++// 27651, 897
++
++class GOMove_spell_place : public SpellScriptLoader
++{
++public:
++    GOMove_spell_place() : SpellScriptLoader("GOMove_spell_place") { }
++
++    class GOMove_spellscript : public SpellScript
++    {
++        PrepareSpellScript(GOMove_spellscript);
++
++        void HandleAfterCast()
++        {
++            if (!GetCaster())
++                return;
++            Player* player = GetCaster()->ToPlayer();
++            if (!player)
++                return;
++            const WorldLocation* summonPos = GetExplTargetDest();
++            if (!summonPos)
++                return;
++            if (uint32 entry = GOMove::Store.SpawnQueGet(player->GetGUID()))
++                GOMove::SpawnGameObject(player, summonPos->GetPositionX(), summonPos->GetPositionY(), summonPos->GetPositionZ(), player->GetOrientation(), player->GetPhaseMaskForSpawn(), entry);
++        }
++
++        void Register() override
++        {
++            AfterCast += SpellCastFn(GOMove_spellscript::HandleAfterCast);
++        }
++    };
++
++    SpellScript* GetSpellScript() const override
++    {
++        return new GOMove_spellscript();
++    }
++};
++
++class GOMove_player_track : public PlayerScript
++{
++public:
++    GOMove_player_track() : PlayerScript("GOMove_player_track") { }
++
++    void OnLogout(Player* player) override
++    {
++        GOMove::Store.SpawnQueRem(player->GetGUID());
++    }
++};
++
++void AddSC_GOMove_commandscript()
++{
++    new GOMove_commandscript();
++    new GOMove_spell_place();
++    new GOMove_player_track();
++}
+diff --git a/src/server/scripts/Custom/GOMove/Guide.jpg b/src/server/scripts/Custom/GOMove/Guide.jpg
+new file mode 100644
+index 000000000000..8e19437961ea
+Binary files /dev/null and b/src/server/scripts/Custom/GOMove/Guide.jpg differ
+diff --git a/src/server/scripts/Custom/GOMove/README.md b/src/server/scripts/Custom/GOMove/README.md
+new file mode 100644
+index 000000000000..786a01a61b1b
+--- /dev/null
++++ b/src/server/scripts/Custom/GOMove/README.md
+@@ -0,0 +1,53 @@
++# GOMove [![Build Status](https://travis-ci.org/Rochet2/TrinityCore.svg?branch=gomove_3.3.5)](https://travis-ci.org/Rochet2/TrinityCore)
++
++#### About
++GOMove is a script that allows you to move objects.
++
++You no longer need to be at the point where you want to spawn an object
++and you can fine tune the position of objects (rotation and x,y,z position)
++
++Some features:
++- Move objects (to compass directions and according to your character position)
++- Favourite list
++- Snap facing to a compass direction (N,E,W,S)
++- Spawn an object again
++- move to ground level
++
++Source: http://rochet2.github.io/GOMove.html  
++Original idea by [Mordred](https://www.youtube.com/watch?v=a0JVXJ07KUU)
++
++#### Installation
++
++Available as:
++- Direct merge: https://github.com/Rochet2/TrinityCore/tree/gomove_3.3.5
++- Diff: https://github.com/Rochet2/TrinityCore/compare/TrinityCore:3.3.5...gomove_3.3.5.diff
++- Diff in github view: https://github.com/Rochet2/TrinityCore/compare/TrinityCore:3.3.5...gomove_3.3.5
++
++Using direct merge:
++- open git bash to source location
++- do `git remote add rochet2 https://github.com/Rochet2/TrinityCore.git`
++- do `git pull rochet2 gomove_3.3.5`
++- use cmake and compile
++- Copy the GOMove addon folder (GOMove folder with lua files inside) to `WowInstallFolder\Interface\AddOns`
++
++Using diff:
++- DO NOT COPY THE DIFF DIRECTLY! It causes apply to fail.
++- download the diff by __right clicking__ the link and select __Save link as__
++- place the downloaded `gomove_3.3.5.diff` to the source root folder
++- open git bash to source location
++- do `git apply gomove_3.3.5.diff`
++- use cmake and compile
++- Copy the GOMove addon folder (GOMove folder with lua files inside) to `WowInstallFolder\Interface\AddOns`
++
++Want to place objects with a spell (green targetting circle)?
++- execute this to world database `INSERT INTO spell_script_names (spell_id, ScriptName) VALUES (27651, 'GOMove_spell_place');`
++- learn spell `27651`
++- Now you can put the entry of the object in Send input box and click Send. Then you can spawn the object with the spell. All objects spawned will be saved for the spell spawning aswell (spawned from favourites list for example)
++
++#### Usage
++Install to server, enable the addon on client side and go ingame.
++You will see the addon display as you log in and you should see a minmap icon with a G on it.
++In game chat use `/gomove help` to see all commands
++Note! Only game objects showing the real guid (not hex) are actually saved. If you save an object and then move it, it is again only temporary.
++
++[![Guide.jpg](Guide.jpg)](https://raw.githubusercontent.com/Rochet2/TrinityCore/gomove_3.3.5/src/server/scripts/Custom/GOMove/Guide.jpg)
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index 9e5e9ba2bfd6..e0463e20c717 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -16,9 +16,11 @@
+  */
+ 
+ // This is where scripts' loading functions should be declared:
++void AddSC_GOMove_commandscript();
+ 
+ // The name of this function should match:
+ // void Add${NameOfDirectory}Scripts()
+ void AddCustomScripts()
+ {
++    AddSC_GOMove_commandscript();
+ }

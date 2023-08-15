@@ -1,0 +1,983 @@
+diff --git a/src/server/game/Battlegrounds/Battleground.cpp b/src/server/game/Battlegrounds/Battleground.cpp
+index 9594fc82ab3..6001752478a 100644
+--- a/src/server/game/Battlegrounds/Battleground.cpp
++++ b/src/server/game/Battlegrounds/Battleground.cpp
+@@ -41,6 +41,9 @@
+ #include "WorldStatePackets.h"
+ #include <cstdarg>
+ 
++#include "CFBGData.h"
++#include "CharacterCache.h"
++
+ void BattlegroundScore::AppendToPacket(WorldPacket& data)
+ {
+     data << uint64(PlayerGuid);
+@@ -979,6 +982,7 @@ void Battleground::StartBattleground()
+ 
+ void Battleground::AddPlayer(Player* player)
+ {
++    sCharacterCache->UpdateCharacterData(player->GetGUID(), player->GetName(), {}, player->GetRace());
+     // remove afk from player
+     if (player->HasFlag(PLAYER_FLAGS, PLAYER_FLAGS_AFK))
+         player->ToggleAFK();
+diff --git a/src/server/game/Battlegrounds/BattlegroundMgr.cpp b/src/server/game/Battlegrounds/BattlegroundMgr.cpp
+index cd3e926c277..1440d6c17c0 100644
+--- a/src/server/game/Battlegrounds/BattlegroundMgr.cpp
++++ b/src/server/game/Battlegrounds/BattlegroundMgr.cpp
+@@ -47,6 +47,8 @@
+ #include "World.h"
+ #include "WorldPacket.h"
+ 
++#include "CFBGData.h"
++
+ bool BattlegroundTemplate::IsArena() const
+ {
+     return BattlemasterEntry->InstanceType == MAP_ARENA;
+diff --git a/src/server/game/Battlegrounds/BattlegroundMgr.h b/src/server/game/Battlegrounds/BattlegroundMgr.h
+index 7335abe190d..6249a6a7ba6 100644
+--- a/src/server/game/Battlegrounds/BattlegroundMgr.h
++++ b/src/server/game/Battlegrounds/BattlegroundMgr.h
+@@ -24,6 +24,8 @@
+ #include "BattlegroundQueue.h"
+ #include <unordered_map>
+ 
++#include "CFBGQueue.h"
++
+ struct BattlemasterListEntry;
+ 
+ typedef std::map<uint32, Battleground*> BattlegroundContainer;
+diff --git a/src/server/game/Battlegrounds/BattlegroundQueue.cpp b/src/server/game/Battlegrounds/BattlegroundQueue.cpp
+index a49ea023e9b..660a28e8e55 100644
+--- a/src/server/game/Battlegrounds/BattlegroundQueue.cpp
++++ b/src/server/game/Battlegrounds/BattlegroundQueue.cpp
+@@ -30,6 +30,8 @@
+ #include "Player.h"
+ #include "World.h"
+ 
++#include "CFBGQueue.h"
++
+ /*********************************************************/
+ /***            BATTLEGROUND QUEUE SYSTEM              ***/
+ /*********************************************************/
+@@ -144,6 +146,7 @@ GroupQueueInfo* BattlegroundQueue::AddGroup(Player* leader, Group* grp, Battlegr
+     ginfo->JoinTime                  = GameTime::GetGameTimeMS();
+     ginfo->RemoveInviteTime          = 0;
+     ginfo->Team                      = leader->GetTeam();
++    ginfo->OTeam                      = leader->GetTeam();
+     ginfo->ArenaTeamRating           = ArenaRating;
+     ginfo->ArenaMatchmakerRating     = MatchmakerRating;
+     ginfo->PreviousOpponentsTeamId   = PreviousOpponentsArenaTeamId;
+@@ -156,7 +159,7 @@ GroupQueueInfo* BattlegroundQueue::AddGroup(Player* leader, Group* grp, Battlegr
+     uint32 index = 0;
+     if (!isRated && !isPremade)
+         index += PVP_TEAMS_COUNT;
+-    if (ginfo->Team == HORDE)
++    if (ginfo->Team == HORDE  && sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
+         index++;
+     TC_LOG_DEBUG("bg.battleground", "Adding Group to BattlegroundQueue bgTypeId : %u, bracket_id : %u, index : %u", BgTypeId, bracketId, index);
+ 
+@@ -308,12 +311,17 @@ void BattlegroundQueue::RemovePlayer(ObjectGuid guid, bool decreaseInvitedCount)
+     // we count from MAX_BATTLEGROUND_QUEUES - 1 to 0
+ 
+     uint32 index = (group->Team == HORDE) ? BG_QUEUE_PREMADE_HORDE : BG_QUEUE_PREMADE_ALLIANCE;
++    // Am i missing something, or why is the optimization above made?
++    if (sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++        index = 0;
+ 
+     for (int32 bracket_id_tmp = MAX_BATTLEGROUND_BRACKETS - 1; bracket_id_tmp >= 0 && bracket_id == -1; --bracket_id_tmp)
+     {
+         //we must check premade and normal team's queue - because when players from premade are joining bg,
+         //they leave groupinfo so we can't use its players size to find out index
+-        for (uint32 j = index; j < BG_QUEUE_GROUP_TYPES_COUNT; j += PVP_TEAMS_COUNT)
++        // I don't understand why we need to optimize this, cpu is cheap
++        // and even though the loops are nested they'll rarely grow big anyways
++        for (uint32 j = index; j < BG_QUEUE_GROUP_TYPES_COUNT; j += (sWorld->getBoolConfig(CONFIG_CFBG_ENABLED) ? 1 : PVP_TEAMS_COUNT))
+         {
+             GroupsQueueType::iterator k = m_QueuedGroups[bracket_id_tmp][j].begin();
+             for (; k != m_QueuedGroups[bracket_id_tmp][j].end(); ++k)
+@@ -499,6 +507,9 @@ large groups are disadvantageous, because they will be kicked first if invitatio
+ */
+ void BattlegroundQueue::FillPlayersToBG(Battleground* bg, BattlegroundBracketId bracket_id)
+ {
++    if (CFBGQueue::MixPlayersToBG(this, bg, bracket_id))
++        return;
++
+     int32 hordeFree = bg->GetFreeSlotsForTeam(HORDE);
+     int32 aliFree   = bg->GetFreeSlotsForTeam(ALLIANCE);
+     uint32 aliCount   = m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE].size();
+@@ -662,6 +673,9 @@ bool BattlegroundQueue::CheckPremadeMatch(BattlegroundBracketId bracket_id, uint
+ // this method tries to create battleground or arena with MinPlayersPerTeam against MinPlayersPerTeam
+ bool BattlegroundQueue::CheckNormalMatch(Battleground* bg_template, BattlegroundBracketId bracket_id, uint32 minPlayers, uint32 maxPlayers)
+ {
++    if (CFBGQueue::CheckMixedMatch(this, bg_template, bracket_id, minPlayers, maxPlayers))
++        return true;
++
+     GroupsQueueType::const_iterator itr_team[PVP_TEAMS_COUNT];
+     for (uint32 i = 0; i < PVP_TEAMS_COUNT; i++)
+     {
+diff --git a/src/server/game/Battlegrounds/BattlegroundQueue.h b/src/server/game/Battlegrounds/BattlegroundQueue.h
+index b7cad6f5d44..5b2cf0fdd46 100644
+--- a/src/server/game/Battlegrounds/BattlegroundQueue.h
++++ b/src/server/game/Battlegrounds/BattlegroundQueue.h
+@@ -22,6 +22,7 @@
+ #include "DBCEnums.h"
+ #include "Battleground.h"
+ #include "EventProcessor.h"
++#include "CFBGQueue.h"
+ 
+ #include <deque>
+ 
+@@ -41,6 +42,7 @@ struct GroupQueueInfo                                       // stores informatio
+ {
+     std::map<ObjectGuid, PlayerQueueInfo*> Players;         // player queue info map
+     uint32  Team;                                           // Player team (ALLIANCE/HORDE)
++    uint32  OTeam;                                          // Original Player team (ALLIANCE/HORDE)
+     BattlegroundTypeId BgTypeId;                            // battleground type id
+     bool    IsRated;                                        // rated
+     uint8   ArenaType;                                      // 2v2, 3v3, 5v5 or 0 when BG
+diff --git a/src/server/game/Battlegrounds/CFBGQueue.cpp b/src/server/game/Battlegrounds/CFBGQueue.cpp
+new file mode 100644
+index 00000000000..6790c23c9d8
+--- /dev/null
++++ b/src/server/game/Battlegrounds/CFBGQueue.cpp
+@@ -0,0 +1,92 @@
++#include "CFBGQueue.h"
++
++#include "BattlegroundMgr.h"
++#include "World.h"
++
++class GroupList : public std::list<GroupQueueInfo*>
++{
++public:
++    void AddGroups(std::list<GroupQueueInfo*> list)
++    {
++        insert(end(), list.begin(), list.end());
++    }
++
++    void Sort()
++    {
++        sort([](GroupQueueInfo* a, GroupQueueInfo* b) { return a->JoinTime < b->JoinTime; });
++    }
++};
++
++bool CFBGQueue::CheckMixedMatch(BattlegroundQueue* queue, Battleground* bg_template, BattlegroundBracketId bracket_id, uint32 minPlayers, uint32 maxPlayers)
++{
++    return CFBGGroupInserter(queue, bg_template, bracket_id, maxPlayers, maxPlayers, minPlayers);
++}
++
++bool CFBGQueue::MixPlayersToBG(BattlegroundQueue* queue, Battleground* bg, BattlegroundBracketId bracket_id)
++{
++    return CFBGGroupInserter(queue, bg, bracket_id, bg->GetFreeSlotsForTeam(ALLIANCE), bg->GetFreeSlotsForTeam(HORDE), 0);
++}
++
++bool CFBGQueue::CFBGGroupInserter(BattlegroundQueue* queue, Battleground* bg, BattlegroundBracketId bracket_id, uint32 AllyFree, uint32 HordeFree, uint32 MinPlayers)
++{
++    if (!sWorld->getBoolConfig(CONFIG_CFBG_ENABLED) || !bg->isBattleground())
++        return false;
++
++    // MinPlayers is only 0 when we're filling an existing BG.
++    bool Filling = MinPlayers == 0;
++
++    uint32 MaxAlly = AllyFree;
++    uint32 MaxHorde = HordeFree;
++
++    queue->m_SelectionPools[TEAM_ALLIANCE].Init();
++    queue->m_SelectionPools[TEAM_HORDE].Init();
++
++    // If players on different factions queue at the same second it'll be random who gets added first
++    bool AllyFirst = urand(0, 1);
++    auto Groups = GroupList();
++
++    Groups.AddGroups(queue->m_QueuedGroups[bracket_id][AllyFirst ? BG_QUEUE_NORMAL_ALLIANCE : BG_QUEUE_NORMAL_HORDE]);
++    Groups.AddGroups(queue->m_QueuedGroups[bracket_id][AllyFirst ? BG_QUEUE_NORMAL_HORDE : BG_QUEUE_NORMAL_ALLIANCE]);
++    Groups.Sort();
++
++    bool startable = false;
++
++    for (auto& ginfo : Groups)
++    {
++        if (!ginfo->IsInvitedToBGInstanceGUID)
++        {
++            bool AddAsAlly = AllyFree == HordeFree ? ginfo->OTeam == ALLIANCE : AllyFree > HordeFree;
++            AddAsAlly = !AddAsAlly;
++
++            ginfo->Team = AddAsAlly ? ALLIANCE : HORDE;
++
++            if (queue->m_SelectionPools[AddAsAlly ? TEAM_ALLIANCE : TEAM_HORDE].AddGroup(ginfo, AddAsAlly ? MaxAlly : MaxHorde))
++                AddAsAlly ? AllyFree -= ginfo->Players.size() : HordeFree -= ginfo->Players.size();
++            else if (!Filling)
++                break;
++
++            // Return when we're ready to start a BG, if we're in startup process
++            if (queue->m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount() >= MinPlayers &&
++                queue->m_SelectionPools[TEAM_HORDE].GetPlayerCount() >= MinPlayers &&
++                !Filling)
++                startable = true;
++        }
++    }
++
++    if (startable)
++        return true;
++
++    // If we're in BG testing one player is enough
++    if (sBattlegroundMgr->isTesting() && queue->m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount() + queue->m_SelectionPools[TEAM_HORDE].GetPlayerCount() > 0)
++        return true;
++
++    // Filling always returns true
++    if (Filling)
++        return true;
++
++    // Return false when we didn't manage to fill the BattleGround in Filling "mode".
++    // reset selectionpool for further attempts
++    queue->m_SelectionPools[TEAM_ALLIANCE].Init();
++    queue->m_SelectionPools[TEAM_HORDE].Init();
++    return false;
++}
+diff --git a/src/server/game/Battlegrounds/CFBGQueue.h b/src/server/game/Battlegrounds/CFBGQueue.h
+new file mode 100644
+index 00000000000..f608df53b89
+--- /dev/null
++++ b/src/server/game/Battlegrounds/CFBGQueue.h
+@@ -0,0 +1,19 @@
++#ifndef __CFBGQUEUE_H
++#define __CFBGQUEUE_H
++
++#include "Common.h"
++#include "DBCEnums.h"
++
++class BattlegroundQueue;
++class Battleground;
++
++class TC_GAME_API CFBGQueue
++{
++public:
++    static bool CheckMixedMatch(BattlegroundQueue* queue, Battleground* bg_template, BattlegroundBracketId bracket_id, uint32 minPlayers, uint32 maxPlayers);
++    static bool MixPlayersToBG(BattlegroundQueue* queue, Battleground* bg, BattlegroundBracketId bracket_id);
++    static bool CFBGGroupInserter(BattlegroundQueue* queue, Battleground* bg_template, BattlegroundBracketId bracket_id, uint32 minPlayers, uint32 maxPlayers, uint32 minplayers);
++};
++
++#endif // __CFBGQUEUE_H
++
+diff --git a/src/server/game/Entities/Player/CFBGData.cpp b/src/server/game/Entities/Player/CFBGData.cpp
+new file mode 100644
+index 00000000000..c531b369339
+--- /dev/null
++++ b/src/server/game/Entities/Player/CFBGData.cpp
+@@ -0,0 +1,145 @@
++#include "CFBGData.h"
++#include "Player.h"
++#include "Item.h"
++#include "WorldSession.h"
++#include "World.h"
++#include "MiscPackets.h"
++#include "ObjectMgr.h"
++#include "SpellMgr.h"
++#include "SpellInfo.h"
++#include "Battleground.h"
++#include "CharacterCache.h"
++#include "DBCStores.h"
++
++void CFBGData::SetCFBGData()
++{
++    if (!sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++        return;
++
++    player->SetByteValue(UNIT_FIELD_BYTES_0, 0, NativeTeam() ? GetORace() : GetFRace());
++    player->SetFaction(NativeTeam() ? GetOFaction() : GetFFaction());
++    ReplaceRacials();
++    SetRaceDisplayID();
++
++    // Calling this in BattleGround::AddPlayer fixes scoreboard
++    sCharacterCache->UpdateCharacterData(player->GetGUID(), player->GetName(), {}, player->GetRace());
++}
++
++void CFBGData::SetRaceDisplayID()
++{
++    if (!sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++        return;
++
++    PlayerInfo const* info = sObjectMgr->GetPlayerInfo(player->GetRace(), player->GetClass());
++
++    if (!info)
++        return;
++
++    player->SetObjectScale(1.f);
++
++    uint8 gender = player->GetGender();
++    switch (gender)
++    {
++    case GENDER_FEMALE:
++        player->SetDisplayId(info->displayId_f);
++        player->SetNativeDisplayId(info->displayId_f);
++        break;
++    case GENDER_MALE:
++        player->SetDisplayId(info->displayId_m);
++        player->SetNativeDisplayId(info->displayId_m);
++        break;
++    default:
++        return;
++    }
++}
++
++void CFBGData::ReplaceRacials()
++{
++    if (!sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++        return;
++
++    ReplaceItems();
++
++    std::unordered_map<uint16, bool> skills;
++
++    auto updateskills = [&] (uint32 prace, uint32 pclass, bool add) -> void
++    {
++        if (auto pinfo = sObjectMgr->GetPlayerInfo(prace, pclass))
++        {
++            for (auto& i : pinfo->skills)
++            {
++                if (SkillLineEntry const* skill = sSkillLineStore.LookupEntry(i.SkillId))
++                {
++                    if ((skill->CategoryID == SKILL_CATEGORY_LANGUAGES &&
++                         sWorld->getBoolConfig(CONFIG_CFBG_REPLACELANGUAGES)) ||
++                        (skill->CategoryID != SKILL_CATEGORY_LANGUAGES &&
++                         sWorld->getBoolConfig(CONFIG_CFBG_REPLACERACIALS)))
++                    {
++                        skills[i.SkillId] = add;
++                    }
++                }
++            }
++        }
++    };
++
++    for (uint8 i = 0; i < MAX_RACES; ++i)
++        updateskills(i, player->GetClass(), false);
++
++    updateskills(NativeTeam() ? GetORace() : GetFRace(), player->GetClass(), true);
++
++    for (std::pair<uint16 const, bool>& skillinfo : skills)
++    {
++        if (skillinfo.second)
++            player->LearnDefaultSkill(skillinfo.first, 0);
++        else
++            player->SetSkill(skillinfo.first, 0, 0, 0);
++    }
++
++    player->SendUpdateToPlayer(player);
++}
++
++void CFBGData::ReplaceItems()
++{
++    if (!sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++        return;
++
++    for (std::pair<uint32 const, uint32>& itempair : sObjectMgr->FactionChangeItems)
++    {
++        uint32 item_alliance = itempair.first;
++        uint32 item_horde = itempair.second;
++
++        auto replaceitem = [&] (uint32 sourceitem, uint32 destinationitem) -> void
++        {
++            while (Item* item = player->GetItemByEntry(sourceitem))
++            {
++                item->SetEntry(destinationitem);
++                item->SetState(ITEM_CHANGED);
++            }
++        };
++
++        if (player->GetTeam() == ALLIANCE)
++            replaceitem(item_horde, item_alliance);
++        else
++            replaceitem(item_alliance, item_horde);
++    }
++
++}
++
++void CFBGData::InitializeCFData()
++{
++    m_oRace = player->GetRace();
++    player->SetFactionForRace(player->GetRace());
++    m_oFaction = player->GetFaction();
++    m_oTeam = Player::TeamForRace(m_oRace);
++
++    m_fRace = 0;
++
++    while (m_fRace == 0)
++        for (uint8 i = 0; i < MAX_RACES; ++i)
++            if (sObjectMgr->GetPlayerInfo(i, player->GetClass()) && Player::TeamForRace(i) != GetOTeam() && urand(0, 5) == 0)
++                m_fRace = i;
++
++    ChrRacesEntry const* rEntry = sChrRacesStore.LookupEntry(m_fRace);
++    m_fFaction = rEntry ? rEntry->FactionID : 0;
++    m_fTeam = Player::TeamForRace(m_fRace);
++}
+diff --git a/src/server/game/Entities/Player/CFBGData.h b/src/server/game/Entities/Player/CFBGData.h
+new file mode 100644
+index 00000000000..5c8388e4b12
+--- /dev/null
++++ b/src/server/game/Entities/Player/CFBGData.h
+@@ -0,0 +1,39 @@
++#ifndef _CPLAYER_H
++#define _CPLAYER_H
++
++#include "Common.h"
++#include "Player.h"
++
++class Player;
++
++class TC_GAME_API CFBGData
++{
++public:
++    CFBGData(Player* player)
++    {
++        this->player = player;
++    }
++
++    bool NativeTeam() { return player->GetTeam() == GetOTeam(); }
++    uint8 GetFRace() const { return m_fRace; }
++    uint8 GetORace() const { return m_oRace; }
++    uint32 GetOFaction() const { return m_oFaction; }
++    uint32 GetFFaction() const { return m_fFaction; }
++    uint32 GetOTeam() const { return m_oTeam; }
++    void SetCFBGData();
++    void ReplaceRacials();
++    void ReplaceItems();
++    void InitializeCFData();
++    void SetRaceDisplayID();
++
++private:
++    Player* player;
++    uint8 m_fRace;
++    uint8 m_oRace;
++    uint32 m_fFaction;
++    uint32 m_oFaction;
++    uint32 m_fTeam;
++    uint32 m_oTeam;
++};
++
++#endif // _CPLAYER_H
+diff --git a/src/server/game/Entities/Player/Player.cpp b/src/server/game/Entities/Player/Player.cpp
+index bffd5163ae8..9fdac0017fd 100644
+--- a/src/server/game/Entities/Player/Player.cpp
++++ b/src/server/game/Entities/Player/Player.cpp
+@@ -116,6 +116,8 @@
+ #include "WorldSession.h"
+ #include "WorldStatePackets.h"
+ 
++#include "CFBGData.h"
++
+ #define ZONE_UPDATE_INTERVAL (1*IN_MILLISECONDS)
+ 
+ #define PLAYER_SKILL_INDEX(x)       (PLAYER_SKILL_INFO_1_1 + ((x)*3))
+@@ -185,6 +187,8 @@ uint32 const MAX_MONEY_AMOUNT = static_cast<uint32>(std::numeric_limits<int32>::
+ 
+ Player::Player(WorldSession* session): Unit(true)
+ {
++    cfbgdata = std::make_unique<CFBGData>(this);
++
+     m_speakTime = 0;
+     m_speakCount = 0;
+ 
+@@ -520,6 +524,7 @@ bool Player::Create(ObjectGuid::LowType guidlow, CharacterCreateInfo* createInfo
+ 
+     SetRace(createInfo->Race);
+     SetClass(createInfo->Class);
++    cfbgdata->InitializeCFData();
+     SetGender(createInfo->Gender);
+     SetPowerType(Powers(powertype), false);
+     InitDisplayIds();
+@@ -5987,7 +5992,7 @@ void Player::UpdateWeaponsSkillsToMaxSkillsForLevel()
+ 
+ // This functions sets a skill line value (and adds if doesn't exist yet)
+ // To "remove" a skill line, set it's values to zero
+-void Player::SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal)
++void Player::SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal, bool defskill)
+ {
+     if (!id)
+         return;
+@@ -5998,6 +6003,9 @@ void Player::SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal)
+     //has skill
+     if (itr != mSkillStatus.end() && itr->second.uState != SKILL_DELETED)
+     {
++        if (itr->second.defskill)
++            itr->second.defskill = defskill;
++
+         currVal = SKILL_VALUE(GetUInt32Value(PLAYER_SKILL_VALUE_INDEX(itr->second.pos)));
+         if (newVal)
+         {
+@@ -17218,8 +17226,17 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
+ 
+     SetRace(fields[3].GetUInt8());
+     SetClass(fields[4].GetUInt8());
++    cfbgdata->InitializeCFData();
++    _LoadBGData(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_BG_DATA));
+     SetGender(gender);
+ 
++    if (m_bgData.bgTeam &&
++        sBattlegroundMgr->GetBattleground(m_bgData.bgInstanceID, m_bgData.bgTypeID) &&
++        !cfbgdata->NativeTeam())
++    {
++        SetRace(cfbgdata->GetFRace());
++    }
++
+     // check if race/class combination is valid
+     PlayerInfo const* info = sObjectMgr->GetPlayerInfo(GetRace(), GetClass());
+     if (!info)
+@@ -17354,7 +17371,6 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
+ 
+     _LoadBoundInstances(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_BOUND_INSTANCES));
+     _LoadInstanceTimeRestrictions(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_INSTANCE_LOCK_TIMES));
+-    _LoadBGData(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_BG_DATA));
+ 
+     GetSession()->SetPlayer(this);
+     MapEntry const* mapEntry = sMapStore.LookupEntry(mapId);
+@@ -17762,6 +17778,8 @@ bool Player::LoadFromDB(ObjectGuid guid, CharacterDatabaseQueryHolder const& hol
+     LearnDefaultSkills();
+     LearnCustomSpells();
+ 
++    cfbgdata->ReplaceRacials();
++
+     // must be before inventory (some items required reputation check)
+     m_reputationMgr->LoadFromDB(holder.GetPreparedResult(PLAYER_LOGIN_QUERY_LOAD_REPUTATION));
+ 
+@@ -19325,7 +19343,7 @@ void Player::SaveToDB(CharacterDatabaseTransaction trans, bool create /* = false
+         stmt->setUInt32(index++, GetGUID().GetCounter());
+         stmt->setUInt32(index++, GetSession()->GetAccountId());
+         stmt->setString(index++, GetName());
+-        stmt->setUInt8(index++, GetRace());
++        stmt->setUInt8(index++, cfbgdata->GetORace());
+         stmt->setUInt8(index++, GetClass());
+         stmt->setUInt8(index++, GetNativeGender());   // save gender from PLAYER_BYTES_3, UNIT_BYTES_0 changes with every transform effect
+         stmt->setUInt8(index++, GetLevel());
+@@ -19435,7 +19453,7 @@ void Player::SaveToDB(CharacterDatabaseTransaction trans, bool create /* = false
+         // Update query
+         stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHARACTER);
+         stmt->setString(index++, GetName());
+-        stmt->setUInt8(index++, GetRace());
++        stmt->setUInt8(index++, cfbgdata->GetORace());
+         stmt->setUInt8(index++, GetClass());
+         stmt->setUInt8(index++, GetNativeGender());   // save gender from PLAYER_BYTES_3, UNIT_BYTES_0 changes with every transform effect
+         stmt->setUInt8(index++, GetLevel());
+@@ -20155,28 +20173,31 @@ void Player::_SaveSkills(CharacterDatabaseTransaction trans)
+         uint16 value = SKILL_VALUE(valueData);
+         uint16 max = SKILL_MAX(valueData);
+ 
+-        switch (itr->second.uState)
++        if (!itr->second.defskill)
+         {
+-            case SKILL_NEW:
+-                stmt = CharacterDatabase.GetPreparedStatement(CHAR_INS_CHAR_SKILLS);
+-                stmt->setUInt32(0, GetGUID().GetCounter());
+-                stmt->setUInt16(1, uint16(itr->first));
+-                stmt->setUInt16(2, value);
+-                stmt->setUInt16(3, max);
+-                trans->Append(stmt);
++            switch (itr->second.uState)
++            {
++                case SKILL_NEW:
++                    stmt = CharacterDatabase.GetPreparedStatement(CHAR_INS_CHAR_SKILLS);
++                    stmt->setUInt32(0, GetGUID().GetCounter());
++                    stmt->setUInt16(1, uint16(itr->first));
++                    stmt->setUInt16(2, value);
++                    stmt->setUInt16(3, max);
++                    trans->Append(stmt);
+ 
+-                break;
+-            case SKILL_CHANGED:
+-                stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_SKILLS);
+-                stmt->setUInt16(0, value);
+-                stmt->setUInt16(1, max);
+-                stmt->setUInt32(2, GetGUID().GetCounter());
+-                stmt->setUInt16(3, uint16(itr->first));
+-                trans->Append(stmt);
++                    break;
++                case SKILL_CHANGED:
++                    stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_SKILLS);
++                    stmt->setUInt16(0, value);
++                    stmt->setUInt16(1, max);
++                    stmt->setUInt32(2, GetGUID().GetCounter());
++                    stmt->setUInt16(3, uint16(itr->first));
++                    trans->Append(stmt);
+ 
+-                break;
+-            default:
+-                break;
++                    break;
++                default:
++                    break;
++            }
+         }
+         itr->second.uState = SKILL_UNCHANGED;
+ 
+@@ -20779,7 +20800,13 @@ void Player::Say(std::string_view text, Language language, WorldObject const* /*
+ 
+     WorldPacket data;
+     ChatHandler::BuildChatPacket(data, CHAT_MSG_SAY, language, this, this, _text);
+-    SendMessageToSetInRange(&data, sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_SAY), true);
++    SendMessageToSetInRange(&data, sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_SAY), !sWorld->getBoolConfig(CONFIG_CFBG_ENABLED));
++
++    if (sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++    {
++       ChatHandler::BuildChatPacket(data, CHAT_MSG_SAY, LANG_UNIVERSAL, this, nullptr, _text);
++       SendDirectMessage(&data);
++    }
+ }
+ 
+ void Player::Say(uint32 textId, WorldObject const* target /*= nullptr*/)
+@@ -20794,7 +20821,13 @@ void Player::Yell(std::string_view text, Language language, WorldObject const* /
+ 
+     WorldPacket data;
+     ChatHandler::BuildChatPacket(data, CHAT_MSG_YELL, language, this, this, _text);
+-    SendMessageToSetInRange(&data, sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_YELL), true);
++    SendMessageToSetInRange(&data, sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_YELL), !sWorld->getBoolConfig(CONFIG_CFBG_ENABLED));
++
++    if (sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++    {
++       ChatHandler::BuildChatPacket(data, CHAT_MSG_YELL, LANG_UNIVERSAL, this, nullptr, _text);
++       SendDirectMessage(&data);
++    }
+ }
+ 
+ void Player::Yell(uint32 textId, WorldObject const* target /*= nullptr*/)
+@@ -20809,7 +20842,13 @@ void Player::TextEmote(std::string_view text, WorldObject const* /*= nullptr*/,
+ 
+     WorldPacket data;
+     ChatHandler::BuildChatPacket(data, CHAT_MSG_EMOTE, LANG_UNIVERSAL, this, this, _text);
+-    SendMessageToSetInRange(&data, sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_TEXTEMOTE), true, !GetSession()->HasPermission(rbac::RBAC_PERM_TWO_SIDE_INTERACTION_CHAT));
++    SendMessageToSetInRange(&data, sWorld->getFloatConfig(CONFIG_LISTEN_RANGE_TEXTEMOTE), !sWorld->getBoolConfig(CONFIG_CFBG_ENABLED), !GetSession()->HasPermission(rbac::RBAC_PERM_TWO_SIDE_INTERACTION_CHAT));
++
++    if (sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++    {
++       ChatHandler::BuildChatPacket(data, CHAT_MSG_EMOTE, LANG_UNIVERSAL, this, nullptr, _text);
++       SendDirectMessage(&data);
++    }
+ }
+ 
+ void Player::TextEmote(uint32 textId, WorldObject const* target /*= nullptr*/, bool /*isBossEmote = false*/)
+@@ -22242,11 +22281,12 @@ void Player::SetBGTeam(uint32 team)
+ {
+     m_bgData.bgTeam = team;
+     SetArenaFaction(uint8(team == ALLIANCE ? 1 : 0));
++    cfbgdata->SetCFBGData();
+ }
+ 
+ uint32 Player::GetBGTeam() const
+ {
+-    return m_bgData.bgTeam ? m_bgData.bgTeam : GetTeam();
++    return m_bgData.bgTeam ? m_bgData.bgTeam : m_team;
+ }
+ 
+ void Player::LeaveBattleground(bool teleportToEntryPoint)
+@@ -23038,7 +23078,7 @@ void Player::LearnDefaultSkill(uint32 skillId, uint16 rank)
+     switch (GetSkillRangeType(rcInfo))
+     {
+         case SKILL_RANGE_LANGUAGE:
+-            SetSkill(skillId, 0, 300, 300);
++            SetSkill(skillId, 0, 300, 300, true);
+             break;
+         case SKILL_RANGE_LEVEL:
+         {
+@@ -23055,11 +23095,11 @@ void Player::LearnDefaultSkill(uint32 skillId, uint16 rank)
+             else if (skillId == SKILL_LOCKPICKING)
+                 skillValue = std::max<uint16>(1, GetSkillValue(SKILL_LOCKPICKING));
+ 
+-            SetSkill(skillId, 0, skillValue, maxValue);
++            SetSkill(skillId, 0, skillValue, maxValue, true);
+             break;
+         }
+         case SKILL_RANGE_MONO:
+-            SetSkill(skillId, 0, 1, 1);
++            SetSkill(skillId, 0, 1, 1, true);
+             break;
+         case SKILL_RANGE_RANK:
+         {
+@@ -23074,7 +23114,7 @@ void Player::LearnDefaultSkill(uint32 skillId, uint16 rank)
+             else if (GetClass() == CLASS_DEATH_KNIGHT)
+                 skillValue = std::min(std::max<uint16>({ uint16(1), uint16((GetLevel() - 1) * 5) }), maxValue);
+ 
+-            SetSkill(skillId, rank, skillValue, maxValue);
++            SetSkill(skillId, rank, skillValue, maxValue, true);
+             break;
+         }
+         default:
+@@ -24961,6 +25001,7 @@ void Player::_LoadSkills(PreparedQueryResult result)
+             uint16 max      = fields[2].GetUInt16();
+ 
+             SkillRaceClassInfoEntry const* rcEntry = GetSkillRaceClassInfo(skill, GetRace(), GetClass());
++
+             if (!rcEntry)
+             {
+                 TC_LOG_ERROR("entities.player", "Player::_LoadSkills: Player '%s' (%s, Race: %u, Class: %u) has forbidden skill %u for his race/class combination",
+diff --git a/src/server/game/Entities/Player/Player.h b/src/server/game/Entities/Player/Player.h
+index b5ddaca836c..fa5f8de9abc 100644
+--- a/src/server/game/Entities/Player/Player.h
++++ b/src/server/game/Entities/Player/Player.h
+@@ -513,6 +513,7 @@ struct SkillStatusData
+     }
+     uint8 pos;
+     SkillUpdateState uState;
++    bool defskill = false;
+ };
+ 
+ typedef std::unordered_map<uint32, SkillStatusData> SkillStatusMap;
+@@ -881,13 +882,19 @@ struct ResurrectionData
+ 
+ #define SPELL_DK_RAISE_ALLY 46619
+ 
++class CFBGData;
++
+ class TC_GAME_API Player : public Unit, public GridObject<Player>
+ {
+     friend class WorldSession;
+     friend class CinematicMgr;
++    friend class CFBGData;
+     friend void AddItemToUpdateQueueOf(Item* item, Player* player);
+     friend void RemoveItemFromUpdateQueueOf(Item* item, Player* player);
++
+     public:
++        std::unique_ptr<CFBGData> cfbgdata;
++
+         explicit Player(WorldSession* session);
+         ~Player();
+ 
+@@ -1738,7 +1745,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
+         void UpdateWeaponSkill(Unit* victim, WeaponAttackType attType);
+         void UpdateCombatSkills(Unit* victim, WeaponAttackType attType, bool defense);
+ 
+-        void SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal);
++        void SetSkill(uint32 id, uint16 step, uint16 newVal, uint16 maxVal, bool defskill = false);
+         uint16 GetMaxSkillValue(uint32 skill) const;        // max + perm. bonus + temp bonus
+         uint16 GetPureMaxSkillValue(uint32 skill) const;    // max
+         uint16 GetSkillValue(uint32 skill) const;           // skill value + perm. bonus + temp bonus
+@@ -1762,7 +1769,7 @@ class TC_GAME_API Player : public Unit, public GridObject<Player>
+         void CheckAreaExploreAndOutdoor(void);
+ 
+         static uint32 TeamForRace(uint8 race);
+-        uint32 GetTeam() const { return m_team; }
++        uint32 GetTeam() const { return GetBGTeam(); }
+         TeamId GetTeamId() const { return m_team == ALLIANCE ? TEAM_ALLIANCE : TEAM_HORDE; }
+         void SetFactionForRace(uint8 race);
+ 
+diff --git a/src/server/game/Handlers/CharacterHandler.cpp b/src/server/game/Handlers/CharacterHandler.cpp
+index 5fa661038fc..21166a31722 100644
+--- a/src/server/game/Handlers/CharacterHandler.cpp
++++ b/src/server/game/Handlers/CharacterHandler.cpp
+@@ -53,6 +53,8 @@
+ #include "QueryHolder.h"
+ #include "World.h"
+ 
++#include "CFBGData.h"
++
+ class LoginQueryHolder : public CharacterDatabaseQueryHolder
+ {
+     private:
+diff --git a/src/server/game/Handlers/ChatHandler.cpp b/src/server/game/Handlers/ChatHandler.cpp
+index c9e69ba6c0a..2bb80b772ec 100644
+--- a/src/server/game/Handlers/ChatHandler.cpp
++++ b/src/server/game/Handlers/ChatHandler.cpp
+@@ -44,6 +44,8 @@
+ #include "WorldPacket.h"
+ #include <algorithm>
+ 
++#include "CFBGData.h"
++
+ inline bool isNasty(uint8 c)
+ {
+     if (c == '\t')
+@@ -348,11 +350,28 @@ void WorldSession::HandleMessagechatOpcode(WorldPacket& recvData)
+                     return;
+                 }
+ 
+-                if (GetPlayer()->GetTeam() != receiver->GetTeam() && !HasPermission(rbac::RBAC_PERM_TWO_SIDE_INTERACTION_CHAT))
++                if (!sWorld->getBoolConfig(CONFIG_CFBG_ENABLED) && GetPlayer()->GetTeam() != receiver->GetTeam() && !HasPermission(rbac::RBAC_PERM_TWO_SIDE_INTERACTION_CHAT))
+                 {
+                     SendWrongFactionNotice();
+                     return;
+                 }
++                // This could all be implemented as a oneliner, but it hurts
++                // my head even thinking about it, this is easy and readable.
++                else if (sWorld->getBoolConfig(CONFIG_CFBG_ENABLED))
++                {
++                    if (GetPlayer()->GetBattleground() == receiver->GetBattleground() &&
++                        GetPlayer()->GetTeam() != receiver->GetTeam())
++                    {
++                        SendWrongFactionNotice();
++                        return;
++                    }
++                    else if (GetPlayer()->GetBattleground() != receiver->GetBattleground() &&
++                             GetPlayer()->cfbgdata->GetOTeam() != receiver->cfbgdata->GetOTeam())
++                    {
++                        SendWrongFactionNotice();
++                        return;
++                    }
++                }
+             }
+ 
+             if (GetPlayer()->HasAura(1852) && !receiver->IsGameMaster())
+diff --git a/src/server/game/World/World.h b/src/server/game/World/World.h
+index eeda8e69709..5b659fae61f 100644
+--- a/src/server/game/World/World.h
++++ b/src/server/game/World/World.h
+@@ -178,6 +178,9 @@ enum WorldBoolConfigs
+     CONFIG_RESPAWN_DYNAMIC_ESCORTNPC,
+     CONFIG_REGEN_HP_CANNOT_REACH_TARGET_IN_RAID,
+     CONFIG_ALLOW_LOGGING_IP_ADDRESSES_IN_DATABASE,
++    CONFIG_CFBG_ENABLED,
++    CONFIG_CFBG_REPLACERACIALS,
++    CONFIG_CFBG_REPLACELANGUAGES,
+     BOOL_CONFIG_VALUE_COUNT
+ };
+ 
+diff --git a/src/server/scripts/Custom/CrossfactionBattlegrounds.cpp b/src/server/scripts/Custom/CrossfactionBattlegrounds.cpp
+new file mode 100644
+index 00000000000..4ba7cfbc3d4
+--- /dev/null
++++ b/src/server/scripts/Custom/CrossfactionBattlegrounds.cpp
+@@ -0,0 +1,79 @@
++#include "ScriptMgr.h"
++#include "CFBGData.h"
++#include "Chat.h"
++#include "RBAC.h"
++#include "WorldSession.h"
++#include "Battleground.h"
++#include "World.h"
++#include "Config.h"
++
++using namespace Trinity::ChatCommands;
++
++class CrossFactionBattlegroundPlayerScript : public PlayerScript
++{
++public:
++    CrossFactionBattlegroundPlayerScript() : PlayerScript("CrossfactionBattlegroundPlayerScript") { }
++
++    void OnLogin(Player* player, bool /*firstLogin*/)
++    {
++        if (!player->cfbgdata->NativeTeam())
++        {
++            player->SetRace(player->cfbgdata->GetFRace());
++            player->SetFactionForRace(player->GetRace());
++            player->cfbgdata->SetRaceDisplayID();
++        }
++    }
++};
++
++class CrossFactionBattlegroundCommandScript : public CommandScript
++{
++public:
++    CrossFactionBattlegroundCommandScript() : CommandScript("CrossFactionBattlegroundCommandScript") { }
++
++    ChatCommandTable GetCommands() const override
++    {
++        static ChatCommandTable debugCommandTable =
++        {
++            { "startbg", HandleDebugBattlegroundCommand, rbac::RBAC_PERM_COMMAND_DEBUG, Console::No },
++        };
++
++        static ChatCommandTable commandTable =
++        {
++            { "cfbg", debugCommandTable },
++        };
++        return commandTable;
++    }
++    static bool HandleDebugBattlegroundCommand(ChatHandler* handler)
++    {
++        if (!handler->GetSession())
++            return false;
++
++        auto bg = handler->GetSession()->GetPlayer()->GetBattleground();
++        if (bg)
++        {
++            bg->SetStartDelayTime(-1);
++            handler->SendSysMessage("Battleground started");
++        }
++        return true;
++    }
++};
++
++class CrossFactionBattlegroundWorldScript : public WorldScript
++{
++public:
++    CrossFactionBattlegroundWorldScript() : WorldScript("CrossFactionBattlegroundWorldScript") { }
++
++    void OnConfigLoad(bool /*reload*/)
++    {
++        sWorld->setBoolConfig(CONFIG_CFBG_ENABLED, sConfigMgr->GetBoolDefault("CrossFactionBattlegrounds.Enable", true));
++        sWorld->setBoolConfig(CONFIG_CFBG_REPLACELANGUAGES, sConfigMgr->GetBoolDefault("CrossFactionBattlegrounds.ReplaceLanguages", true));
++        sWorld->setBoolConfig(CONFIG_CFBG_REPLACERACIALS, sConfigMgr->GetBoolDefault("CrossFactionBattlegrounds.ReplaceRacials", false));
++    }
++};
++
++void AddSC_CrossfactionBattlegrounds()
++{
++    new CrossFactionBattlegroundPlayerScript();
++    new CrossFactionBattlegroundCommandScript();
++    new CrossFactionBattlegroundWorldScript();
++}
+diff --git a/src/server/scripts/Custom/custom_script_loader.cpp b/src/server/scripts/Custom/custom_script_loader.cpp
+index cb7667acfef..3d6bae8297e 100644
+--- a/src/server/scripts/Custom/custom_script_loader.cpp
++++ b/src/server/scripts/Custom/custom_script_loader.cpp
+@@ -28,7 +28,7 @@
+ // 6
+ // 7
+ // 8
+-// 9
++void AddSC_CrossfactionBattlegrounds();
+ // 10
+ // 11
+ // 12
+@@ -71,7 +71,7 @@ void AddCustomScripts()
+     // 6
+     // 7
+     // 8
+-    // 9
++    AddSC_CrossfactionBattlegrounds();
+     // 10
+     // 11
+     // 12
+diff --git a/src/server/worldserver/worldserver.conf.dist b/src/server/worldserver/worldserver.conf.dist
+index f475d0248e8..24d7473d08b 100644
+--- a/src/server/worldserver/worldserver.conf.dist
++++ b/src/server/worldserver/worldserver.conf.dist
+@@ -4125,3 +4125,43 @@ Metric.OverallStatusInterval = 1
+ 
+ #
+ ###################################################################################################
++
++###################################################################################################
++# Cross Faction Battlegrounds#
++##############################
++#
++#    CrossFactionBattlegrounds.Enable
++#        Description: Enables Cross Faction Battlegrounds modules.
++#                     This module will enable both factions to team up for Battlegrounds play.
++#
++#        Default:     1    - (Enabled)
++#                     0    - (Disable)
++#
++
++CrossFactionBattlegrounds.Enable = 1
++
++#
++#    CrossFactionBattlegrounds.ReplaceLanguages
++#        Description: Disable Languages so everyone regardless of race.
++#                     This will enable both factions to comunicate on the same team for
++#                     unified team communifcations.
++#
++#        Default:     1    - (Enabled)
++#                     0    - (Disable)
++#
++
++CrossFactionBattlegrounds.ReplaceLanguages = 1
++
++#
++#    CrossFactionBattlegrounds.ReplaceRacials
++#        Description: Replaces Racial with default Skills.
++#                     This Ensures there are no racial exploits or advantage for Battlegounds play.
++#
++#        Default:     0    - (Disable)
++#                     1    - (Enabled)
++#
++
++CrossFactionBattlegrounds.ReplaceRacials = 0
++
++#
++###################################################################################################

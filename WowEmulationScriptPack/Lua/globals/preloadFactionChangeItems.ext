@@ -1,0 +1,36 @@
+local FactionChangeItems = {}
+
+function PreloadFactionChangeItems()
+    FactionChangeItems["Alliance"] = {}
+        FactionChangeItems["Horde"] = {}
+    local Query = WorldDBQuery("SELECT alliance_id,horde_id FROM player_factionchange_items")
+    if(Query) then
+        repeat
+            FactionChangeItems["Alliance"][Query:GetUInt32(0)] = Query:GetUInt32(1)
+                        FactionChangeItems["Horde"][Query:GetUInt32(1)] = Query:GetUInt32(0) 
+        until not Query:NextRow()
+        PrintInfo("[Faction Change Items] Cache initialized. Loaded "..Query:GetRowCount().." results.")
+    else
+        PrintInfo("[Faction Change Items] Cache initialized. No results found.")
+    end
+end
+
+function FactionChangeItemFromAlliance(entryid)
+        local entry = tonumber(entryid)
+        if FactionChangeItems["Alliance"][entryid] == nil then
+                return 0
+        else
+                return FactionChangeItems["Alliance"][entryid]
+        end
+end
+
+function FactionChangeItemFromHorde(entryid)
+        local entry = tonumber(entryid)
+        if FactionChangeItems["Horde"][entryid] == nil then
+                return
+        else
+                return FactionChangeItems["Horde"][entryid]
+        end
+end
+
+PreloadFactionChangeItems()

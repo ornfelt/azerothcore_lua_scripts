@@ -1,0 +1,1 @@
+PermaDeath = Lock character so u cant login after you die.
