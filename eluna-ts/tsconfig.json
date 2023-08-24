@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "esnext",
+    "skipLibCheck": true,
+    "lib": [
+      "esnext","DOM"
+    ],
+    "moduleResolution": "node",
+    "types": [
+      "lua-types/5.2",
+      "@azerothcore/eluna-ts-definitions",
+      "@azerothcore/eluna-ts-lib"
+    ],
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/@azerothcore"
+    ],
+    "rootDir": "modules"
+  },
+  "include": [
+    "modules/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/node_modules",
+    "test",
+    "**/*spec.ts",
+    "**/__tests__",
+    "**/__mocks__",
+  ],
+  "references": [
+    {
+      "path": "./deps/eluna-ts-definitions"
+    },
+    {
+      "path": "./deps/eluna-ts-lib/tsconfig.ref.json"
+    }
+  ],
+  "tstl": {
+    "luaTarget": "5.2",
+    "noHeader": true,
+    "luaLibImport": "none",
+    "luaBundleEntry": "./modules/index.ts"
+  }
+}
