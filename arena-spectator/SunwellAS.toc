@@ -1,0 +1,6 @@
+## Interface: 30300
+## Title: Sunwell Arena Spectator UI
+## Version: 27
+## SavedVariables: teamname, teamscore, tournamentMode
+SunwellAS.lua
+combatfeedback.lua

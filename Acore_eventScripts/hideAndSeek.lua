@@ -212,8 +212,8 @@ end
 function haS.OnCommand(_, player, command, chatHandler)
     local commandArray = {}
 
-    --prevent players from using this, GM rank 2 is required.
-    if not chatHandler:IsAvailable( 2 ) then
+    --prevent players from using this, GM rank 1 is required.
+    if not chatHandler:IsAvailable( 1 ) then
         return
     end
 

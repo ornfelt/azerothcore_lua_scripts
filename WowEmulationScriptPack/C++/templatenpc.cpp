@@ -1,1500 +1,1268 @@
-/////////////////////////////////////////////////////////////////////////////
-//        ____        __  __  __     ___                                   //
-//       / __ )____ _/ /_/ /_/ /__  /   |  ________  ____  ____ ______     //
-//      / __  / __ `/ __/ __/ / _ \/ /| | / ___/ _ \/ __ \/ __ `/ ___/     //
-//     / /_/ / /_/ / /_/ /_/ /  __/ ___ |/ /  /  __/ / / / /_/ (__  )      //
-//    /_____/\__,_/\__/\__/_/\___/_/  |_/_/   \___/_/ /_/\__,_/____/       //
-//         Developed by Natureknight for BattleArenas.no-ip.org            //
-//             Copyright (C) 2015 Natureknight/JessiqueBA                  //
-//                      battlearenas.no-ip.org                             //
-/////////////////////////////////////////////////////////////////////////////
+// Template NPC
+// Smolderforge
+// Template by Robin
 
 #include "ScriptPCH.h"
-#include "TemplateNPC.h"
+#include "beastmaster.h"
 
-void sTemplateNPC::LearnPlateMailSpells(Player* player)
+void AddTrinketTabardShirt(Player *player)
 {
-	switch (player->getClass())
-	{
-	case CLASS_WARRIOR:
-	case CLASS_PALADIN:
-	case CLASS_DEATH_KNIGHT:
-		player->learnSpell(PLATE_MAIL, true);
-		break;
-	case CLASS_SHAMAN:
-	case CLASS_HUNTER:
-		player->learnSpell(MAIL, true);
-		break;
-	default:
-		break;
-	}
+    // general defines
+    uint32 trinketHorde = 37865;
+    uint32 trinketAlly  = 37864;
+    uint32 guildtabard  = 5976;
+    uint32 shirt        = 4333;
+
+    if (player->GetTeam() == HORDE)
+        player->StoreNewItemInBestSlots(trinketHorde, 1);
+    else
+        player->StoreNewItemInBestSlots(trinketAlly, 1);
+
+    //player->StoreNewItemInBestSlots(guildtabard, 1);
+    player->StoreNewItemInBestSlots(shirt, 1);
 }
 
-void sTemplateNPC::ApplyBonus(Player* player, Item* item, EnchantmentSlot slot, uint32 bonusEntry)
+void AddEnchantment(Player *player, Item *item, uint32 enchantId)
 {
-	if (!item)
-		return;
-
-	if (!bonusEntry || bonusEntry == 0)
-		return;
-
-	player->ApplyEnchantment(item, slot, false);
-	item->SetEnchantment(slot, bonusEntry, 0, 0);
-	player->ApplyEnchantment(item, slot, true);
+    if (!player || !item || !enchantId)
+        return;
+    
+    // remove old enchanting before applying new if equipped
+    player->ApplyEnchantment(item, PERM_ENCHANTMENT_SLOT, false);
+    item->SetEnchantment(PERM_ENCHANTMENT_SLOT, enchantId, 0, 0);
+    
+    // add new enchanting if equipped
+    player->ApplyEnchantment(item, PERM_ENCHANTMENT_SLOT, true);
 }
 
-void sTemplateNPC::ApplyGlyph(Player* player, uint8 slot, uint32 glyphID)
+void AddSocket(Player *player, Item *item, uint32 enchantId_1, uint32 enchantId_2, uint32 enchantId_3)
 {
-	if (GlyphPropertiesEntry const* gp = sGlyphPropertiesStore.LookupEntry(glyphID))
-	{
-		if (uint32 oldGlyph = player->GetGlyph(slot))
-		{
-			player->RemoveAurasDueToSpell(sGlyphPropertiesStore.LookupEntry(oldGlyph)->SpellId);
-			player->SetGlyph(slot, 0);
-		}
-		player->CastSpell(player, gp->SpellId, true);
-		player->SetGlyph(slot, glyphID);
-	}
+    if (!player || !item)
+        return;
+
+    //remove ALL enchants
+    for (uint32 enchant_slot = SOCK_ENCHANTMENT_SLOT; enchant_slot < SOCK_ENCHANTMENT_SLOT+3; ++enchant_slot)
+        player->ApplyEnchantment(item, EnchantmentSlot(enchant_slot), false);
+
+    if (enchantId_1)
+        item->SetEnchantment(EnchantmentSlot(SOCK_ENCHANTMENT_SLOT), enchantId_1, 0, 0);
+    if (enchantId_2)
+        item->SetEnchantment(EnchantmentSlot(SOCK_ENCHANTMENT_SLOT_2), enchantId_2, 0, 0);
+    if (enchantId_3)
+        item->SetEnchantment(EnchantmentSlot(SOCK_ENCHANTMENT_SLOT_3), enchantId_3, 0, 0);
+
+    for (uint32 enchant_slot = SOCK_ENCHANTMENT_SLOT; enchant_slot < SOCK_ENCHANTMENT_SLOT+3; ++enchant_slot)
+        player->ApplyEnchantment(item, EnchantmentSlot(enchant_slot), true);
 }
 
-void sTemplateNPC::LearnTemplateTalents(Player* player)
+void AddItemsEnchantsGemsTalents(Player* player, uint32 items[], uint32 sockets[][3], uint32 enchants[], uint32 talents[], uint32 itemsCount, uint32 talentsCount)
 {
-	for (TalentContainer::const_iterator itr = m_TalentContainer.begin(); itr != m_TalentContainer.end(); ++itr)
-	{
-		if ((*itr)->playerClass == GetClassString(player).c_str() && (*itr)->playerSpec == sTalentsSpec)
-		{
-			player->learnSpell((*itr)->talentId, false);
-			player->AddTalent((*itr)->talentId, player->GetActiveSpec(), true);
-		}
-	}
-	player->SetFreeTalentPoints(0);
-	player->SendTalentsInfoData(false);
+    // wipe talents without confirmation
+    player->resetTalents(true);
+
+    // learn talents from array
+    for (uint32 talent_i = 0; talent_i < talentsCount; talent_i++)
+    {
+        player->learnSpell(talents[talent_i]);
+        player->addTalent(talents[talent_i], player->GetActiveSpec(), true);
+    }
+
+    // remove all talents points
+    player->SetFreeTalentPoints(0);
+
+    // add items and equipt it
+    for (uint32 i = 0; i < itemsCount; i++)
+        player->StoreNewItemInBestSlots(items[i], 1);
+
+    // add socket to items
+    for (int i_slot = EQUIPMENT_SLOT_START; i_slot < EQUIPMENT_SLOT_END; i_slot++)
+    {
+        Item *itemTarget = player->GetItemByPos(INVENTORY_SLOT_BAG_0, i_slot);
+
+        if (sockets[i_slot][0] || sockets[i_slot][1] || sockets[i_slot][2]) // if there is at least 1 gem
+            AddSocket(player, itemTarget, sockets[i_slot][0], sockets[i_slot][1], sockets[i_slot][2]);
+
+        AddEnchantment(player, itemTarget, enchants[i_slot]);
+
+        if (i_slot >= INVENTORY_SLOT_BAG_END || !itemTarget)
+            continue;
+
+        ItemPrototype const *proto = itemTarget->GetProto();
+
+        player->ApplyEnchantment(itemTarget,BONUS_ENCHANTMENT_SLOT, false);
+        itemTarget->SetEnchantment(BONUS_ENCHANTMENT_SLOT, proto->socketBonus, 0, 0);
+        player->ApplyEnchantment(itemTarget, BONUS_ENCHANTMENT_SLOT, true);
+    }
+
+    player->ToggleMetaGemsActive(23, true); // 23 is INVENTORY_SLOT_ITEM_1, not defined in oregon anymore
+
+    // add trinkets tabard and shirt from function
+    AddTrinketTabardShirt(player);
+
+    player->ResetAllPowers(); // set health, mana, etc. to full
 }
 
-void sTemplateNPC::LearnTemplateGlyphs(Player* player)
+bool GossipHello_npc_template(Player *player, Creature *creature)
 {
-	for (GlyphContainer::const_iterator itr = m_GlyphContainer.begin(); itr != m_GlyphContainer.end(); ++itr)
-	{
-		if ((*itr)->playerClass == GetClassString(player).c_str() && (*itr)->playerSpec == sTalentsSpec)
-			ApplyGlyph(player, (*itr)->slot, (*itr)->glyph);
-	}
-	player->SendTalentsInfoData(false);
+    if (creature->isQuestGiver())
+        player->PrepareQuestMenu(creature->GetGUID());
+
+    player->ADD_GOSSIP_ITEM(0, "Equip all my items, enchants, gems and spec my talents please.", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 1);
+
+    player->SEND_GOSSIP_MENU(9, creature->GetGUID());
+    return true;
 }
 
-void sTemplateNPC::EquipTemplateGear(Player* player)
+bool GossipSelect_npc_template(Player *player, Creature *creature, uint32 sender, uint32 action)
 {
-	if (player->getRace() == RACE_HUMAN)
-	{
-		for (HumanGearContainer::const_iterator itr = m_HumanGearContainer.begin(); itr != m_HumanGearContainer.end(); ++itr)
-		{
-			if ((*itr)->playerClass == GetClassString(player).c_str() && (*itr)->playerSpec == sTalentsSpec)
-			{
-				player->EquipNewItem((*itr)->pos, (*itr)->itemEntry, true); // Equip the item and apply enchants and gems
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), PERM_ENCHANTMENT_SLOT, (*itr)->enchant);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT, (*itr)->socket1);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT_2, (*itr)->socket2);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT_3, (*itr)->socket3);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), BONUS_ENCHANTMENT_SLOT, (*itr)->bonusEnchant);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), PRISMATIC_ENCHANTMENT_SLOT, (*itr)->prismaticEnchant);
-			}
-		}
-	}
-	else if (player->GetTeam() == ALLIANCE && player->getRace() != RACE_HUMAN)
-	{
-		for (AllianceGearContainer::const_iterator itr = m_AllianceGearContainer.begin(); itr != m_AllianceGearContainer.end(); ++itr)
-		{
-			if ((*itr)->playerClass == GetClassString(player).c_str() && (*itr)->playerSpec == sTalentsSpec)
-			{
-				player->EquipNewItem((*itr)->pos, (*itr)->itemEntry, true); // Equip the item and apply enchants and gems
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), PERM_ENCHANTMENT_SLOT, (*itr)->enchant);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT, (*itr)->socket1);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT_2, (*itr)->socket2);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT_3, (*itr)->socket3);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), BONUS_ENCHANTMENT_SLOT, (*itr)->bonusEnchant);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), PRISMATIC_ENCHANTMENT_SLOT, (*itr)->prismaticEnchant);
-			}
-		}
-	}
-	else if (player->GetTeam() == HORDE)
-	{
-		for (HordeGearContainer::const_iterator itr = m_HordeGearContainer.begin(); itr != m_HordeGearContainer.end(); ++itr)
-		{
-			if ((*itr)->playerClass == GetClassString(player).c_str() && (*itr)->playerSpec == sTalentsSpec)
-			{
-				player->EquipNewItem((*itr)->pos, (*itr)->itemEntry, true); // Equip the item and apply enchants and gems
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), PERM_ENCHANTMENT_SLOT, (*itr)->enchant);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT, (*itr)->socket1);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT_2, (*itr)->socket2);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), SOCK_ENCHANTMENT_SLOT_3, (*itr)->socket3);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), BONUS_ENCHANTMENT_SLOT, (*itr)->bonusEnchant);
-				ApplyBonus(player, player->GetItemByPos(INVENTORY_SLOT_BAG_0, (*itr)->pos), PRISMATIC_ENCHANTMENT_SLOT, (*itr)->prismaticEnchant);
-			}
-		}
-	}
+    uint32 itemsCount = 0;
+    uint32 talentsCount = 0;
+
+    switch (action)
+    {
+        case GOSSIP_ACTION_INFO_DEF + 1:
+        {
+            // check if player has item equipped
+            for (int i = EQUIPMENT_SLOT_START; i < EQUIPMENT_SLOT_END; i++)
+            {
+                Item *itemTarget = player->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
+
+                if (itemTarget)
+                {
+                    player->GetSession()->SendNotification("You must unequip all items first.");
+                    player->CLOSE_GOSSIP_MENU();
+                    return true;
+                }
+            }
+
+            // check if player is in bg queue
+            if (player->InBattleGroundQueue())
+            {
+                player->GetSession()->SendNotification("You must leave all queues before resetting talents");
+                return true;
+            }
+
+            switch (player->getClass())
+            {
+                case CLASS_WARRIOR:
+                    player->ADD_GOSSIP_ITEM(0, "Arms (Axe)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 101);
+                    player->ADD_GOSSIP_ITEM(0, "Arms (Mace)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 102);
+                    player->ADD_GOSSIP_ITEM(0, "Arms (Sword)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 103);
+                    break;
+                case CLASS_PALADIN:
+                    player->ADD_GOSSIP_ITEM(0, "Holy", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 201);
+                    player->ADD_GOSSIP_ITEM(0, "Shockadin", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 202);
+                    player->ADD_GOSSIP_ITEM(0, "Retribution", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 203);
+                    break;
+                case CLASS_HUNTER:
+                    player->ADD_GOSSIP_ITEM(0, "Beastmastery", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 301);
+                    player->ADD_GOSSIP_ITEM(0, "Marksmanship", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 302);
+                    player->ADD_GOSSIP_ITEM(0, "Survival", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 303);
+                    break;
+                case CLASS_ROGUE:
+                    player->ADD_GOSSIP_ITEM(0, "Assassination (Mutilate)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 401);
+                    player->ADD_GOSSIP_ITEM(0, "Subtlety (Hemorrhage)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 403);
+                    break;
+                case CLASS_PRIEST:
+                    player->ADD_GOSSIP_ITEM(0, "Discipline / Holy", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 501);
+                    player->ADD_GOSSIP_ITEM(0, "Shadow", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 502);
+                    break;
+                case CLASS_SHAMAN:
+                    player->ADD_GOSSIP_ITEM(0, "Elemental", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 601);
+                    player->ADD_GOSSIP_ITEM(0, "Enhancement", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 602);
+                    player->ADD_GOSSIP_ITEM(0, "Restoration", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 603);
+                    break;
+                case CLASS_MAGE:
+                    //player->ADD_GOSSIP_ITEM(0, "Arcane/Fire (PoM/Pyro)", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 701);
+                    player->ADD_GOSSIP_ITEM(0, "Fire", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 702);
+                    player->ADD_GOSSIP_ITEM(0, "Frost", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 703);
+                    break;
+                case CLASS_WARLOCK:
+                    player->ADD_GOSSIP_ITEM(0, "Affliction", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 801);
+                    player->ADD_GOSSIP_ITEM(0, "Demonology", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 802);
+                    player->ADD_GOSSIP_ITEM(0, "SL/SL", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 803);
+                    player->ADD_GOSSIP_ITEM(0, "Destruction", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 804);
+                    break;
+                case CLASS_DRUID:
+                    player->ADD_GOSSIP_ITEM(0, "Balance", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 901);
+                    player->ADD_GOSSIP_ITEM(0, "Feral Combat", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 902);
+                    player->ADD_GOSSIP_ITEM(0, "Restoration", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 904);
+                    player->ADD_GOSSIP_ITEM(0, "Restokin", GOSSIP_SENDER_MAIN, GOSSIP_ACTION_INFO_DEF + 905);
+                    break;
+            }
+            player->SEND_GOSSIP_MENU(60, creature->GetGUID());
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 101: // Warrior - Arms (Axe - 100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {30488, 33923, 30490, 33484, 30486, 33813, 30487, 33331, 30489, 33812, 33919, 33057, 29383, 31966, 32054}; // item ids
+            uint32 itemsCount = 15; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 2647, 684, 2931, 2931, 0, 0, 368, 3225, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3139, 0 },
+                { 3139, 0 , 0},
+                { 3115, 3139, 0},
+                { 0, 0, 0 },
+                { 3115, 3115, 3139},
+                { 3115, 3115, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3139, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16466, 12962, 12963, 12867, 12712, 16494, 12292, 12785, 29889, 12668, 29859, 12294, 29838, 12856, 12838, 12322, 12323, 16492, 13048, 12328, 20505, 12677};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 102: // Warrior - Arms (Mace - 100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {30488, 33923, 30490, 33484, 30486, 33813, 30487, 33331, 30489, 33812, 33919, 33057, 29383, 31959, 32054}; // item ids
+            uint32 itemsCount = 15; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 2647, 684, 2931, 2931, 0, 0, 368, 3225, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3139, 0 },
+                { 3139, 0 , 0},
+                { 3115, 3139, 0},
+                { 0, 0, 0 },
+                { 3115, 3115, 3139},
+                { 3115, 3115, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3139, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16466, 12962, 12963, 12867, 12712, 16494, 12292, 12704, 29889, 12668, 29859, 12294, 29838, 12856, 12838, 12322, 12323, 16492, 13048, 12328, 20505, 12677};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 103: // Warrior - Arms (Sword - 100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {30488, 33923, 30490, 33484, 30486, 33813, 30487, 33331, 30489, 33812, 33919, 33057, 29383, 31984, 32054}; // item ids
+            uint32 itemsCount = 15; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 2647, 684, 2931, 2931, 0, 0, 368, 3225, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3139, 0 },
+                { 3139, 0 , 0},
+                { 3115, 3139, 0},
+                { 0, 0, 0 },
+                { 3115, 3115, 3139},
+                { 3115, 3115, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3139, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16466, 12962, 12963, 12867, 12712, 16494, 12292, 12815, 29889, 12668, 29859, 12294, 29838, 12856, 12838, 12322, 12323, 16492, 13048, 12328, 20505, 12677};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 201: // Paladin - Holy (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32022, 33922, 32024, 33333, 32020, 33904, 32021, 33903, 33518, 33905, 33918, 33064, 34471, 30108, 33309, 33077}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2980, 0, 2933, 0, 2746, 2940, 2617, 2322, 2930, 2930, 0, 0, 2664, 2343, 3229, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2835, 3138, 0 },
+                { 3141, 0 , 0},
+                { 3138, 3141, 0},
+                { 0, 0, 0 },
+                { 3138, 3138, 3141},
+                { 0, 0, 0 },
+                { 3138, 3141, 3138 },
+                { 0, 0, 0 },
+                { 3141, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {20261, 20209, 20224, 20239, 31821, 25836, 20215, 20216, 20361, 25829, 20473, 31830, 31833, 31841, 31842, 20137, 20175, 20146, 20217, 20470, 31845, 20256};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 202: // Paladin - Shockadin (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31997, 33920, 31996, 33304, 31992, 33889, 31993, 30064, 31995, 33890, 33853, 33056, 29370, 32963, 33313, 33504}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2982, 0, 2933, 0, 2748, 2649, 2650, 2937, 2928, 2928, 0, 0, 2938, 36, 2654, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3210, 0 },
+                { 3282, 0 , 0},
+                { 3282, 3140, 0},
+                { 0, 0, 0 },
+                { 3282, 3282, 3140},
+                { 3282, 3282, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3140, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {20261, 20332, 20208, 20239, 25836, 20215, 20216, 25829, 20473, 31830, 31841, 20105, 25957, 20337, 26021, 44414, 25988, 31867, 20218};
+            talentsCount = 19; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+                case GOSSIP_ACTION_INFO_DEF + 203: // Paladin - Retribution (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32041, 33923, 32043, 33484, 32039, 33910, 32040, 33909, 33501, 33911, 33919, 33057, 29383, 31984, 27484}; // item ids
+            uint32 itemsCount = 15; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3096, 0, 2986, 0, 2933, 0, 3012, 2657, 2647, 684, 2931, 2931, 0, 0, 368, 2667, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2830, 3115, 0 },
+                { 3139, 0 , 0},
+                { 3208, 3139, 0},
+                { 0, 0, 0 },
+                { 3115, 3115, 3139},
+                { 0, 0, 0 },
+                { 3115, 3139, 3133 },
+                { 0, 0, 0 },
+                { 3139, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {20105, 25957, 20337, 26021, 20121, 20375, 44414, 25988, 20113, 20218, 20059, 31878, 20066, 35397, 35395, 20137, 20193, 20175, 20143, 20217, 20470, 31845, 20489};
+            talentsCount = 23; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 301: // Hunter - Beastmastery (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31962, 31964, 33923, 33484, 31960, 33877, 31961, 33527, 33878, 34887, 33496, 34578, 31965, 31985, 31986, 33876}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 1593, 2564, 2931, 2931, 0, 0, 368, 2666, 2666, 2523, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3208, 0 },
+                { 3219, 0 , 0},
+                { 3281, 3144, 0},
+                { 0, 0, 0 },
+                { 3281, 3281, 3144},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3144, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {19587, 35030, 19609, 19575, 19596, 19620, 19573, 19602, 19577, 19592, 19625, 34460, 19574, 34470, 34692, 19431, 19415, 34954, 19434, 34949, 19490};
+            talentsCount = 21; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            CreatePet(player, creature, PET_RAVAGER);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 302: // Hunter - Marksman (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31962, 30017, 31964, 29994, 31960, 33876, 31965, 31985, 34892, 31961, 33877, 31963, 33878, 33496, 34887, 34163, }; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 1593, 2564, 2931, 2931, 0, 0, 368, 2666, 2666, 2523, 0 }; // enchant ids
+            // GEM TEMPLATE ->         HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3208, 0 },         // HEAD
+                { 0, 0, 0 },             // NECK
+                { 3209, 3215, 0 },         // SHOULDER
+                { 0, 0, 0 },             // BODY(SHIRT)
+                { 3116, 3116, 3131 },     // CHEST
+                { 0, 0, 0 },             // WAIST
+                { 0, 0, 0 },            // LEGS
+                { 0, 0, 0 },            // FEET
+                { 3131, 0, 0 },            // WRISTS
+                { 0, 0, 0 },              // HANDS
+                { 0, 0, 0 },            // FINGER1
+                { 0, 0, 0 },             // FINGER2
+                { 0, 0, 0 },             // TRINKET1
+                { 0, 0, 0 },             // TRINKET2
+                { 0, 0, 0 },             // BACK
+                { 0, 0, 0 },             // MAINHAND
+                { 0, 0, 0 },             // OFFHAND
+                { 0, 0, 0 },             // RANGE
+                { 0, 0, 0 },             // TABARD
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {19587, 19575, 19415, 19431, 34954, 19434, 34949, 19468, 19490, 19503, 34476, 19511, 34484, 19506, 34489, 34490, 19152, 19500, 19387, 19233, 19263};
+            talentsCount = 21; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            CreatePet(player, creature, PET_WIND_SERPENT);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 303: // Hunter - Survival (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31962, 31964, 33923, 33484, 31960, 33877, 31961, 33527, 33878, 34887, 33496, 34578, 31965, 31985, 31986, 33876}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 1593, 2564, 2931, 2931, 0, 0, 368, 2666, 2666, 2724, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3209, 0 },
+                { 3144, 0 , 0},
+                { 3116, 3144, 0},
+                { 0, 0, 0 },
+                { 3116, 3116, 3144},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3144, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {19431, 19415, 34954, 19434, 19434, 34949, 19490, 19503, 19152, 19500, 19388, 19233, 19259, 19263, 24283, 34496, 19373, 24297, 34497, 19386, 34503, 34839};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            CreatePet(player, creature, PET_WIND_SERPENT);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 401: // Rogue - Assassination (Mutilate) (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31999, 33923, 32001, 29994, 32002, 33881, 32044, 32044, 32054, 31998, 30040, 30148, 33892, 33496, 34887, 29383, }; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 1593, 2564, 2931, 2931, 0, 0, 368, 2673, 2673, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2830, 3208, 0 },         // HEAD
+                { 3220, 0, 0 },         // NECK
+                { 3209, 3219, 0 },         // SHOULDER
+                { 0, 0, 0 },             // BODY(SHIRT)
+                { 3116, 3116, 3142 },     // CHEST
+                { 3116, 3116, 0 },         // WAIST
+                { 3134, 0, 0 },            // LEGS
+                { 0, 0, 0 },            // FEET
+                { 3116, 0, 0 },            // WRISTS
+                { 0, 0, 0 },              // HANDS
+                { 0, 0, 0 },            // FINGER1
+                { 0, 0, 0 },             // FINGER2
+                { 0, 0, 0 },             // TRINKET1
+                { 0, 0, 0 },             // TRINKET2
+                { 0, 0, 0 },             // BACK
+                { 0, 0, 0 },             // MAINHAND
+                { 0, 0, 0 },             // OFFHAND
+                { 0, 0, 0 },             // RANGE
+                { 0, 0, 0 },             // TABARD
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {14142, 14161, 14159, 13866, 14179, 14137, 14117, 31209, 14177, 14176, 31245, 14195, 14983, 31242, 1329, 14075, 14094, 14065, 13980, 14066 };
+            talentsCount = 20; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 403: // Rogue - Subtlety (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31999, 30017, 32001, 29994, 32002, 33881, 32028, 32046, 32054, 31998, 30040, 30148, 33892, 33496, 34887, 29383, }; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2933, 0, 3012, 2658, 1593, 2564, 2931, 2931, 0, 0, 368, 2673, 2673, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3208, 0 },         // HEAD
+                { 0, 0, 0 },             // NECK
+                { 3209, 3219, 0 },         // SHOULDER
+                { 0, 0, 0 },             // BODY(SHIRT)
+                { 3116, 3116, 3142 },     // CHEST
+                { 3116, 3116, 0 },         // WAIST
+                { 3134, 0, 0 },            // LEGS
+                { 0, 0, 0 },            // FEET
+                { 3116, 0, 0 },            // WRISTS
+                { 0, 0, 0 },              // HANDS
+                { 0, 0, 0 },            // FINGER1
+                { 0, 0, 0 },             // FINGER2
+                { 0, 0, 0 },             // TRINKET1
+                { 0, 0, 0 },             // TRINKET2
+                { 0, 0, 0 },             // BACK
+                { 0, 0, 0 },             // MAINHAND
+                { 0, 0, 0 },             // OFFHAND
+                { 0, 0, 0 },             // RANGE
+                { 0, 0, 0 },             // TABARD
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {14142, 14161, 14159, 14179, 14137, 16719, 13973, 14094, 14064, 13980, 14278, 14066, 14173, 30895, 14185, 14083, 16511, 30906, 31230, 14183, 31220, 36554 };
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 501: // Priest - Discipline / Holy (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32016, 33922, 32018, 29989, 32019, 33901, 32015, 33900, 32017, 33902, 33918, 30110, 30665, 32964, 32961, 30080}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2980, 0, 2933, 0, 2746, 2940, 2617, 2322, 2930, 2930, 0, 0, 2938, 2343, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2835, 3318, 0 },
+                { 3218, 0 , 0},
+                { 3318, 3132, 0},
+                { 0, 0, 0 },
+                { 3318, 3215, 3131},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3131, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {14791, 14769, 14774, 33172, 14751, 14777, 14783, 14772, 18555, 14752, 33190, 45244, 10060, 33205, 34912, 33206, 15012, 17191, 18535, 27901, 15237, 27811};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 502: // Priest - Shadow (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32035, 33921, 32037, 29992, 32038, 33883, 32034, 30064, 32036, 33884, 33853, 33056, 34470, 32053, 31978, 32962}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2672, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3210, 0 },
+                { 3215, 0 , 0},
+                { 3282, 3131, 0},
+                { 0, 0, 0 },
+                { 3282, 3131, 3131},
+                { 3282, 3282, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3131, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {14791, 14769, 14774, 33172, 14751, 14521, 14783, 15326, 15317, 15328, 15448, 15312, 15407, 17323, 15334, 15487, 15286, 27840, 33215, 15310, 15473, 33195, 34914};
+            talentsCount = 23; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 601: // Shaman - Elemental (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32011, 33921, 32013, 32009, 30044, 32012, 33899, 33897, 32010, 33853, 33056, 34579, 33304, 32963, 33313, 33506,};
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = {3002, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2669, 2654, 0, 0};
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = { 
+                { 3163, 3210, 0 }, 
+                { 3140, 0, 0 },
+                { 3282, 3140, 0 },
+                { 0, 0, 0 },
+                { 3282, 3140, 3140 },
+                { 3137, 3140, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3140, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16111, 16108, 28998, 16164, 16120, 29065, 29000, 16089, 30665, 16582, 30671, 16166, 30681, 16217, 16240, 16222, 16233, 16189, 16221, 16188};
+            talentsCount = 20; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 602: // Shaman - Enhancement (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32006, 33923, 32008, 33484, 32004, 33894, 32005, 33895, 33527, 33896, 33919, 33057, 29383, 31965, 31965, 33507}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3096, 0, 2986, 0, 2933, 0, 3012, 2658, 2647, 684, 2931, 2931, 0, 0, 2938, 2668, 2668, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3208, 0 },
+                { 3139, 0 , 0},
+                { 3115, 3139, 0},
+                { 0, 0, 0 },
+                { 3115, 3115, 3139},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3139, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16301, 16305, 16287, 16290, 43338, 16284, 16309, 16268, 29080, 30814, 29084, 30819, 30798, 17364, 30811, 30823, 16108, 16130, 28998, 16164, 16116};
+            talentsCount = 21; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 603: // Shaman - Restoration (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32031, 33922, 32033, 33333, 32029, 33906, 32030, 33907, 32032, 33908, 33918, 33064, 34471, 30108, 33309, 24413}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2980, 0, 2933, 0, 2746, 2940, 2617, 2322, 2930, 2930, 0, 0, 2938, 2343, 3229, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2835, 3138, 0 },
+                { 3141, 0 , 0},
+                { 3138, 3141, 0},
+                { 0, 0, 0 },
+                { 3138, 3141, 3141},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3141, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {17489, 16253, 16293, 16287, 16274, 16309, 16217, 16240, 16222, 16198, 16234, 16189, 16208, 16188, 30866, 16212, 16190, 30885, 30869, 974};
+            talentsCount = 20; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 701: // Mage - Arcane/Fire (Pom/Pyro) (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32048, 33921, 32047, 32050, 33912, 32051, 33914, 33913, 33853, 32049, 30109, 29370, 33304, 32055, 32962}; // item ids
+            uint32 itemsCount = 19; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2721, 0, 2661, 0, 2748, 2940, 2650, 2935, 2928, 2928, 0, 0, 2938, 2669, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3261, 3210, 0 },   //HEAD
+                { 3282, 0 , 0},      //NECK
+                { 3212, 3215, 0},    //SHOULDER    
+                { 0, 0, 0},          //SHIRT
+                { 3282, 3284, 3218}, //CHEST
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3282, 0, 0 },      //WRISTS
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {12464, 12840, 12592, 29446, 12577, 28574, 12598, 12043, 12502, 15060, 31572, 31582, 12042, 35581, 31588, 12360, 12848, 12353, 11080, 11366, 18460, 12873, 11113};
+            talentsCount = 23; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 702: // Mage - Fire (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32048, 33921, 32047, 32050, 33912, 32051, 33914, 33913, 33853, 32049, 30109, 28785, 33304, 32055, 32962}; // item ids
+            uint32 itemsCount = 19; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2721, 0, 2661, 0, 2748, 2940, 2650, 2935, 2928, 2928, 0, 0, 2938, 2671, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3261, 3210, 0 },   //HEAD
+                { 3282, 0 , 0},      //NECK
+                { 3212, 3215, 0},    //SHOULDER    
+                { 0, 0, 0},          //SHIRT
+                { 3282, 3284, 3218}, //CHEST
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3282, 0, 0 },      //WRISTS
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {12341, 12360, 12848, 12353, 18460, 11366, 12351, 12873, 13043, 29075, 11368, 11113, 31642, 12400, 11129, 31680, 31661, 12592, 16770, 12839, 12577, 28574, 12598};
+            talentsCount = 23; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 703: // Mage - Frost (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32047, 32048, 32049, 32050, 33584, 35319, 35321, 33913, 30064, 33914, 35320, 33497, 29370, 33467, 33334, 32962}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2669, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3210, 0 },
+                { 3287, 0 , 0},
+                { 3285, 3287, 0},
+                { 0, 0, 0 },
+                { 3287, 3287, 3287},
+                { 3287, 3287, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3287, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {12592, 12840, 29446, 12577, 28574, 12598, 16766, 15053, 12497, 12475, 12571, 12953, 12472, 12488, 16758, 12985, 11958, 31672, 28594, 11426, 31676, 31687};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 801: // Warlock - Affliction (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31974, 33921, 31976, 35321, 31977, 33883, 31973, 30064, 31975, 33884, 33853, 33056, 34470, 32053, 31978, 32962}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2672, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3210, 0 },
+                { 3215, 0 , 0},
+                { 3125, 3131, 0},
+                { 0, 0, 0 },
+                { 3282, 3131, 3131},
+                { 3282, 3282, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3131, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {17814, 18174, 18183, 17805, 18829, 17787, 18288, 18219, 18095, 32383, 32385, 18265, 18223, 18275, 30064, 30057, 30108, 18701, 18693, 18704, 17803, 17792, 17877, 17877};
+            talentsCount = 24; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 802: // Warlock - Demonology (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {30212, 33921, 30215, 35321, 31977, 33883, 31973, 30064, 31975, 33884, 33853, 33056, 29370, 32053, 31978, 32962}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2669, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3125, 0 },
+                { 3215, 0 , 0},
+                { 3286, 3286, 0},
+                { 0, 0, 0 },
+                { 3210, 3286, 3286},
+                { 3282, 3282, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3286, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {17814, 18693, 18744, 18708, 18750, 30145, 18710, 18773, 18788, 30327, 23825, 30321, 19028, 35693, 30248, 30146, 17803, 17792, 17877, 18701};
+            talentsCount = 20; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 803: // Warlock - SL/SL (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31980, 33921, 31979, 35321, 31977, 33883, 31973, 30064, 31975, 33357, 33853, 33056, 34470, 32053, 31978, 32962}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2672, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3210, 0 },
+                { 3282, 0 , 0},
+                { 3125, 3215, 0},
+                { 0, 0, 0 },
+                { 3282, 3131, 3131},
+                { 3282, 3282, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3131, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {18701, 18693, 18744, 18708, 18710, 18750, 30145, 18773, 18788, 23825, 30326, 30321, 19028, 17814, 18174, 18183, 17805, 18829, 17784, 18288, 18219, 18095, 32383, 32385, 18265, 18265, 18223, 35691};
+            talentsCount = 28; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 804: // Warlock - Destruction (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31980, 33920, 31979, 33304, 31982, 33913, 31981, 30064, 31983, 33914, 33853, 33056, 34577, 32053,31978, 32962}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2669, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3210, 0 },
+                { 3215, 0 , 0},
+                { 3125, 3140, 0},
+                { 0, 0, 0 },
+                { 3282, 3140, 3140},
+                { 3140, 3140, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3140, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {17814, 18701, 18693, 17782, 17792, 18183, 18134, 17877, 18136, 17918, 17836, 17959, 30302, 17958, 34939, 17962, 17877, 30296, 30292, 30296, 30283};
+            talentsCount = 21; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 901: // Druid - Balance (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {32057, 35319, 32059, 35321, 32060, 33917, 32056, 33915, 33584, 33916, 33497, 33853, 35327, 32053, 33334, 33510}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3002, 0, 2982, 0, 2933, 0, 2748, 2940, 2650, 2937, 2928, 2928, 0, 0, 2938, 2669, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 3163, 3287, 0 },
+                { 3287, 0 , 0},
+                { 3210, 3287, 0},
+                { 0, 0, 0 },
+                { 3282, 3282, 3287},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3282, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16818, 16689, 16689, 16920, 35364, 16822, 5570, 16820, 16913, 16924, 33591, 16880, 16847, 16901, 33956, 24858, 33607, 16862, 16941, 16931, 16979, 17061};
+            talentsCount = 22; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 902: // Druid - Feral Combat (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31968, 33923, 31971, 33484, 31972, 33881, 31967, 33879, 30229, 33880, 33919, 34887, 30627, 34898, 0, 33509}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3003, 0, 2986, 0, 2661, 0, 3012, 2657, 1891, 2564, 2931, 2931, 0, 0, 368, 2670, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2829, 3142, 0 },
+                { 3142, 0 , 0},
+                { 3142, 3142, 0},
+                { 0, 0, 0 },
+                { 3208, 3209, 3219},
+                { 0, 0, 0 },
+                { 3134, 0, 0 },
+                { 0, 0, 0 },
+                { 3142, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16938, 16941, 16931, 24866, 16979, 16944, 16968, 16975, 37117, 16999, 16857, 33873, 24894, 33853, 33957, 17007, 34300, 33869, 33917, 33876, 33878, 16689, 16689, 17061, 17073, 16835, 16864};
+            talentsCount = 27; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 904: // Druid - Restoration (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31988, 33922, 32059, 29989, 31991, 33887, 32056, 33885, 31989, 33886, 33918, 30110, 34050, 32964, 32961, 33508}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2980, 0, 2933, 0, 2746, 2940, 2617, 2322, 2930, 2930, 0, 0, 2938, 2343, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2835, 3215, 0 },
+                { 3218, 0 , 0},
+                { 3318, 3132, 0},
+                { 0, 0, 0 },
+                { 3318, 3318, 3131},
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 3318, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16818, 16689, 17245, 16920, 5570, 16862, 16941, 16931, 16979, 17061, 17061, 17051, 16835, 17108, 17122, 17113, 17116, 24946, 17076, 33883, 18562, 34151, 33889 };
+            talentsCount = 23; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+        case GOSSIP_ACTION_INFO_DEF + 905: // Druid - Restokin (100%)
+        {
+            // ITEM TEMPLATE -> just fill in item ids, no required order
+            uint32 items[] = {31988, 33922, 32059, 29989, 31991, 33887, 32056, 33885, 33552, 33886, 33918, 30110, 34050, 32964, 32961, 33510}; // item ids
+            uint32 itemsCount = 16; // item count above
+            // ENCHANT TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            uint32 enchants[19] = { 3004, 0, 2980, 0, 2933, 0, 2746, 2940, 2617, 2322, 2930, 2930, 0, 0, 2938, 2343, 0, 0, 0 }; // enchant ids
+            // GEM TEMPLATE -> HEAD, NECK, SHOULDER, BODY(SHIRT), CHEST, WAIST, LEGS, FEET, WRISTS, HANDS, FINGER1, FINGER2, TRINKET1, TRINKET2, BACK, MAINHAND, OFFHAND, RANGE, TABARD
+            // If Item has 1 gem slot { enchantId, 0 , 0},
+            // If Item has 2 gem slot { enchantId, enchantId, 0},
+            // If Item has 3 gem slot { enchantId, enchantId, enchantId},
+            uint32 sockets[19][3] = {
+                { 2835, 3215, 0 },
+                { 3131, 0 , 0},
+                { 3318, 3131, 0},
+                { 0, 0, 0 },
+                { 3318, 3318, 3131},
+                { 0, 0, 0 },
+                { 3318, 3131, 3318 },
+                { 0, 0, 0 },
+                { 3318, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+                { 0, 0, 0 },
+            };
+            // add all talents spells (max rank which should be learned) here, no order necessary
+            uint32 talents[] = {16818, 16689, 17249, 16920, 16822, 5570, 16820, 16924, 33591, 16880, 16847, 33596, 33956, 24858, 24905, 17061, 17051, 16835, 17108, 17122, 17113, 17116, 24946};
+            talentsCount = 23; // talent spell count from above
+
+            AddItemsEnchantsGemsTalents(player, items, sockets, enchants, talents, itemsCount, talentsCount);
+            break;
+        }
+    }
+    if (action != (GOSSIP_ACTION_INFO_DEF + 1))
+        player->CLOSE_GOSSIP_MENU();
+
+    return true;
 }
 
-void sTemplateNPC::LoadTalentsContainer()
+void AddSC_npc_template()
 {
-	for (TalentContainer::const_iterator itr = m_TalentContainer.begin(); itr != m_TalentContainer.end(); ++itr)
-		delete *itr;
-
-	m_TalentContainer.clear();
-
-	uint32 oldMSTime = getMSTime();
-	uint32 count = 0;
-
-	QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec, talentId FROM template_npc_talents;");
-
-	if (!result)
-	{
-		sLog->outString(">> Loaded 0 talent templates. DB table `template_npc_talents` is empty!");
-		sLog->outString();
-		return;
-	}
-
-	do
-	{
-		Field* fields = result->Fetch(); 
-
-		TalentTemplate* pTalent = new TalentTemplate;
-
-		pTalent->playerClass = fields[0].GetString();
-		pTalent->playerSpec = fields[1].GetString();
-		pTalent->talentId = fields[2].GetUInt32(); 
-
-		m_TalentContainer.push_back(pTalent);
-		++count;
-	}
-	while (result->NextRow());
-	sLog->outString(">> Loaded %u talent templates in %u ms.", count, GetMSTimeDiffToNow(oldMSTime));
-	sLog->outString();
-}
-
-void sTemplateNPC::LoadGlyphsContainer()
-{
-	for (GlyphContainer::const_iterator itr = m_GlyphContainer.begin(); itr != m_GlyphContainer.end(); ++itr)
-		delete *itr;
-
-	m_GlyphContainer.clear();
-
-	QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec, slot, glyph FROM template_npc_glyphs;");
-
-	uint32 oldMSTime = getMSTime();
-	uint32 count = 0;
-
-	if (!result)
-	{
-		sLog->outString(">> Loaded 0 glyph templates. DB table `template_npc_glyphs` is empty!");
-		sLog->outString();
-		return;
-	}
-
-	do
-	{
-		Field* fields = result->Fetch();
-
-		GlyphTemplate* pGlyph = new GlyphTemplate;
-
-		pGlyph->playerClass = fields[0].GetString();
-		pGlyph->playerSpec = fields[1].GetString();
-		pGlyph->slot = fields[2].GetUInt8();
-		pGlyph->glyph = fields[3].GetUInt32();
-
-		m_GlyphContainer.push_back(pGlyph);
-		++count;
-	}
-	while (result->NextRow());
-	sLog->outString(">> Loaded %u glyph templates in %u ms.", count, GetMSTimeDiffToNow(oldMSTime));
-	sLog->outString();
-}
-
-void sTemplateNPC::LoadHumanGearContainer()
-{
-	for (HumanGearContainer::const_iterator itr = m_HumanGearContainer.begin(); itr != m_HumanGearContainer.end(); ++itr)
-		delete *itr;
-
-	m_HumanGearContainer.clear();
-
-	QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec, pos, itemEntry, enchant, socket1, socket2, socket3, bonusEnchant, prismaticEnchant FROM template_npc_human;");
-
-	uint32 oldMSTime = getMSTime();
-	uint32 count = 0;
-
-	if (!result)
-	{
-		sLog->outString(">> Loaded 0 'gear templates. DB table `template_npc_human` is empty!");
-		sLog->outString();
-		return;
-	}
-
-	do
-	{
-		Field* fields = result->Fetch();
-
-		HumanGearTemplate* pItem = new HumanGearTemplate;
-
-		pItem->playerClass = fields[0].GetString();
-		pItem->playerSpec = fields[1].GetString();
-		pItem->pos = fields[2].GetUInt8();
-		pItem->itemEntry = fields[3].GetUInt32();
-		pItem->enchant = fields[4].GetUInt32();
-		pItem->socket1 = fields[5].GetUInt32();
-		pItem->socket2 = fields[6].GetUInt32();
-		pItem->socket3 = fields[7].GetUInt32();
-		pItem->bonusEnchant = fields[8].GetUInt32();
-		pItem->prismaticEnchant = fields[9].GetUInt32();
-
-		m_HumanGearContainer.push_back(pItem);
-		++count;
-	}
-	while (result->NextRow());
-	sLog->outString(">> Loaded %u gear templates for Humans in %u ms.", count, GetMSTimeDiffToNow(oldMSTime));
-	sLog->outString();
-}
-
-void sTemplateNPC::LoadAllianceGearContainer()
-{
-	for (AllianceGearContainer::const_iterator itr = m_AllianceGearContainer.begin(); itr != m_AllianceGearContainer.end(); ++itr)
-		delete *itr;
-
-	m_AllianceGearContainer.clear();
-
-	QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec, pos, itemEntry, enchant, socket1, socket2, socket3, bonusEnchant, prismaticEnchant FROM template_npc_alliance;");
-
-	uint32 oldMSTime = getMSTime();
-	uint32 count = 0;
-
-	if (!result)
-	{
-		sLog->outString(">> Loaded 0 'gear templates. DB table `template_npc_alliance` is empty!");
-		sLog->outString();
-		return;
-	}
-
-	do
-	{
-		Field* fields = result->Fetch();
-
-		AllianceGearTemplate* pItem = new AllianceGearTemplate;
-
-		pItem->playerClass = fields[0].GetString();
-		pItem->playerSpec = fields[1].GetString();
-		pItem->pos = fields[2].GetUInt8();
-		pItem->itemEntry = fields[3].GetUInt32();
-		pItem->enchant = fields[4].GetUInt32();
-		pItem->socket1 = fields[5].GetUInt32();
-		pItem->socket2 = fields[6].GetUInt32();
-		pItem->socket3 = fields[7].GetUInt32();
-		pItem->bonusEnchant = fields[8].GetUInt32();
-		pItem->prismaticEnchant = fields[9].GetUInt32();
-
-		m_AllianceGearContainer.push_back(pItem);
-		++count;
-	}
-	while (result->NextRow());
-	sLog->outString(">> Loaded %u gear templates for Alliances in %u ms.", count, GetMSTimeDiffToNow(oldMSTime));
-	sLog->outString();
-}
-
-void sTemplateNPC::LoadHordeGearContainer()
-{
-	for (HordeGearContainer::const_iterator itr = m_HordeGearContainer.begin(); itr != m_HordeGearContainer.end(); ++itr)
-		delete *itr;
-
-	m_HordeGearContainer.clear();
-
-	QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec, pos, itemEntry, enchant, socket1, socket2, socket3, bonusEnchant, prismaticEnchant FROM template_npc_horde;");
-
-	uint32 oldMSTime = getMSTime();
-	uint32 count = 0;
-
-	if (!result)
-	{
-		sLog->outString(">> Loaded 0 'gear templates. DB table `template_npc_horde` is empty!");
-		sLog->outString();
-		return;
-	}
-
-	do
-	{
-		Field* fields = result->Fetch();
-
-		HordeGearTemplate* pItem = new HordeGearTemplate;
-
-		pItem->playerClass = fields[0].GetString();
-		pItem->playerSpec = fields[1].GetString();
-		pItem->pos = fields[2].GetUInt8();
-		pItem->itemEntry = fields[3].GetUInt32();
-		pItem->enchant = fields[4].GetUInt32();
-		pItem->socket1 = fields[5].GetUInt32();
-		pItem->socket2 = fields[6].GetUInt32();
-		pItem->socket3 = fields[7].GetUInt32();
-		pItem->bonusEnchant = fields[8].GetUInt32();
-		pItem->prismaticEnchant = fields[9].GetUInt32();
-
-		m_HordeGearContainer.push_back(pItem);
-		++count;
-	}
-	while (result->NextRow());
-	sLog->outString(">> Loaded %u gear templates for Hordes in %u ms.", count, GetMSTimeDiffToNow(oldMSTime));
-	sLog->outString();
-}
-
-std::string sTemplateNPC::GetClassString(Player* player)
-{
-	switch (player->getClass())
-	{
-	case CLASS_PRIEST:       return "Priest";      break;
-	case CLASS_PALADIN:      return "Paladin";     break;
-	case CLASS_WARRIOR:      return "Warrior";     break;
-	case CLASS_MAGE:         return "Mage";        break;
-	case CLASS_WARLOCK:      return "Warlock";     break;
-	case CLASS_SHAMAN:       return "Shaman";      break;
-	case CLASS_DRUID:        return "Druid";       break;
-	case CLASS_HUNTER:       return "Hunter";      break;
-	case CLASS_ROGUE:        return "Rogue";       break;
-	case CLASS_DEATH_KNIGHT: return "DeathKnight"; break;
-	default:
-		break;
-	}
-	return "Unknown"; // Fix warning, this should never happen
-}
-
-bool sTemplateNPC::OverwriteTemplate(Player* player, std::string& playerSpecStr)
-{
-	// Delete old talent and glyph templates before extracting new ones
-	CharacterDatabase.PExecute("DELETE FROM template_npc_talents WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-	CharacterDatabase.PExecute("DELETE FROM template_npc_glyphs WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-
-	// Delete old gear templates before extracting new ones
-	if (player->getRace() == RACE_HUMAN)
-	{
-		CharacterDatabase.PExecute("DELETE FROM template_npc_human WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-		player->GetSession()->SendAreaTriggerMessage("Template successfuly created!");
-		return false;
-	}
-	else if (player->GetTeam() == ALLIANCE && player->getRace() != RACE_HUMAN)
-	{
-		CharacterDatabase.PExecute("DELETE FROM template_npc_alliance WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-		player->GetSession()->SendAreaTriggerMessage("Template successfuly created!");
-		return false;
-	}
-	else if (player->GetTeam() == HORDE)
-	{                                                                                                        // ????????????? sTemplateNpcMgr here??
-		CharacterDatabase.PExecute("DELETE FROM template_npc_horde WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-		player->GetSession()->SendAreaTriggerMessage("Template successfuly created!");
-		return false;
-	}
-	return true;
-}
-
-void sTemplateNPC::ExtractGearTemplateToDB(Player* player, std::string& playerSpecStr)
-{
-	for (uint8 i = EQUIPMENT_SLOT_START; i < EQUIPMENT_SLOT_END; ++i)
-	{
-		Item* equippedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, i);
-
-		if (equippedItem)
-		{
-			if (player->getRace() == RACE_HUMAN)
-			{
-				CharacterDatabase.PExecute("INSERT INTO template_npc_human (`playerClass`, `playerSpec`, `pos`, `itemEntry`, `enchant`, `socket1`, `socket2`, `socket3`, `bonusEnchant`, `prismaticEnchant`) VALUES ('%s', '%s', '%u', '%u', '%u', '%u', '%u', '%u', '%u', '%u');"
-					, GetClassString(player).c_str(), playerSpecStr.c_str(), equippedItem->GetSlot(), equippedItem->GetEntry(), equippedItem->GetEnchantmentId(PERM_ENCHANTMENT_SLOT), 
-					equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT), equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT_2), equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT_3),
-					equippedItem->GetEnchantmentId(BONUS_ENCHANTMENT_SLOT), equippedItem->GetEnchantmentId(PRISMATIC_ENCHANTMENT_SLOT));
-			}
-			else if (player->GetTeam() == ALLIANCE && player->getRace() != RACE_HUMAN)
-			{
-				CharacterDatabase.PExecute("INSERT INTO template_npc_alliance (`playerClass`, `playerSpec`, `pos`, `itemEntry`, `enchant`, `socket1`, `socket2`, `socket3`, `bonusEnchant`, `prismaticEnchant`) VALUES ('%s', '%s', '%u', '%u', '%u', '%u', '%u', '%u', '%u', '%u');"
-					, GetClassString(player).c_str(), playerSpecStr.c_str(), equippedItem->GetSlot(), equippedItem->GetEntry(), equippedItem->GetEnchantmentId(PERM_ENCHANTMENT_SLOT), 
-					equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT), equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT_2), equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT_3),
-					equippedItem->GetEnchantmentId(BONUS_ENCHANTMENT_SLOT), equippedItem->GetEnchantmentId(PRISMATIC_ENCHANTMENT_SLOT));
-			}
-			else if (player->GetTeam() == HORDE)
-			{
-				CharacterDatabase.PExecute("INSERT INTO template_npc_horde (`playerClass`, `playerSpec`, `pos`, `itemEntry`, `enchant`, `socket1`, `socket2`, `socket3`, `bonusEnchant`, `prismaticEnchant`) VALUES ('%s', '%s', '%u', '%u', '%u', '%u', '%u', '%u', '%u', '%u');"
-					, GetClassString(player).c_str(), playerSpecStr.c_str(), equippedItem->GetSlot(), equippedItem->GetEntry(), equippedItem->GetEnchantmentId(PERM_ENCHANTMENT_SLOT), 
-					equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT), equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT_2), equippedItem->GetEnchantmentId(SOCK_ENCHANTMENT_SLOT_3),
-					equippedItem->GetEnchantmentId(BONUS_ENCHANTMENT_SLOT), equippedItem->GetEnchantmentId(PRISMATIC_ENCHANTMENT_SLOT));
-			}
-		}
-	}
-}
-
-void sTemplateNPC::ExtractTalentTemplateToDB(Player* player, std::string& playerSpecStr)
-{
-	QueryResult result = CharacterDatabase.PQuery("SELECT spell FROM character_talent WHERE guid = '%u' "
-		"AND spec = '%u';", player->GetGUID(), player->GetActiveSpec());
-
-	if (!result)
-	{
-		return;
-	}
-	else if (player->GetFreeTalentPoints() > 0)
-	{
-		player->GetSession()->SendAreaTriggerMessage("You have unspend talent points. Please spend all your talent points and re-extract the template.");
-		return;
-	}
-	else
-	{
-		do
-		{
-			Field* fields = result->Fetch(); 
-			uint32 spell = fields[0].GetUInt32();
-
-			CharacterDatabase.PExecute("INSERT INTO template_npc_talents (playerClass, playerSpec, talentId) "
-				"VALUES ('%s', '%s', '%u');", GetClassString(player).c_str(), playerSpecStr.c_str(), spell);
-		}
-		while (result->NextRow());
-	}
-}
-
-void sTemplateNPC::ExtractGlyphsTemplateToDB(Player* player, std::string& playerSpecStr)
-{
-	QueryResult result = CharacterDatabase.PQuery("SELECT glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 "
-		"FROM character_glyphs WHERE guid = '%u' AND spec = '%u';", player->GetGUID(), player->GetActiveSpec());
-
-	for (uint8 slot = 0; slot < MAX_GLYPH_SLOT_INDEX; ++slot)
-	{
-		if (!result)
-		{ 
-			player->GetSession()->SendAreaTriggerMessage("Get glyphs and re-extract the template!");
-			continue;
-		}
-
-		Field* fields = result->Fetch();
-		uint32 glyph1 = fields[0].GetUInt32();
-		uint32 glyph2 = fields[1].GetUInt32();
-		uint32 glyph3 = fields[2].GetUInt32();
-		uint32 glyph4 = fields[3].GetUInt32();
-		uint32 glyph5 = fields[4].GetUInt32();
-		uint32 glyph6 = fields[5].GetUInt32();
-
-		uint32 storedGlyph;
-
-		switch (slot)
-		{
-		case 0:
-			storedGlyph = glyph1;
-			break;
-		case 1:
-			storedGlyph = glyph2;
-			break;
-		case 2:
-			storedGlyph = glyph3;
-			break;
-		case 3:
-			storedGlyph = glyph4;
-			break;
-		case 4:
-			storedGlyph = glyph5;
-			break;
-		case 5:
-			storedGlyph = glyph6;
-			break;
-		default:
-			break;
-		}
-
-		CharacterDatabase.PExecute("INSERT INTO template_npc_glyphs (playerClass, playerSpec, slot, glyph) "
-			"VALUES ('%s', '%s', '%u', '%u');", GetClassString(player).c_str(), playerSpecStr.c_str(), slot, storedGlyph);
-	}
-}
-
-bool sTemplateNPC::CanEquipTemplate(Player* player, std::string& playerSpecStr)
-{
-	if (player->getRace() == RACE_HUMAN)
-	{
-		QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec FROM template_npc_human "
-			"WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-
-		if (!result)
-			return false;
-	}
-	else if (player->GetTeam() == ALLIANCE && player->getRace() != RACE_HUMAN)
-	{
-		QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec FROM template_npc_alliance "
-			"WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-
-		if (!result)
-			return false;
-	}
-	else if (player->GetTeam() == HORDE)
-	{
-		QueryResult result = CharacterDatabase.PQuery("SELECT playerClass, playerSpec FROM template_npc_horde "
-			"WHERE playerClass = '%s' AND playerSpec = '%s';", GetClassString(player).c_str(), playerSpecStr.c_str());
-
-		if (!result)
-			return false;
-	}
-	return true;
-}
-
-class TemplateNPC_Commands : public CommandScript
-{
-public:
-	TemplateNPC_Commands() : CommandScript("TemplateNPC_Commands") { }
-
-	ChatCommand* GetCommands() const
-	{
-		static ChatCommand createDeathKnightItemSetTable[] =
-		{
-			{ "blood",             SEC_ADMINISTRATOR,         false,          &HandleCreateDeathKnightBloodItemSetCommand,       "", NULL },
-			{ "frost",             SEC_ADMINISTRATOR,         false,          &HandleCreateDeathKnightFrostItemSetCommand,       "", NULL },
-			{ "unholy",            SEC_ADMINISTRATOR,         false,          &HandleCreateDeathKnightUnholyItemSetCommand,      "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createRogueItemSetTable[] =
-		{
-			{ "assassination",     SEC_ADMINISTRATOR,         false,          &HandleCreateRogueAssassinationItemSetCommand,     "", NULL },
-			{ "combat",            SEC_ADMINISTRATOR,         false,          &HandleCreateRogueCombatItemSetCommand,            "", NULL },
-			{ "subtlety",          SEC_ADMINISTRATOR,         false,          &HandleCreateRogueSubtletyItemSetCommand,          "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createHunterItemSetTable[] =
-		{
-			{ "marksmanship",      SEC_ADMINISTRATOR,         false,          &HandleCreateHunterMarksmanshipItemSetCommand,     "", NULL },
-			{ "beastmastery",      SEC_ADMINISTRATOR,         false,          &HandleCreateHunterBeastmasteryItemSetCommand,     "", NULL },
-			{ "survival",          SEC_ADMINISTRATOR,         false,          &HandleCreateHunterSurvivalItemSetCommand,         "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createDruidItemSetTable[] =
-		{
-			{ "ballance",          SEC_ADMINISTRATOR,         false,          &HandleCreateDruidBallanceItemSetCommand,          "", NULL },
-			{ "feral",             SEC_ADMINISTRATOR,         false,          &HandleCreateDruidFeralItemSetCommand,             "", NULL },
-			{ "restoration",       SEC_ADMINISTRATOR,         false,          &HandleCreateDruidRestorationItemSetCommand,       "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createShamanItemSetTable[] =
-		{
-			{ "elemental",         SEC_ADMINISTRATOR,         false,          &HandleCreateShamanElementalItemSetCommand,        "", NULL },
-			{ "enhancement",       SEC_ADMINISTRATOR,         false,          &HandleCreateShamanEnhancementItemSetCommand,      "", NULL },
-			{ "restoration",       SEC_ADMINISTRATOR,         false,          &HandleCreateShamanRestorationItemSetCommand,      "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createWarlockItemSetTable[] =
-		{
-			{ "affliction",        SEC_ADMINISTRATOR,         false,          &HandleCreateWarlockAfflictionItemSetCommand,      "", NULL },
-			{ "demonology",        SEC_ADMINISTRATOR,         false,          &HandleCreateWarlockDemonologyItemSetCommand,      "", NULL },
-			{ "destruction",       SEC_ADMINISTRATOR,         false,          &HandleCreateWarlockDestructionItemSetCommand,     "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createMageItemSetTable[] =
-		{
-			{ "frost",             SEC_ADMINISTRATOR,         false,          &HandleCreateMageFrostItemSetCommand,              "", NULL },
-			{ "fire",              SEC_ADMINISTRATOR,         false,          &HandleCreateMageFireItemSetCommand,               "", NULL },
-			{ "arcane",            SEC_ADMINISTRATOR,         false,          &HandleCreateMageArcaneItemSetCommand,             "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createWarriorItemSetTable[] =
-		{
-			{ "arms",              SEC_ADMINISTRATOR,         false,          &HandleCreateWarriorArmsItemSetCommand,            "", NULL },
-			{ "fury",              SEC_ADMINISTRATOR,         false,          &HandleCreateWarriorFuryItemSetCommand,            "", NULL },
-			{ "protection",        SEC_ADMINISTRATOR,         false,          &HandleCreateWarriorProtectionItemSetCommand,      "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createPaladinItemSetTable[] =
-		{
-			{ "holy",              SEC_ADMINISTRATOR,         false,          &HandleCreatePaladinHolyItemSetCommand,            "", NULL },
-			{ "protection",        SEC_ADMINISTRATOR,         false,          &HandleCreatePaladinProtectionItemSetCommand,      "", NULL },
-			{ "retribution",       SEC_ADMINISTRATOR,         false,          &HandleCreatePaladinRetributionItemSetCommand,     "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-
-		static ChatCommand createPriestItemSetTable[] =
-		{
-			{ "discipline",        SEC_ADMINISTRATOR,         false,          &HandleCreatePriestDisciplineItemSetCommand,       "", NULL },
-			{ "shadow",            SEC_ADMINISTRATOR,         false,          &HandleCreatePriestShadowItemSetCommand,           "", NULL },
-			{ "holy",              SEC_ADMINISTRATOR,         false,          &HandleCreatePriestHolyItemSetCommand,             "", NULL },
-			{ NULL,                0,                         false,          NULL,                                              "", NULL }
-		};
-		static ChatCommand createItemSetCommandTable[] =
-		{
-			{ "priest",            SEC_ADMINISTRATOR,          true,            NULL,         "", createPriestItemSetTable },
-			{ "paladin",           SEC_ADMINISTRATOR,          true,            NULL,         "", createPaladinItemSetTable },
-			{ "warrior",           SEC_ADMINISTRATOR,          true,            NULL,         "", createWarriorItemSetTable },
-			{ "mage",              SEC_ADMINISTRATOR,          true,            NULL,         "", createMageItemSetTable },
-			{ "warlock",           SEC_ADMINISTRATOR,          true,            NULL,         "", createWarlockItemSetTable },
-			{ "shaman",            SEC_ADMINISTRATOR,          true,            NULL,         "", createShamanItemSetTable },
-			{ "druid",             SEC_ADMINISTRATOR,          true,            NULL,         "", createDruidItemSetTable },
-			{ "hunter",            SEC_ADMINISTRATOR,          true,            NULL,         "", createHunterItemSetTable },
-			{ "rogue",             SEC_ADMINISTRATOR,          true,            NULL,         "", createRogueItemSetTable },
-			{ "deathknight",       SEC_ADMINISTRATOR,          true,            NULL,         "", createDeathKnightItemSetTable },
-			{ NULL,                0,                          false,           NULL,         "", NULL }
-		};
-		static ChatCommand commandTable[] =
-		{
-			{ "create",            SEC_ADMINISTRATOR,         true, NULL,                 "", createItemSetCommandTable },
-			{ NULL,                0,                         false, NULL,                "", NULL }
-		};
-		return commandTable;
-	}
-
-	// DISCIPLINE PRIEST
-	static bool HandleCreatePriestDisciplineItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-
-		if (player->getClass() != CLASS_PRIEST)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a priest!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Discipline";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// SHADOW PRIEST
-	static bool HandleCreatePriestShadowItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_PRIEST)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a priest!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Shadow";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// HOLY PRIEST
-	static bool HandleCreatePriestHolyItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_PRIEST)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a priest!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Holy";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// HOLY PALADIN
-	static bool HandleCreatePaladinHolyItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_PALADIN)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a paladin!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Holy";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// PROTECTION PALADIN
-	static bool HandleCreatePaladinProtectionItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_PALADIN)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a paladin!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Protection";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// RETRIBUTION PALADIN
-	static bool HandleCreatePaladinRetributionItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_PALADIN)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a paladin!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Retribution";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// FURY WARRIOR
-	static bool HandleCreateWarriorFuryItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_WARRIOR)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a warrior!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Fury";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// ARMS WARRIOR
-	static bool HandleCreateWarriorArmsItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_WARRIOR)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a warrior!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Arms";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// PROTECTION WARRIOR
-	static bool HandleCreateWarriorProtectionItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_WARRIOR)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a warrior!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Protection";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// ARCANE MAGE
-	static bool HandleCreateMageArcaneItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_MAGE)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a mage!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Arcane";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// FIRE MAGE
-	static bool HandleCreateMageFireItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_MAGE)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a mage!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Fire";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// FROST MAGE
-	static bool HandleCreateMageFrostItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_MAGE)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a mage!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Frost";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// AFFLICTION WARLOCK
-	static bool HandleCreateWarlockAfflictionItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_WARLOCK)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a warlock!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Affliction";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// DEMONOLOGY WARLOCK
-	static bool HandleCreateWarlockDemonologyItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_WARLOCK)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a warlock!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Demonology";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// DESTRUCTION WARLOCK
-	static bool HandleCreateWarlockDestructionItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_WARLOCK)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a warlock!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Destruction";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// ELEMENTAL SHAMAN
-	static bool HandleCreateShamanElementalItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_SHAMAN)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a shaman!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Elemental";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// ENHANCEMENT SHAMAN
-	static bool HandleCreateShamanEnhancementItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_SHAMAN)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a shaman!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Enhancement";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// RESTORATION SHAMAN
-	static bool HandleCreateShamanRestorationItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_SHAMAN)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a shaman!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Restoration";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// BALLANCE DRUID
-	static bool HandleCreateDruidBallanceItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_DRUID)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a druid!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Ballance";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// FERAL DRUID
-	static bool HandleCreateDruidFeralItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_DRUID)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a druid!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Feral";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// RESTORATION DRUID
-	static bool HandleCreateDruidRestorationItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_DRUID)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a druid!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Restoration";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// MARKSMANSHIP HUNTER
-	static bool HandleCreateHunterMarksmanshipItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_HUNTER)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a hunter!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Marksmanship";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// BEASTMASTERY HUNTER
-	static bool HandleCreateHunterBeastmasteryItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_HUNTER)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a hunter!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Beastmastery";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// SURVIVAL HUNTER
-	static bool HandleCreateHunterSurvivalItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_HUNTER)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a hunter!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Survival";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// ASSASSINATION ROGUE
-	static bool HandleCreateRogueAssassinationItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_ROGUE)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a rogue!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Assassination";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// COMBAT ROGUE
-	static bool HandleCreateRogueCombatItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_ROGUE)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a rogue!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Combat";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// SUBTLETY ROGUE
-	static bool HandleCreateRogueSubtletyItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_ROGUE)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a rogue!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Subtlety";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// BLOOD DEATHKNIGHT
-	static bool HandleCreateDeathKnightBloodItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_DEATH_KNIGHT)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a death knight!");
-			return false;
-		}
-		player->SaveToDB();
-		sTemplateNpcMgr->sTalentsSpec = "Blood";
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// FROST DEATHKNIGHT
-	static bool HandleCreateDeathKnightFrostItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_DEATH_KNIGHT)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a death knight!");
-			return false;
-		}
-		sTemplateNpcMgr->sTalentsSpec = "Frost";
-		player->SaveToDB();
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-
-	// UNHOLY DEATHKNIGHT
-	static bool HandleCreateDeathKnightUnholyItemSetCommand(ChatHandler* handler, const char* args)
-	{
-		Player* player = handler->GetSession()->GetPlayer();
-		if (player->getClass() != CLASS_DEATH_KNIGHT)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You're not a death knight!");
-			return false;
-		}
-		sTemplateNpcMgr->sTalentsSpec = "Unholy";
-		player->SaveToDB();
-		sTemplateNpcMgr->OverwriteTemplate(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGearTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractTalentTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		sTemplateNpcMgr->ExtractGlyphsTemplateToDB(player, sTemplateNpcMgr->sTalentsSpec);
-		return true;
-	}
-};
-
-class TemplateNPC : public CreatureScript
-{
-public:
-	TemplateNPC() : CreatureScript("TemplateNPC") { }
-
-	bool OnGossipHello(Player* player, Creature* creature)
-	{
-		switch (player->getClass())
-		{
-		case CLASS_PRIEST:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_holy_wordfortitude:30|t|r Use Discipline Spec", GOSSIP_SENDER_MAIN, 0);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_holy_holybolt:30|t|r Use Holy Spec", GOSSIP_SENDER_MAIN, 1);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_shadow_shadowwordpain:30|t|r Use Shadow Spec", GOSSIP_SENDER_MAIN, 2);
-			}
-			break;
-		case CLASS_PALADIN:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_holy_holybolt:30|t|r Use Holy Spec", GOSSIP_SENDER_MAIN, 3);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_holy_devotionaura:30|t|r Use Protection Spec", GOSSIP_SENDER_MAIN, 4);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_holy_auraoflight:30|t|r Use Retribution Spec", GOSSIP_SENDER_MAIN, 5);
-			}
-			break;
-		case CLASS_WARRIOR:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_warrior_innerrage:30|t|r Use Fury Spec", GOSSIP_SENDER_MAIN, 6);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_rogue_eviscerate:30|t|r Use Arms Spec", GOSSIP_SENDER_MAIN, 7);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_warrior_defensivestance:30|t|r Use Protection Spec", GOSSIP_SENDER_MAIN, 8);
-			}
-			break;
-		case CLASS_MAGE:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_holy_magicalsentry:30|t|r Use Arcane Spec", GOSSIP_SENDER_MAIN, 9);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_fire_flamebolt:30|t|r Use Fire Spec", GOSSIP_SENDER_MAIN, 10);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_frost_frostbolt02:30|t|r Use Frost Spec", GOSSIP_SENDER_MAIN, 11);
-			}
-			break;
-		case CLASS_WARLOCK:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_shadow_deathcoil:30|t|r Use Affliction Spec", GOSSIP_SENDER_MAIN, 12);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_shadow_metamorphosis:30|t|r Use Demonology Spec", GOSSIP_SENDER_MAIN, 13);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_shadow_rainoffire:30|t|r Use Destruction Spec", GOSSIP_SENDER_MAIN, 14);
-			}
-			break;
-		case CLASS_SHAMAN:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_nature_lightning:30|t|r Use Elemental Spec", GOSSIP_SENDER_MAIN, 15);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_nature_lightningshield:30|t|r Use Enhancement Spec", GOSSIP_SENDER_MAIN, 16);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_nature_magicimmunity:30|t|r Use Restoration Spec", GOSSIP_SENDER_MAIN, 17);
-			}
-			break;
-		case CLASS_DRUID:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_nature_starfall:30|t|r Use Ballance Spec", GOSSIP_SENDER_MAIN, 18);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_racial_bearform:30|t|r Use Feral Spec", GOSSIP_SENDER_MAIN, 19);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_nature_healingtouch:30|t|r Use Restoration Spec", GOSSIP_SENDER_MAIN, 20);
-			}
-			break;
-		case CLASS_HUNTER:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_marksmanship:30|t|r Use Markmanship Spec", GOSSIP_SENDER_MAIN, 21);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_hunter_beasttaming:30|t|r Use Beastmastery Spec", GOSSIP_SENDER_MAIN, 22);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_Hunter_swiftstrike:30|t|r Use Survival Spec", GOSSIP_SENDER_MAIN, 23);
-			}
-			break;
-		case CLASS_ROGUE:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_rogue_eviscerate:30|t|r Use Assasination Spec", GOSSIP_SENDER_MAIN, 24);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_backstab:30|t|r Use Combat Spec", GOSSIP_SENDER_MAIN, 25);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\ability_stealth:30|t|r Use Subtlety Spec", GOSSIP_SENDER_MAIN, 26);
-			}
-			break;
-		case CLASS_DEATH_KNIGHT:
-			{
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_deathknight_bloodpresence:30|t|r Use Blood Spec", GOSSIP_SENDER_MAIN, 27);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_deathknight_frostpresence:30|t|r Use Frost Spec", GOSSIP_SENDER_MAIN, 28);
-				player->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "|cff00ff00|TInterface\\icons\\spell_deathknight_unholypresence:30|t|r Use Unholy Spec", GOSSIP_SENDER_MAIN, 29);
-			}
-			break;
-		}
-		player->SEND_GOSSIP_MENU(60025, creature->GetGUID());
-		return true;
-	}
-
-	void EquipFullTemplateGear(Player* player, std::string& playerSpecStr) // Merge
-	{
-		if (sTemplateNpcMgr->CanEquipTemplate(player, playerSpecStr) == false)
-		{
-			player->GetSession()->SendAreaTriggerMessage("There's no templates for %s specialization yet.", playerSpecStr.c_str());
-			return;
-		}
-
-		// Don't let players to use Template feature while wearing some gear
-		for (uint8 i = EQUIPMENT_SLOT_START; i < EQUIPMENT_SLOT_END; ++i)
-		{
-			if (Item* haveItemEquipped = player->GetItemByPos(INVENTORY_SLOT_BAG_0, i))
-			{
-				if (haveItemEquipped)
-				{
-					player->GetSession()->SendAreaTriggerMessage("You need to remove all your equipped items in order to use this feature!");
-					player->CLOSE_GOSSIP_MENU();
-					return;
-				}
-			}
-		}
-
-		// Don't let players to use Template feature after spending some talent points
-		if (player->GetFreeTalentPoints() < 71)
-		{
-			player->GetSession()->SendAreaTriggerMessage("You have already spent some talent points. You need to reset your talents first!");
-			player->CLOSE_GOSSIP_MENU();
-			return;
-		}
-
-		sTemplateNpcMgr->LearnTemplateTalents(player);
-		sTemplateNpcMgr->LearnTemplateGlyphs(player);
-		sTemplateNpcMgr->EquipTemplateGear(player);
-		sTemplateNpcMgr->LearnPlateMailSpells(player);
-
-		LearnWeaponSkills(player);
-
-		player->GetSession()->SendAreaTriggerMessage("Successfuly equipped %s %s template!", playerSpecStr.c_str(), sTemplateNpcMgr->GetClassString(player).c_str());
-	}
-
-	bool OnGossipSelect(Player* player, Creature* creature, uint32 /*uiSender*/, uint32 uiAction)
-	{
-		player->PlayerTalkClass->ClearMenus();
-
-		if (!player || !creature)
-			return true;
-
-		switch (uiAction)
-		{
-		case 0: // Use Discipline Priest Spec
-			sTemplateNpcMgr->sTalentsSpec = "Discipline";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 1: // Use Holy Priest Spec
-			sTemplateNpcMgr->sTalentsSpec = "Holy";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 2: // Use Shadow Priest Spec
-			sTemplateNpcMgr->sTalentsSpec = "Shadow";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 3: // Use Holy Paladin Spec
-			sTemplateNpcMgr->sTalentsSpec = "Holy";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 4: // Use Protection Paladin Spec
-			sTemplateNpcMgr->sTalentsSpec = "Protection";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 5: // Use Retribution Paladin Spec
-			sTemplateNpcMgr->sTalentsSpec = "Retribution";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 6: // Use Fury Warrior Spec
-			sTemplateNpcMgr->sTalentsSpec = "Fury";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 7: // Use Arms Warrior Spec
-			sTemplateNpcMgr->sTalentsSpec = "Arms";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 8: // Use Protection Warrior Spec
-			sTemplateNpcMgr->sTalentsSpec = "Protection";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 9: // Use Arcane Mage Spec
-			sTemplateNpcMgr->sTalentsSpec = "Arcane";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 10: // Use Fire Mage Spec
-			sTemplateNpcMgr->sTalentsSpec = "Fire";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 11: // Use Frost Mage Spec
-			sTemplateNpcMgr->sTalentsSpec = "Frost";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 12: // Use Affliction Warlock Spec
-			sTemplateNpcMgr->sTalentsSpec = "Affliction";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 13: // Use Demonology Warlock Spec
-			sTemplateNpcMgr->sTalentsSpec = "Demonology";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 14: // Use Destruction Warlock Spec
-			sTemplateNpcMgr->sTalentsSpec = "Destruction";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 15: // Use Elemental Shaman Spec
-			sTemplateNpcMgr->sTalentsSpec = "Elemental";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 16: // Use Enhancement Shaman Spec
-			sTemplateNpcMgr->sTalentsSpec = "Enhancement";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 17: // Use Restoration Shaman Spec
-			sTemplateNpcMgr->sTalentsSpec = "Restoration";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 18: // Use Ballance Druid Spec
-			sTemplateNpcMgr->sTalentsSpec = "Ballance";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 19: // Use Feral Druid Spec
-			sTemplateNpcMgr->sTalentsSpec = "Feral";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 20: // Use Restoration Druid Spec
-			sTemplateNpcMgr->sTalentsSpec = "Restoration";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 21: // Use Marksmanship Hunter Spec
-			sTemplateNpcMgr->sTalentsSpec = "Marksmanship";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 22: // Use Beastmastery Hunter Spec
-			sTemplateNpcMgr->sTalentsSpec = "Beastmastery";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 23: // Use Survival Hunter Spec
-			sTemplateNpcMgr->sTalentsSpec = "Survival";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 24: // Use Assassination Rogue Spec
-			sTemplateNpcMgr->sTalentsSpec = "Assassination";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 25: // Use Combat Rogue Spec
-			sTemplateNpcMgr->sTalentsSpec = "Combat";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 26: // Use Subtlety Rogue Spec
-			sTemplateNpcMgr->sTalentsSpec = "Subtlety";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 27: // Use Blood DK Spec
-			sTemplateNpcMgr->sTalentsSpec = "Blood";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 28: // Use Frost DK Spec
-			sTemplateNpcMgr->sTalentsSpec = "Frost";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-
-		case 29: // Use Unholy DK Spec
-			sTemplateNpcMgr->sTalentsSpec = "Unholy";
-			EquipFullTemplateGear(player, sTemplateNpcMgr->sTalentsSpec);
-			player->CLOSE_GOSSIP_MENU();
-			break;
-		default: // Just in case
-			player->GetSession()->SendAreaTriggerMessage("Something went wrong in the code. Please contact the administrator.");
-			break;
-		}
-		player->UpdateSkillsForLevel();
-		return true;
-	}
-};
-
-void AddSC_TemplateNPC()
-{
-	new TemplateNPC_Commands();
-	new TemplateNPC();
+    Script *newscript;
+
+    newscript = new Script;
+    newscript->Name="npc_template";
+    newscript->pGossipHello =  &GossipHello_npc_template;
+    newscript->pGossipSelect = &GossipSelect_npc_template;
+    newscript->RegisterSelf();
 }

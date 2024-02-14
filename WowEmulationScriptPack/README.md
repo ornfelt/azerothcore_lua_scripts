@@ -8,7 +8,7 @@ I highly recommend learning from these rather than just grabbing them and using 
 
 This is highly unorganized and a bit of a mess and that is okay. As it's meant to be a resource in a time where resources are very very sparse.
 I do not maintain this repo is is just a collection.
-This repo consists of over 1800 files and will continue to grow.
+This repo consists of over 4000 files and will continue to grow.
 
 ## Disclaimer
 I do not own these scripts nor did i create them.

@@ -1,9 +1,0 @@
-Please Change | To
-
-*Server Name* = Server Name
-*Website* = Website
-*Server IP* = Server IP
-*Server Domain* = Server Domain
-*NPC ID* = NPC ID
-
-Thank you CodeMonkey off AC Web for Lua

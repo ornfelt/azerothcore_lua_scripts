@@ -1,3 +1,0 @@
-INSERT INTO `creature_proto` (`entry`,`minlevel`,`maxlevel`,`faction`,`minhealth`,`maxhealth`,`scale`,`auras`,`invisibility_type`,`death_state`) VALUES ('24675','70','70','14','5000','5000','1','0','0','0');
-INSERT INTO `creature_proto` (`entry`,`minlevel`,`maxlevel`,`faction`,`minhealth`,`maxhealth`,`mana`,`scale`,`auras`,`invisibility_type`,`death_state`) VALUES ('24666','70','70','14','1','1','0','1','0','0','0');
-INSERT INTO `creature_proto` (`entry`,`minlevel`,`maxlevel`,`faction`,`minhealth`,`maxhealth`,`scale`,`auras`,`invisibility_type`,`death_state`) VALUES ('24674','70','70','14','12000','12000','1','0','0','0');

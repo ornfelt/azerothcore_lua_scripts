@@ -1,26 +1,28 @@
-/////////////////////////////////////////////////////////////////////////////
-//        ____        __  __  __     ___                                   //
-//       / __ )____ _/ /_/ /_/ /__  /   |  ________  ____  ____ ______     //
-//      / __  / __ `/ __/ __/ / _ \/ /| | / ___/ _ \/ __ \/ __ `/ ___/     //
-//     / /_/ / /_/ / /_/ /_/ /  __/ ___ |/ /  /  __/ / / / /_/ (__  )      //
-//    /_____/\__,_/\__/\__/_/\___/_/  |_/_/   \___/_/ /_/\__,_/____/       //
-//         Developed by Natureknight for BattleArenas.no-ip.org            //
-//             Copyright (C) 2015 Natureknight/JessiqueBA                  //
-//                      battlearenas.no-ip.org                             //
-/////////////////////////////////////////////////////////////////////////////
-
 #include "ScriptPCH.h"
+#include "Language.h"
 
-class Professions_NPC : public CreatureScript
+class Proffessions_NPC : public CreatureScript
 {
 public:
-	Professions_NPC () : CreatureScript("Professions_NPC") {}
+	Proffessions_NPC () : CreatureScript("Proffessions_NPC") {}
 
 	bool OnGossipHello(Player *pPlayer, Creature* _creature)
 	{
-		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Primary Professions", GOSSIP_SENDER_MAIN, 1);
-		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Secondary Professions", GOSSIP_SENDER_MAIN, 2);
-		pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Alchemy", GOSSIP_SENDER_MAIN, SKILL_ALCHEMY);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Blacksmithing", GOSSIP_SENDER_MAIN, SKILL_BLACKSMITHING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Leatherworking", GOSSIP_SENDER_MAIN, SKILL_LEATHERWORKING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Tailoring", GOSSIP_SENDER_MAIN, SKILL_TAILORING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Engineering", GOSSIP_SENDER_MAIN, SKILL_ENGINEERING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Enchanting", GOSSIP_SENDER_MAIN, SKILL_ENCHANTING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Jewelcrafting", GOSSIP_SENDER_MAIN, SKILL_JEWELCRAFTING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Inscription", GOSSIP_SENDER_MAIN, SKILL_INSCRIPTION);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Cooking", GOSSIP_SENDER_MAIN, SKILL_COOKING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "First Aid", GOSSIP_SENDER_MAIN, SKILL_FIRST_AID);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Herbalism", GOSSIP_SENDER_MAIN, SKILL_HERBALISM);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Skinning", GOSSIP_SENDER_MAIN, SKILL_SKINNING);
+		pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_CHAT, "Mining", GOSSIP_SENDER_MAIN, SKILL_MINING);
+
+		pPlayer->PlayerTalkClass->SendGossipMenu(907, _creature->GetGUID());
 		return true;
 	}
 
@@ -30,106 +32,12 @@ public:
 
 		if (uiSender == GOSSIP_SENDER_MAIN)
 		{
-			switch (SKILL)
-			{
-			case 1: // Primary Proffs
-				/*if (pPlayer->HasItemCount(40752, 5)) // Emblem of Wrathful
-				{
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Alchemy (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_ALCHEMY);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Blacksmithing (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_BLACKSMITHING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Enchanting (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_ENCHANTING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Engineering (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_ENGINEERING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Herbalism (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_HERBALISM);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Inscription (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_INSCRIPTION);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Jewelcrafting (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_JEWELCRAFTING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Leatherworking (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_LEATHERWORKING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Mining (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_MINING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Skinning (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_SKINNING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Tailoring (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_TAILORING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_TALK, "Back to Main Page", GOSSIP_SENDER_MAIN, 5);
-				pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
-				}
-				else
-				{
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Alchemy (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Blacksmithing (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Enchanting (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Engineering (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Herbalism (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Inscription (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Jewelcrafting (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Leatherworking (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Mining (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Skinning (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Tailoring (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_TALK, "Back to Main Page", GOSSIP_SENDER_MAIN, 5);
-				pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
-				}
-				else
-				{*/
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Alchemy", GOSSIP_SENDER_MAIN, SKILL_ALCHEMY);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Blacksmithing", GOSSIP_SENDER_MAIN, SKILL_BLACKSMITHING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Enchanting", GOSSIP_SENDER_MAIN, SKILL_ENCHANTING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Engineering", GOSSIP_SENDER_MAIN, SKILL_ENGINEERING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Herbalism", GOSSIP_SENDER_MAIN, SKILL_HERBALISM);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Inscription", GOSSIP_SENDER_MAIN, SKILL_INSCRIPTION);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Jewelcrafting", GOSSIP_SENDER_MAIN, SKILL_JEWELCRAFTING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Leatherworking", GOSSIP_SENDER_MAIN, SKILL_LEATHERWORKING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Mining", GOSSIP_SENDER_MAIN, SKILL_MINING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Skinning", GOSSIP_SENDER_MAIN, SKILL_SKINNING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Tailoring", GOSSIP_SENDER_MAIN, SKILL_TAILORING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_TALK, "Back to Main Page", GOSSIP_SENDER_MAIN, 5);
-				pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
-				/*}*/
-				break;
-			case 2: // Secondary Proffs
-				/*if (pPlayer->HasItemCount(40752, 5))
-				{
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Cooking (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_COOKING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "First Aid (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_FIRST_AID);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Fishing (|cff00FF66Unlocked|r)", GOSSIP_SENDER_MAIN, SKILL_FISHING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_TALK, "Back to Main Page", GOSSIP_SENDER_MAIN, 5);
-				pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
-				}
-				else
-				{
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Cooking (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "First Aid (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Fishing (5 EoW - |cffD80000Locked|r)", GOSSIP_SENDER_MAIN, 3);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_TALK, "Back to Main Page", GOSSIP_SENDER_MAIN, 5);
-				pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
-				}
-				}
-				else
-				{*/
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Cooking", GOSSIP_SENDER_MAIN, SKILL_COOKING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "First Aid", GOSSIP_SENDER_MAIN, SKILL_FIRST_AID);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_INTERACT_1, "Fishing", GOSSIP_SENDER_MAIN, SKILL_FISHING);
-				pPlayer->ADD_GOSSIP_ITEM(GOSSIP_ICON_TALK, "Back to Main Page", GOSSIP_SENDER_MAIN, 5);
-				pPlayer->PlayerTalkClass->SendGossipMenu(60030, _creature->GetGUID());
-				/*}*/
-				break;
-				/*case 3: // No enought EoW
-				pPlayer->GetSession()->SendAreaTriggerMessage("You need at least 5 Emblems of Wrathful to purchase a profession.");
-				pPlayer->CLOSE_GOSSIP_MENU();
-				break;*/
-			case 5: // Main Page
-				OnGossipHello(pPlayer, _creature);
-				break;
-			default:
-				{
-					if (pPlayer->HasSkill(SKILL))
-						pPlayer->GetSession()->SendNotification("You already have that skill");
-					else
-					{
-						CompleteLearnProfession(pPlayer, (SkillType)SKILL);
-						/*if (sWorld->getBoolConfig(REALM_IS_TOURNAMENT_ENABLED))
-						    pPlayer->DestroyItemCount(40752, 5, true); // Emblem of Wrathful*/
-						pPlayer->CLOSE_GOSSIP_MENU();
-					}
-				}
-			}
+			if(pPlayer->HasSkill(SKILL))
+				pPlayer->GetSession()->SendNotification("You already have that skill");
+			else
+				CompleteLearnProfession(pPlayer, (SkillType)SKILL);
 		}
+		OnGossipHello(pPlayer, _creature);
 		return true;
 	}
 
@@ -153,18 +61,18 @@ public:
 	{
 		const char* skill_name;
 		SkillLineEntry const *SkillInfo = sSkillLineStore.LookupEntry(skill);
-		skill_name = SkillInfo->name[ChatHandler(pPlayer).GetSessionDbcLocale()];
+		skill_name = SkillInfo->name[ChatHandler(pPlayer->GetSession()).GetSessionDbcLocale()];
 
 		if (!SkillInfo)
 		{
-			sLog->outError("Profession NPC: received non-valid skill ID (LearnAllRecipesInProfession)");
+			sLog->outError(LOG_FILTER_PLAYER_SKILLS, "Profession NPC: received non-valid skill ID (LearnAllRecipesInProfession)");
 			return false;
 		}       
 
 		LearnSkillRecipesHelper(pPlayer, SkillInfo->id);
 
 		pPlayer->SetSkill(SkillInfo->id, pPlayer->GetSkillStep(SkillInfo->id), 450, 450);
-		ChatHandler(pPlayer).PSendSysMessage(LANG_COMMAND_LEARN_ALL_RECIPES, skill_name);
+		ChatHandler(pPlayer->GetSession()).PSendSysMessage(LANG_COMMAND_LEARN_ALL_RECIPES, skill_name);
 
 		return true;
 	}
@@ -240,7 +148,7 @@ public:
 	}
 };
 
-void AddSC_Professions_NPC()
+void AddSC_Proffessions_NPC()
 {
-	new Professions_NPC();
+	new Proffessions_NPC();
 }
