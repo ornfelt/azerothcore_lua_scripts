@@ -1,4 +1,5 @@
 local enableScript = true  -- Set to true to enable the script, false to disable
+local enableGuildChat = true -- Set to true to enable guild chat, false to disable
 
 if enableScript then
 
@@ -24,7 +25,8 @@ local zones = {
     "Zangarmarsh", "Terokkar Forest", "Nagrand", "Blade's Edge Mountains", "Netherstorm",
     "Shadowmoon Valley", "Borean Tundra", "Howling Fjord", "Dragonblight",
     "Grizzly Hills", "Zul'Drak", "Sholazar Basin", "The Storm Peaks", "Icecrown",
-    "Crystalsong Forest", "Wintergrasp"
+    "Crystalsong Forest", "Wintergrasp", "Mount Hyjal", "Vashj'ir", "Deepholm",
+    "Uldum", "Twilight Highlands", "Tol Barad"
 }
 
 local instances = {
@@ -225,15 +227,17 @@ end
 -- Create a public chat event
 CreateLuaEvent(function()
     local n = t.d[math.random(#t.d)]
-    SendWorldMessage(string.format("|cFFFFC0C0[World]|r|cff%s|Hplayer:%s|h[%s]|h|r:|cFFFFC0C0%s|r", t.cc[math.random(#t.cc)], n, n, t:dt("talk")))
+    SendWorldMessage(string.format("|cFFFFC0C0[World] |r|cff%s|Hplayer:%s|h[%s]|h|r: |cFFFFC0C0%s|r", t.cc[math.random(#t.cc)], n, n, t:dt("talk")))
 end, {talk_time[1], talk_time[2]}, 0)
 
 -- Create a guild chat event
-CreateLuaEvent(function()
-    local n = t.d[math.random(#t.d)]
-    SendWorldMessage(string.format("|cFF40FF40[Guild]|Hplayer:%s|h[%s]|h:%s|r", n, n, t:dt("guild_talk")))
-end, {guild_talk_time[1], guild_talk_time[2]}, 0)
-
+    if enableGuildChat then
+        CreateLuaEvent(function()
+            local n = t.d[math.random(#t.d)]
+            SendWorldMessage(string.format("|cFF40FF40[Guild] |Hplayer:%s|h[%s]|h: %s|r", n, n, t:dt("guild_talk")))
+        end, {guild_talk_time[1], guild_talk_time[2]}, 0)
+    end
+	
 -- Process secret words and invitation packets
 --RegisterServerEvent(5, function(_, p, w)
 --    local c = p:GetOpcode()
