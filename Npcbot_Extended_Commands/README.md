@@ -32,6 +32,15 @@ The .bot nameset [new name] command sets the name of the targeted NPC Bot. The n
 - `arrows` // Arrows and Bullets aren't needed but I added them anyway.
 - `bullets`
 
+## Other Chat Options
+I've included another lua script primarily focused on Mage Portals. I realize trickerer recently update mage gossip items to include portals, but I still prefer chat options for this function and having a reagent requirement. If you want to have a reagent requirement core side as well and you're not playing my repack, you'll have to modify that yourself.
+
+Chats:
+- Typing out a greeting such as hi or hello or what's up etc will ellicit a response from a nearby bot
+- "Wtb port to x" or "LF port to x" or "port to x" will grant a portal from mage bots. Abbreviations for cities are also considered
+- "Salv me" will get a nearby paladin bot to cast hand of salvation on you. (No CD)
+- "DI me" will get a nearby paladin bot to cast Divine Intervention on you. (No CD)
+
 ## Important Notes
 
 - The script is a work in progress. There are many items and levels of division that still need to be added.
