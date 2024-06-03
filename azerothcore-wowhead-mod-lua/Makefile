@@ -1,0 +1,33 @@
+DOCKER_TAG ?= latest
+DOCKER_IMAGE ?= ac-api:$(DOCKER_TAG)
+DOCKER_CONTAINER ?= api
+
+HTTP_HOST ?= 0.0.0.0
+HTTP_PORT ?= 8000
+LOCAL_HTTP_PORT ?= 8000
+
+AZEROTHCORE_REMOTE_ADDRESS ?= http://localhost:7878
+GM_USERNAME ?= admin
+GM_PASSWORD ?= admin
+
+GUNICORN_WORKERS ?= $(shell nproc)
+GUNICORN_TIMEOUT ?= 360
+
+.PHONY: run
+run: build
+	docker run --name=$(DOCKER_CONTAINER) -p $(HTTP_PORT):$(LOCAL_HTTP_PORT) -it --rm \
+	--env AZEROTHCORE_REMOTE_ADDRESS="$(AZEROTHCORE_REMOTE_ADDRESS)" \
+	--env GM_USERNAME="$(GM_USERNAME)" \
+	--env GM_PASSWORD="$(GM_PASSWORD)" \
+	--env GUNICORN_WORKERS="$(GUNICORN_WORKERS)" \
+	--env GUNICORN_TIMEOUT="$(GUNICORN_TIMEOUT)" \
+	--env GUNICORN_BIND_ADDRESS="$(HTTP_HOST):$(HTTP_PORT)" $(DOCKER_IMAGE)
+
+.PHONY: build
+build:
+	docker build -t $(DOCKER_IMAGE) .
+
+.PHONY: stop
+stop:
+	docker stop $(DOCKER_CONTAINER)
+

@@ -1,0 +1,6 @@
+flask
+requests
+beautifulsoup4
+Flask-Cors
+acore-soap-app==0.3.4
+gunicorn
