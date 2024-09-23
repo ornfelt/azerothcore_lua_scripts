@@ -1,0 +1,994 @@
+ <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/..\FrameXML\UI.xsd">
+	<Script file="TurnIn.lua" />
+	<Script file="TurnInUI.lua" />
+	
+	<Frame name="TI_OptionFrameBoxTemplate" virtual="true">
+		<!-- shamelessly stolen from blizzard -->
+		<Layers>
+			<Layer level="BACKGROUND">
+				<FontString name="$parentTitle" inherits="GameFontHighlight">
+					<Anchors>
+						<Anchor point="BOTTOMLEFT" relativePoint="TOPLEFT">
+							<Offset>
+								<AbsDimension x="9" y="0"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Backdrop bgFile="Interface\Tooltips\UI-Tooltip-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+			<EdgeSize>
+				<AbsValue val="16"/>
+			</EdgeSize>
+			<TileSize>
+				<AbsValue val="16"/>
+			</TileSize>
+			<BackgroundInsets>
+				<AbsInset left="5" right="5" top="5" bottom="5"/>
+			</BackgroundInsets>
+		</Backdrop>
+		<Scripts>
+			<OnLoad>
+				self:SetBackdropBorderColor(0.4, 0.4, 0.4);
+				self:SetBackdropColor(0.5, 0.5, 0.5);
+			</OnLoad>
+		</Scripts>
+	</Frame>
+
+	
+	<Button name="TI_PriorityList" virtual="true" hidden="false">
+		<Size>
+			<AbsDimension x="235" y="20" />
+		</Size>
+		<Scripts><!--
+			<OnEnter>
+				getglobal(self:GetName() .. "_Background"):SetVertexColor(1,1,1,0.4);
+			</OnEnter>
+			<OnLeave>
+				getglobal(self:GetName() .. "_Background"):SetVertexColor(0,0,0,0.4);
+			</OnLeave>
+			-->
+		</Scripts>
+		<Frames>
+			<CheckButton name="$parent_Check" hidden="false" inherits="OptionsCheckButtonTemplate">
+				<Anchors>
+					<Anchor point="TOPLEFT"/>
+				</Anchors>
+				<HitRectInsets>
+					<AbsInset left="0" right="0" top="0" bottom="0"/>
+				</HitRectInsets>
+				<Size>
+					<AbsDimension x="20" y="22"/>
+				</Size>
+				<Scripts>
+					<OnEnter>
+						TI_OptionListCheckboxTooltip(self);
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+					<OnClick>
+						TI_OptionToggle(self);
+					</OnClick>
+				</Scripts>
+			</CheckButton>
+			<Button name="$parent_MoveDown" hidden="false">
+				<Size>
+					<AbsDimension x="24" y="24"/>
+				</Size>
+				<Anchors>
+					<Anchor point="TOPRIGHT">
+						<Offset>
+							<AbsDimension x="0" y="0"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnEnter>
+						TI_TooltipMessage(self, "Decrease this option's priority.");
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+					<OnClick>
+						TI_OptionMove(self, 1);
+					</OnClick>
+				</Scripts>
+				<NormalTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Up"/>
+				<PushedTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Down"/>
+				<DisabledTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollDown-Disabled"/>
+				<HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+			</Button>
+			<Button name="$parent_MoveUp" hidden="false">
+				<Size>
+					<AbsDimension x="24" y="24"/>
+				</Size>
+				<Anchors>
+					<Anchor point="RIGHT" relativePoint="LEFT" relativeTo="$parent_MoveDown">
+						<Offset>
+							<AbsDimension x="3" y="0"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						TI_OptionMove(self, -1);
+					</OnClick>
+					<OnEnter>
+						TI_TooltipMessage(self, "Increase this option's priority.");
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+				</Scripts>
+				<NormalTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Up"/>
+				<PushedTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Down"/>
+				<DisabledTexture file="Interface\ChatFrame\UI-ChatIcon-ScrollUp-Disabled"/>
+				<HighlightTexture file="Interface\Buttons\UI-Common-MouseHilight" alphaMode="ADD"/>
+			</Button>
+		</Frames>
+		<Layers>
+			<Layer level="ARTWORK">
+				<Texture name="$parent_Icon" file="Interface\QuestFrame\UI-Quest-BulletPoint">
+					<Size>
+						<AbsDimension x="16" y="16"/>
+					</Size>
+					<Anchors>
+						<Anchor point="TOPLEFT">
+							<Offset>
+								<AbsDimension x="20" y="-3"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</Texture>
+				<FontString name="$parent_Text" inherits="GameFontNormal" justifyV="top" justifyH="left">
+					<Anchors>
+						<Anchor point="TOPLEFT" relativeTo="$parent_Icon" relativePoint="TOPRIGHT">
+							<Offset>
+								<AbsDimension x="0" y="-1"/>
+							</Offset>
+						</Anchor>
+						<Anchor point="TOPRIGHT" relativeTo="$parent_MoveUp" relativePoint="TOPLEFT">
+							<Offset>
+								<AbsDimension x="0" y="0"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+			<Layer level="BACKGROUND">
+				<Texture name="$parent_Background" setAllPoints="true">
+					<Color r="0.2" g="0.2" b="1" a="0.0" />
+				</Texture>
+			</Layer>
+		</Layers>
+		<!--<NormalText name="$parent_Text" justifyV="top" justifyH="left" inherits="GameFontNormal" nonspacewrap="true">
+			<Anchors>
+				<Anchor point="TOPLEFT" relativeTo="$parent_Icon" relativePoint="TOPRIGHT">
+					<Offset>
+						<AbsDimension x="0" y="-1"/>
+					</Offset>
+				</Anchor>
+				<Anchor point="TOPRIGHT" relativeTo="$parent_MoveUp" relativePoint="TOPLEFT">
+					<Offset>
+						<AbsDimension x="0" y="0"/>
+					</Offset>
+				</Anchor>
+			</Anchors>
+			<Size>
+				<AbsDimension x="156" y="0" />
+			</Size>
+		</NormalText>-->
+	</Button>
+	
+	<Button name="TI_NPCList" virtual="true" hidden="false">
+		<Size>
+			<AbsDimension x="232" y="20" />
+		</Size>
+		<Frames>
+			<CheckButton name="$parent_Check" hidden="false" inherits="OptionsCheckButtonTemplate">
+				<Anchors>
+					<Anchor point="TOPLEFT"/>
+				</Anchors>
+				<HitRectInsets>
+					<AbsInset left="0" right="0" top="0" bottom="0"/>
+				</HitRectInsets>
+				<Size>
+					<AbsDimension x="20" y="22"/>
+				</Size>
+				<Scripts>
+					<OnClick>
+						TI_NPCToggle(self);
+						TI_NPCListCheckboxTooltip(self);
+					</OnClick>
+					<OnEnter>
+						TI_NPCListCheckboxTooltip(self);
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+				</Scripts>
+			</CheckButton>
+			<Button name="$parent_Delete" hidden="false" inherits="OptionsButtonTemplate" text="X">
+				<Anchors>
+					<Anchor point="RIGHT">
+						<Offset>
+							<AbsDimension x="3" y="0"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="20" y="20" />
+				</Size>
+				<Scripts>
+					<OnEnter>
+						TI_TooltipMessage(self, "Delete this NPC.");
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+					<OnClick>
+						TI_DeleteNPCIndex(self);
+					</OnClick>
+				</Scripts>
+			</Button>
+		</Frames>
+		<Layers>
+			<Layer level="ARTWORK">
+				<FontString name="$parent_Text" justifyV="top" justifyH="left" inherits="GameFontNormal" text="">
+					<Anchors>
+						<Anchor point="LEFT">
+							<Offset>
+								<AbsDimension x="20" y="0"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnClick>
+				TI_SelectNPCIndex(self);
+			</OnClick>
+		</Scripts>
+		<HighlightTexture file="Interface\QuestFrame\UI-QuestTitleHighlight" alphaMode="ADD"/>
+	</Button>
+	
+	<GameTooltip name="TI_Tooltip" hidden="true" inherits="GameTooltipTemplate" />
+	
+	<Frame Name="TI_TempNPCListEntry" virtual="true" hidden="true">
+		<Scripts>
+			<OnEnter>
+				TI_TempNPCListTooltipShow(self);
+			</OnEnter>
+			<OnLeave>
+				TI_TooltipHide();
+			</OnLeave>
+		</Scripts>
+		<Size>
+			<AbsDimension x="188" y="20" />
+		</Size>
+		
+		<Layers>
+			<Layer level="ARTWORK">
+				<FontString name="$parent_Text" justifyV="top" justifyH="left" inherits="GameFontNormal" text="">
+					<Anchors>
+						<Anchor point="LEFT">
+							<Offset>
+								<AbsDimension x="0" y="0"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Frames>
+			<Button name="$parent_Delete" hidden="false" inherits="OptionsButtonTemplate" text="X">
+				<Anchors>
+					<Anchor point="TOPRIGHT">
+						<Offset>
+							<AbsDimension x="0" y="2"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="20" y="20" />
+				</Size>
+				<Scripts>
+					<OnClick>
+						TI_DeleteTempNPCIndex(self:GetParent():GetID());
+					</OnClick>
+					<OnEnter>
+						TI_TooltipMessage(self, "Delete");
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+				</Scripts>
+			</Button>
+			<Button name="$parent_Add" hidden="false" inherits="OptionsButtonTemplate" text="+">
+				<Anchors>
+					<Anchor point="RIGHT" relativeTo="$parent_Delete" relativePoint="LEFT">
+						<Offset>
+							<AbsDimension x="0" y="0"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="20" y="20" />
+				</Size>
+				<Scripts>
+					<OnClick>
+						TI_AddTempNPCIndex(self:GetParent():GetID());
+					</OnClick>
+					<OnEnter>
+						TI_TooltipMessage(self, "Add this NPC to the database");
+					</OnEnter>
+					<OnLeave>
+						TI_TooltipHide();
+					</OnLeave>
+				</Scripts>
+			</Button>
+		</Frames>
+	</Frame>
+	
+	<Frame Name="TI_TempNPCListWindow" parent="UIParent" frameStrata="DIALOG" toplevel="true" enableMouse="true" movable="true" hidden="true">
+		<Size>
+			<AbsDimension x="200" y="130" />
+		</Size>
+		<Anchors>
+			<Anchor point="CENTER"/>
+		</Anchors>
+		<Layers>
+			<Layer level="ARTWORK">
+				<FontString inherits="GameFontNormal" text="Recently Visited NPCs">
+					<Anchors>
+						<Anchor point="TOPLEFT" relativePoint="TOPLEFT">
+							<Offset><AbsDimension x="6" y="-7" /></Offset>
+						</Anchor>
+						<Anchor point="TOPRIGHT">
+							<Offset><AbsDimension x="-6" y="-7" /></Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Frames>
+			<Button name="$parent_Close" inherits="UIPanelCloseButton">
+				<Anchors> 
+					<Anchor point="TOPRIGHT">
+						<Offset>
+							<AbsDimension x="0" y="0"/>
+						</Offset>
+					</Anchor>
+				</Anchors> 
+			</Button>
+			<Frame name="$parent1" id="1" hidden="true" inherits="TI_TempNPCListEntry">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="TOPLEFT">
+						<Offset><AbsDimension x="6" y="-27" /></Offset>
+					</Anchor>
+					<!--<Anchor point="TOPRIGHT">
+						<Offset><AbsDimension x="-6" y="-27" /></Offset>
+					</Anchor>-->
+				</Anchors>
+			</Frame>
+			<Frame name="$parent2" id="2" hidden="true" inherits="TI_TempNPCListEntry">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent1">
+						<Offset><AbsDimension x="0" y="0" /></Offset>
+					</Anchor>
+				</Anchors>
+			</Frame>
+			<Frame name="$parent3" id="3" hidden="true" inherits="TI_TempNPCListEntry">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent2">
+						<Offset><AbsDimension x="0" y="0" /></Offset>
+					</Anchor>
+				</Anchors>
+			</Frame>
+			<Frame name="$parent4" id="4" hidden="true" inherits="TI_TempNPCListEntry">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent3">
+						<Offset><AbsDimension x="0" y="0" /></Offset>
+					</Anchor>
+				</Anchors>
+			</Frame>
+			<Frame name="$parent5" id="5" hidden="true" inherits="TI_TempNPCListEntry">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent4">
+						<Offset><AbsDimension x="0" y="0" /></Offset>
+					</Anchor>
+				</Anchors>
+			</Frame>
+		</Frames>
+		<Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+			<EdgeSize>
+				<AbsValue val="16"/>
+			</EdgeSize>
+			<TileSize>
+				<AbsValue val="16"/>
+			</TileSize>
+			<BackgroundInsets>
+				<AbsInset left="5" right="5" top="5" bottom="5"/>
+			</BackgroundInsets>
+		</Backdrop>
+		<Scripts>
+			<OnMouseUp>
+				if ( self.isMoving ) then
+					self:StopMovingOrSizing();
+					self.isMoving = false;
+				end
+			</OnMouseUp>
+			<OnMouseDown>
+				if (  button == "LeftButton" ) then
+					self:StartMoving();
+					self.isMoving = true;
+				end
+			</OnMouseDown>
+			<OnHide>
+				if ( self.isMoving ) then
+					self:StopMovingOrSizing();
+					self.isMoving = false;
+				end
+			</OnHide>
+		</Scripts>
+	</Frame>
+	
+	<Frame Name="TI_OptionsFrame" frameStrata="DIALOG" toplevel="true" enableMouse="true" enableMouseWheel="true" movable="true" parent="UIParent">
+		<TitleRegion>
+			<Size>
+				<AbsDimension x="128" y="64"/>
+			</Size>
+			<Anchors>
+				<Anchor point="TOP">
+					<Offset>
+						<AbsDimension x="0" y="12"/>
+					</Offset>
+				</Anchor>
+			</Anchors>
+		 </TitleRegion>
+		
+		<Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+			<BackgroundInsets>
+				<AbsInset left="11" right="12" top="12" bottom="11"/>
+			</BackgroundInsets>
+			<TileSize>
+				<AbsValue val="32"/>
+			</TileSize>
+			<EdgeSize>
+				<AbsValue val="32"/>
+			</EdgeSize>
+		</Backdrop>
+		
+		<Scripts>
+			<OnShow>
+				
+			</OnShow>
+		</Scripts>
+		<Size>
+			<AbsDimension x="300" y="500"/>
+		</Size>
+		<Anchors>
+			<Anchor point="CENTER"/>
+		</Anchors>
+		<Layers>
+			<Layer level="ARTWORK">
+				<Texture name="$parentOptionFrameHeader" file="Interface\DialogFrame\UI-DialogBox-Header">
+					<Size>
+						<AbsDimension x="256" y="64"/>
+					</Size>
+					<Anchors>
+						<Anchor point="TOP">
+							<Offset>
+								<AbsDimension x="0" y="12"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</Texture>
+				<FontString inherits="GameFontNormal" text="Turn In Options">
+					<Anchors>
+						<Anchor point="TOP" relativeTo="$parentOptionFrameHeader">
+							<Offset>
+								<AbsDimension x="0" y="-14"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+				
+			</Layer>
+		</Layers>
+		
+		<Frames>
+			<Button name="$parent_Close" inherits="UIPanelCloseButton">
+				<Anchors> 
+					<Anchor point="TOPRIGHT">
+						<Offset>
+							<AbsDimension x="0" y="0"/>
+						</Offset>
+					</Anchor>
+				</Anchors> 
+			</Button>
+			
+			<Frame name="TI_StatusIndicator" hidden="false">
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset>
+							<AbsDimension x="16" y="-24" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="200" y="20" />
+				</Size>
+				<Frames>
+					<CheckButton name="$parent_Checkbox" hidden="false" inherits="OptionsCheckButtonTemplate">
+						<Anchors>
+							<Anchor point="TOPLEFT">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+						<HitRectInsets>
+							<AbsInset left="0" right="0" top="0" bottom="0"/>
+						</HitRectInsets>
+						<Size>
+							<AbsDimension x="20" y="22"/>
+						</Size>
+						<Scripts>
+							<OnClick>
+								TI_StatusIndicator_CheckFn(self);
+							</OnClick>
+						</Scripts>
+					</CheckButton>
+				</Frames>
+				<Layers>
+					<Layer level="OVERLAY">
+						<FontString name="$parent_Text" inherits="GameFontNormal" text="Turn In is ">
+							<Anchors>
+								<Anchor point="LEFT">
+									<Offset>
+										<AbsDimension x="20" y="0" />
+									</Offset>
+								</Anchor>
+							</Anchors>
+						</FontString>
+						<FontString name="$parent_Status" inherits="GameFontNormal">
+							<Anchors>
+								<Anchor point="LEFT" relativeTo="$parent_Text" relativePoint="RIGHT">
+									<Offset>
+										<AbsDimension x="1" y="0" />
+									</Offset>
+								</Anchor>
+							</Anchors>
+						</FontString>
+					</Layer>
+				</Layers>
+				<Scripts>
+					<OnShow>
+						TI_StatusIndicatorUpdate();
+					</OnShow>
+				</Scripts>
+			</Frame>
+			
+			<Frame name="TI_SettingCheckboxes" hidden="false">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativeTo="TI_StatusIndicator" relativePoint="BOTTOMLEFT">
+						<Offset>
+							<AbsDimension x="0" y="-10" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="200" y="40" />
+				</Size>
+				<Frames>
+					<CheckButton name="$parent_UseDefault" hidden="false" inherits="OptionsCheckButtonTemplate">
+						<Anchors>
+							<Anchor point="TOPLEFT">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+						<HitRectInsets>
+							<AbsInset left="0" right="0" top="0" bottom="0"/>
+						</HitRectInsets>
+						<Size>
+							<AbsDimension x="20" y="22"/>
+						</Size>
+						<Scripts>
+							<OnClick>
+								TI_SettingCheckboxFn(self, "usedefault");
+							</OnClick>
+						</Scripts>
+					</CheckButton>
+					<CheckButton name="$parent_AddAutomatically" hidden="false" inherits="OptionsCheckButtonTemplate">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativeTo="$parent_UseDefault" relativePoint="BOTTOMLEFT">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+						<HitRectInsets>
+							<AbsInset left="0" right="0" top="0" bottom="0"/>
+						</HitRectInsets>
+						<Size>
+							<AbsDimension x="20" y="22"/>
+						</Size>
+						<Scripts>
+							<OnClick>
+								TI_SettingCheckboxFn(self, "autoadd");
+							</OnClick>
+						</Scripts>
+					</CheckButton>
+				</Frames>
+				<Layers>
+					<Layer level="OVERLAY">
+						<FontString name="$parent_UseDefault_Text" inherits="GameFontNormal" text="Use default options for unlisted NPCs">
+							<Anchors>
+								<Anchor point="TOPLEFT">
+									<Offset>
+										<AbsDimension x="20" y="-4" />
+									</Offset>
+								</Anchor>
+							</Anchors>
+						</FontString>
+						<FontString name="$parent_AddAutomatically_Text" inherits="GameFontNormal" text="Automatically add new NPCs">
+							<Anchors>
+								<Anchor point="TOPLEFT" relativeTo="$parent_UseDefault_Text" relativePoint="BOTTOMLEFT">
+									<Offset>
+										<AbsDimension x="0" y="-10" />
+									</Offset>
+								</Anchor>
+							</Anchors>
+						</FontString>
+					</Layer>
+				</Layers>
+				<Scripts>
+					<OnShow>
+						TI_SettingCheckboxUpdate();
+					</OnShow>
+				</Scripts>
+			</Frame>
+			
+			<Frame name="TI_OptionsPriorityContainer" inherits="TI_OptionFrameBoxTemplate">
+				<Scripts>
+					<OnLoad>
+						self:SetBackdropBorderColor(0.4, 0.4, 0.4);
+						self:SetBackdropColor(0.15, 0.15, 0.15);
+						getglobal(self:GetName().."Title"):SetText("Gossip Options Priority List");
+					</OnLoad>
+				</Scripts>
+				<Anchors>
+					<Anchor point="BOTTOMLEFT" relativeTo="$parent" relativePoint="BOTTOMLEFT">
+						<Offset>
+							<AbsDimension x="16" y="16" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="264" y="176" />
+				</Size>
+				<Frames>
+					<ScrollFrame name="TI_OptionsPriorityScrollFrame" hidden="false" inherits="UIPanelScrollFrameTemplate">
+						<Anchors>
+							<Anchor point="TOPLEFT">
+								<Offset>
+									<AbsDimension x="4" y="-8" />
+								</Offset>
+							</Anchor>
+							<Anchor point="BOTTOMRIGHT">
+								<Offset>
+									<AbsDimension x="-28" y="8" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+						<ScrollChild>
+							<Frame name="TI_OptionsPriority">
+								<Anchors>
+									<Anchor point="TOPLEFT" />
+								</Anchors>
+								<Size>
+									<AbsDimension x="200" y="30"/>
+								</Size>
+								
+								<!--<Layers>
+									<Layer level="OVERLAY">
+										<FontString name="$parentText" justifyV="top" justifyH="left" inherits="GameFontNormal" text="Gossip Options">
+											<Anchors>
+												<Anchor point="TOPLEFT" />
+											</Anchors>
+										</FontString>
+									</Layer>
+									<Layer level="BACKGROUND">
+										<Texture name="$parent_Background" setAllPoints="true">
+											<Color r="0" g="1" b="0" a="0.0"/>
+										</Texture>
+									</Layer>
+								</Layers>-->
+								<Frames>
+									<Button name="$parent1" id="1" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent2" id="2" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent1">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent3" id="3" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent2">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent4" id="4" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent3">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent5" id="5" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent4">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent6" id="6" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent5">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent7" id="7" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent6">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent8" id="8" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent7">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent9" id="9" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent8">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent10" id="10" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent9">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent11" id="11" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent10">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent12" id="12" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent11">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent13" id="13" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent12">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent14" id="14" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent13">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent15" id="15" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent14">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+									<Button name="$parent16" id="16" hidden="true" inherits="TI_PriorityList">
+										<Anchors>
+											<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent15">
+												<Offset>
+													<AbsDimension x="0" y="0" />
+												</Offset>
+											</Anchor>
+										</Anchors>
+									</Button>
+								</Frames>
+							</Frame>
+						</ScrollChild>
+					</ScrollFrame>
+				</Frames>
+			</Frame>
+			
+			<Frame name="TI_OptionsNPCContainer" inherits="TI_OptionFrameBoxTemplate">
+				<Scripts>
+					<OnLoad>
+						self:SetBackdropBorderColor(0.4, 0.4, 0.4);
+						self:SetBackdropColor(0.15, 0.15, 0.15);
+						getglobal(self:GetName().."Title"):SetText("NPC Database");
+					</OnLoad>
+				</Scripts>
+				<Anchors>
+					<Anchor point="BOTTOMLEFT" relativeTo="TI_OptionsPriorityContainer" relativePoint="TOPLEFT">
+						<Offset>
+							<AbsDimension x="0" y="16" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Size>
+					<AbsDimension x="264" y="176" />
+				</Size>
+				<Frames>
+				
+					<ScrollFrame name="TI_NPCListScrollFrame" inherits="FauxScrollFrameTemplate" hidden="false" enableMouseWheel="true">
+						<Anchors>
+							<Anchor point="TOPLEFT">
+								<Offset>
+									<AbsDimension x="-28" y="-8" />
+								</Offset>
+							</Anchor>
+							<Anchor point="BOTTOMRIGHT">
+								<Offset>
+									<AbsDimension x="-28" y="8" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+						<Scripts>
+							<OnVerticalScroll>
+								--FauxScrollFrame_OnVerticalScroll(20, TI_NPCListScrollBarUpdate);
+								FauxScrollFrame_OnVerticalScroll(self, offset, 20, TI_NPCListScrollBarUpdate);
+							</OnVerticalScroll>
+							<OnShow>
+								TI_NPCListScrollBarUpdate();
+							</OnShow>
+						</Scripts>
+					</ScrollFrame>
+					
+					<Button name="$parent1" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT">
+								<Offset>
+									<AbsDimension x="4" y="-8" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent2" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent1">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent3" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent2">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent4" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent3">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent5" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent4">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent6" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent5">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent7" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent6">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+					<Button name="$parent8" hidden="true" inherits="TI_NPCList">
+						<Anchors>
+							<Anchor point="TOPLEFT" relativePoint="BOTTOMLEFT" relativeTo="$parent7">
+								<Offset>
+									<AbsDimension x="0" y="0" />
+								</Offset>
+							</Anchor>
+						</Anchors>
+					</Button>
+				</Frames>
+			</Frame>
+			
+		</Frames>
+	</Frame>
+	
+	
+	<Frame name="TurnIn" hidden="true" frameStrata="LOW" enableMouse="false">
+		<Scripts>
+			<OnLoad function="TI_OnLoad"/>
+			<OnEvent function="TI_OnEvent"/>
+		</Scripts>
+	</Frame>
+</Ui>

@@ -1,0 +1,28 @@
+{
+  "name": "wowbot",
+  "version": "1.0.0",
+  "description": "Fiverr Order Village",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "author": "CallMeXander#9145",
+  "license": "ISC",
+  "dependencies": {
+    "@rodrigogs/mysql-events": "^0.6.0",
+    "discord.js": "^12.5.3",
+    "hex-to-binary": "^1.0.1",
+    "http": "^0.0.1-security",
+    "mysql": "^2.18.1",
+    "mysql2": "^2.3.3",
+    "nodemon": "^2.0.15",
+    "sha1": "^1.1.1",
+    "soap": "^0.43.0",
+    "xml2js": "^0.4.23"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CallMeXander/AzerothCoreDiscordBot"
+}
+}

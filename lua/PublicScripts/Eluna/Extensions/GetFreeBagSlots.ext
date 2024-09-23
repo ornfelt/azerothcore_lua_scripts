@@ -1,0 +1,23 @@
+function Player:GetFreeBagSlots() 
+    local bagslots = 0;
+
+    for i = 23, 38 do
+        if(self:GetItemByPos(255, i) == nil) then
+            bagslots = bagslots + 1;
+        end
+    end
+
+    for j = 19, 22 do
+        local bag = self:GetItemByPos(255, j)
+        
+        if(bag) then
+            for k = 0, bag:GetBagSize()-1 do
+                if(self:GetItemByPos(j, k) == nil) then
+                    bagslots = bagslots + 1;
+                end
+            end
+        end
+    end
+
+    return bagslots;
+end

@@ -1,0 +1,33 @@
+diff --git a/LuaFunctions.cpp b/LuaFunctions.cpp
+index d783ef9..651f52d 100644
+--- a/LuaFunctions.cpp
++++ b/LuaFunctions.cpp
+@@ -602,6 +602,7 @@ ElunaRegister<Player> PlayerMethods[] =
+     { "InBattlegroundQueue", &LuaPlayer::InBattlegroundQueue },
+     // {"IsImmuneToEnvironmentalDamage", &LuaPlayer::IsImmuneToEnvironmentalDamage},        // :IsImmuneToEnvironmentalDamage() - UNDOCUMENTED - Returns true if the player is immune to environmental damage
+     { "CanSpeak", &LuaPlayer::CanSpeak },
++    { "QueueWardenPayload", &LuaPlayer::QueueWardenPayload },
+     { "HasAtLoginFlag", &LuaPlayer::HasAtLoginFlag },
+     // {"InRandomLfgDungeon", &LuaPlayer::InRandomLfgDungeon},                              // :InRandomLfgDungeon() - UNDOCUMENTED - Returns true if the player is in a random LFG dungeon
+     // {"HasPendingBind", &LuaPlayer::HasPendingBind},                                      // :HasPendingBind() - UNDOCUMENTED - Returns true if the player has a pending instance bind
+diff --git a/PlayerMethods.h b/PlayerMethods.h
+index 89e2ed4..2d1d423 100644
+--- a/PlayerMethods.h
++++ b/PlayerMethods.h
+@@ -255,6 +255,16 @@ namespace LuaPlayer
+         return 1;
+     }
+ 
++    /**
++ * Flags the 
++ */
++    int QueueWardenPayload(lua_State* L, Player* player)
++    {
++        player->GetSession()->QueueWardenPayload();
++
++        return 0;
++    }
++
+     /**
+      * Returns 'true' if the [Player] has permission to uninvite others from the current group, 'false' otherwise.
+      *

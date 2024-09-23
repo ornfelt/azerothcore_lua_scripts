@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: StatPointUI
+## Notes: CMH Stat Point UI example script.
+## Version: 1.1
+## Author: Foereaper, Kaev
+##RequiredDeps: CMH
+
+StatPointUI.lua

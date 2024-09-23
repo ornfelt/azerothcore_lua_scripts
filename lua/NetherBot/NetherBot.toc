@@ -1,0 +1,15 @@
+## Interface: 30300
+## Title: NetherBot
+## Notes: NetherBot - npcbot tool
+## Author: NetherstormX
+## Version: 1.1
+## SavedVariables: NetherbotDB
+
+locale.lua
+locale\zhCN.lua
+locale\zhTW.lua
+locale\itIT.lua
+locale\grGR.lua
+locale\frFR.lua
+
+netherbot.lua

@@ -1,0 +1,1 @@
+DELETE FROM creature_template WHERE entry = 1112002;

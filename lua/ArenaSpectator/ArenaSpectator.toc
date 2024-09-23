@@ -1,0 +1,13 @@
+## Interface: 30300
+## Title: Arena Spectator UI
+## Version: 26
+## SavedVariables: teamname, teamscore, tournamentMode, TidyPlatesOptions
+ArenaSpectator.lua
+combatfeedback.lua
+
+widgets\Statusbar.lua
+TidyPlatesCore.lua
+TidyPlatesUtility.lua
+TidyPlatesDefaults.lua
+TidyPlatesPanel.lua
+widgets\Widgets.xml

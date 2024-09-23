@@ -1,0 +1,7 @@
+## Interface: 30300
+## X-Compatible-With: 40000
+## Title: Turn In
+## Notes: Automates the selection of quest and gossip options.
+## SavedVariables: TI_status, TI_NPCDB, TI_NPCIndex
+## Version: 2.1
+TurnIn.xml

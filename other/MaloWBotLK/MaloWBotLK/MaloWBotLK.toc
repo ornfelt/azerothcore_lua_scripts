@@ -1,0 +1,72 @@
+## Interface: 30300
+## Title: MaloWBotLK
+## DefaultState: enabled
+## Notes: MaloWBotLK
+## Version 1
+## Author: MaloW
+## Dependencies: MaloWUtils
+
+Config.lua
+Buffs.lua
+LootHandler.lua
+SpellEffectCalculator.lua
+MessageHandlers.lua
+Functions.lua
+MaloWBotLK.lua
+CombatLogModule.lua
+RoleplayTables.lua
+ConsumableHandler.lua
+
+classes\Deathknight\Deathknight.lua
+classes\Deathknight\DeathknightBlood.lua
+classes\Deathknight\DeathknightFrost.lua
+classes\Deathknight\DeathknightUnholy.lua
+classes\Druid\Druid.lua
+classes\Druid\DruidBalance.lua
+classes\Druid\DruidFeral.lua
+classes\Druid\DruidRestoration.lua
+classes\Hunter\Hunter.lua
+classes\Hunter\HunterBeastMastery.lua
+classes\Hunter\HunterMarksmanship.lua
+classes\Hunter\HunterSurvival.lua
+classes\Mage\Mage.lua
+classes\Mage\MageArcane.lua
+classes\Mage\MageFire.lua
+classes\Mage\MageFrost.lua
+classes\Paladin\Paladin.lua
+classes\Paladin\PaladinHoly.lua
+classes\Paladin\PaladinProtection.lua
+classes\Paladin\PaladinRetribution.lua
+classes\Priest\Priest.lua
+classes\Priest\PriestDiscipline.lua
+classes\Priest\PriestHoly.lua
+classes\Priest\PriestShadow.lua
+classes\Rogue\Rogue.lua
+classes\Rogue\RogueAssassination.lua
+classes\Rogue\RogueCombat.lua
+classes\Rogue\RogueSubtlety.lua
+classes\Shaman\Shaman.lua
+classes\Shaman\ShamanElemental.lua
+classes\Shaman\ShamanEnhancement.lua
+classes\Shaman\ShamanRestoration.lua
+classes\Warlock\Warlock.lua
+classes\Warlock\WarlockAffliction.lua
+classes\Warlock\WarlockDemonology.lua
+classes\Warlock\WarlockDestruction.lua
+classes\Warrior\Warrior.lua
+classes\Warrior\WarriorArms.lua
+classes\Warrior\WarriorFury.lua
+classes\Warrior\WarriorProtection.lua
+
+bosses\Bosses.lua
+bosses\Loatheb.lua
+bosses\Kelthuzad.lua
+bosses\Gluth.lua
+bosses\Malygos.lua
+bosses\Thaddius.lua
+bosses\FlameLeviathan.lua
+bosses\NorthrendBeasts.lua
+bosses\LevelFarm.lua
+
+
+

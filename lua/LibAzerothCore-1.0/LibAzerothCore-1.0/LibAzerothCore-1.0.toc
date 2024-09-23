@@ -1,0 +1,5 @@
+## Interface: 30300
+## Title: Lib: AzerothCore-1.0
+## Notes: Integrates with TrinityCore to provide easy access to commands
+## OptionalDeps: LibStub
+LibAzerothCore-1.0.lua

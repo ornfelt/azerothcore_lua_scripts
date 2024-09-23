@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: CMH
+## Notes: Client & Server Message Handler framework for communication between server and client.
+## Version: 2.0
+## Author: Foereaper, Stoneharry, Terrorblade
+
+smallfolk.lua
+CMH.lua

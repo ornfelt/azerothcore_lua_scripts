@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: MaloWUtils
+## DefaultState: enabled
+## Notes: MaloWUtils
+## Version 1
+## Author: MaloW
+MaloWUtils.lua
+MaloWUtils.xml
