@@ -1,4 +1,4 @@
-AzerothCore lua/eluna scripts
+# AzerothCore lua/eluna scripts
 
 Acore-Character_Customizer [lua/Acore-Character_Customizer](lua/Acore-Character_Customizer)
 
