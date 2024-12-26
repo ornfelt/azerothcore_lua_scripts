@@ -169,7 +169,7 @@ function SHOP_UI.MainFrame_Create()
 		"OnClick",
 		function()
 			if GameMenuFrame:IsShown() then
-				MainFrame_Toggle()
+				MainFrame_Toggle(true)
 			end
 		end
 	)
@@ -1168,8 +1168,8 @@ function SHOP_UI.ModelFrame_ShowCreature(displayId)
 	PlaySound("INTERFACESOUND_GAMESCROLLBUTTON", "Master")
 end
 
-function MainFrame_Toggle()
-	if SHOP_UI["FRAME"]:IsShown() and SHOP_UI["FRAME"]:IsVisible() then
+function MainFrame_Toggle(force_hide)
+	if (SHOP_UI["FRAME"]:IsShown() and SHOP_UI["FRAME"]:IsVisible()) or force_hide then
 		SHOP_UI["FRAME"]:Hide()
 	else
 		SHOP_UI["FRAME"]:Show()

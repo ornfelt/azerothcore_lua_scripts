@@ -1,0 +1,39 @@
+name: Build LS files
+
+on:
+  push:
+  workflow_call:
+  
+jobs:
+  build-ls-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        
+      - name: Clone Eluna documentation repository
+        uses: actions/checkout@v4
+        with:
+          repository: ElunaLuaEngine/ElunaLuaEngine.github.io
+          path: docs
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          architecture: 'x64'
+        
+      - name: Install Python dependencies
+        run: pip install beautifulsoup4
+        
+      - name: Create build directory
+        run: mkdir -p ./build
+        
+      - name: Build LuaLS definition files
+        run: bash runParser.sh ./parser.py ./docs ./build
+        
+      - name: Upload built definitions
+        uses: actions/upload-artifact@v4
+        with:
+          name: definitions
+          path: ./build

@@ -4,7 +4,7 @@
 Simple Lua Script that allows access to your character's bank, mailbox or auction house anywhere in the world via chat commands.  If you would like to add or change the commands, you can do so in the Lua script.
 
 - The bank can be accessed with the following commands: ".bank", ".openbank".
-- The mailbox can be accessed with the following commands: ".mail", ".mailbox".
+- The mailbox can be accessed with the following commands: ".mb", ".mail", ".mailbox".
 - The auction house can be accessed with the following commands: ".auctions", ".ah", ".auctionhouse".
 
 

@@ -1,9 +1,17 @@
-# Define the paths to the parser script and the parent directory containing Eluna API HTML files
-$parserScriptPath = "C:\Path\To\parser.py"
-$htmlParentDirectory = "C:\Path\To\ElunaLuaEngine.github.io-master"
+# Check if the required number of arguments is provided
+if ($Args.Count -lt 3) {
+    Write-Host "Usage: runParser.ps1 <parserScriptPath> <htmlParentDirectory> <outputDirectory> [debug(false)]"
+    exit 1
+}
 
-# Define the output directory for the LuaLS workspace
-$outputDirectory = "C:\Path\To\LuaLS\Workspace"
+$parserScriptPath = $Args[0]        # Path to parser.py
+$htmlParentDirectory = $Args[1]     # Path to ElunaLuaEngine.github.io repository
+$outputDirectory = $Args[2]         # Path to output directory
+$debug = $false                     # Default debug value
+
+if ($Args.Count -ge 4) {
+    $debug = [bool]$Args[3]
+}
 
 # Define the list of subdirectories to process
 $subdirectories = @("Aura", "BattleGround", "Corpse", "Creature", "ElunaQuery", "GameObject", "Group", "Guild", "Global", "Item", "Map", "Object", "Player", "Quest", "Spell", "Unit", "Vehicle", "WorldObject", "WorldPacket")
@@ -11,5 +19,5 @@ $subdirectories = @("Aura", "BattleGround", "Corpse", "Creature", "ElunaQuery", 
 # Iterate over each subdirectory
 foreach ($subdir in $subdirectories) {
     $htmlDirectory = Join-Path -Path $htmlParentDirectory -ChildPath $subdir
-    python $parserScriptPath $htmlDirectory $outputDirectory
+    python $parserScriptPath $htmlDirectory $outputDirectory $debug
 }
