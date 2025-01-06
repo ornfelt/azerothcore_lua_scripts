@@ -1,147 +1,226 @@
 # AzerothCore lua/eluna scripts
 
+
+
 Acore-Character_Customizer [lua/Acore-Character_Customizer](lua/Acore-Character_Customizer)
 
- Acore-Lua_Quest_Tools [lua/Acore-Lua_Quest_Tools](lua/Acore-Lua_Quest_Tools)
 
- acore-SimpleBoss [lua/acore-SimpleBoss](lua/acore-SimpleBoss)
+Acore-Lua_Quest_Tools [lua/Acore-Lua_Quest_Tools](lua/Acore-Lua_Quest_Tools)
 
- Acore-Socketeer [lua/Acore-Socketeer](lua/Acore-Socketeer)
 
- Acore_AutoRez [lua/Acore_AutoRez](lua/Acore_AutoRez)
+acore-SimpleBoss [lua/acore-SimpleBoss](lua/acore-SimpleBoss)
 
- Acore_BossTimer [lua/Acore_BossTimer](lua/Acore_BossTimer)
 
- Acore_CarbonCopy [lua/Acore_CarbonCopy](lua/Acore_CarbonCopy)
+Acore-Socketeer [lua/Acore-Socketeer](lua/Acore-Socketeer)
 
- Acore_CustomWorldboss [lua/Acore_CustomWorldboss](lua/Acore_CustomWorldboss)
 
- Acore_DiscordNotifier [lua/Acore_DiscordNotifier](lua/Acore_DiscordNotifier)
+Acore_AutoRez [lua/Acore_AutoRez](lua/Acore_AutoRez)
 
- Acore_ElunaTest [lua/Acore_ElunaTest](lua/Acore_ElunaTest)
 
- Acore_eventScripts [lua/Acore_eventScripts](lua/Acore_eventScripts)
+Acore_BossTimer [lua/Acore_BossTimer](lua/Acore_BossTimer)
 
- Acore_ExchangeNpc [lua/Acore_ExchangeNpc](lua/Acore_ExchangeNpc)
 
- Acore_LevelUpReward [lua/Acore_LevelUpReward](lua/Acore_LevelUpReward)
+Acore_CarbonCopy [lua/Acore_CarbonCopy](lua/Acore_CarbonCopy)
 
- Acore_LootStats [lua/Acore_LootStats](lua/Acore_LootStats)
 
- Acore_Lua_BuffNPC [lua/Acore_Lua_BuffNPC](lua/Acore_Lua_BuffNPC)
+Acore_CustomWorldboss [lua/Acore_CustomWorldboss](lua/Acore_CustomWorldboss)
 
- Acore_Lua_Mythic_Plus [lua/Acore_Lua_Mythic_Plus](lua/Acore_Lua_Mythic_Plus)
 
- Acore_Lua_RandomlyAttacked [lua/Acore_Lua_RandomlyAttacked](lua/Acore_Lua_RandomlyAttacked)
+Acore_DiscordNotifier [lua/Acore_DiscordNotifier](lua/Acore_DiscordNotifier)
 
- acore_lua_teleporter [lua/acore_lua_teleporter](lua/acore_lua_teleporter)
 
- Acore_Lua_Unlimited_Ammo [lua/Acore_Lua_Unlimited_Ammo](lua/Acore_Lua_Unlimited_Ammo)
+Acore_ElunaTest [lua/Acore_ElunaTest](lua/Acore_ElunaTest)
 
- Acore_RecruitAFriend [lua/Acore_RecruitAFriend](lua/Acore_RecruitAFriend)
 
- Acore_SendAndBind [lua/Acore_SendAndBind](lua/Acore_SendAndBind)
+Acore_eventScripts [lua/Acore_eventScripts](lua/Acore_eventScripts)
 
- Acore_Sortmachine [lua/Acore_Sortmachine](lua/Acore_Sortmachine)
 
- Acore_Summonall [lua/Acore_Summonall](lua/Acore_Summonall)
+Acore_ExchangeNpc [lua/Acore_ExchangeNpc](lua/Acore_ExchangeNpc)
 
- Acore_TempAnnouncements [lua/Acore_TempAnnouncements](lua/Acore_TempAnnouncements)
 
- Acore_Zonecheck [lua/Acore_Zonecheck](lua/Acore_Zonecheck)
+Acore_LevelUpReward [lua/Acore_LevelUpReward](lua/Acore_LevelUpReward)
 
- Acore_ZoneDebuff [lua/Acore_ZoneDebuff](lua/Acore_ZoneDebuff)
 
- ActiveChat [lua/ActiveChat](lua/ActiveChat)
+Acore_LootStats [lua/Acore_LootStats](lua/Acore_LootStats)
 
- arena-spectator [lua/arena-spectator](lua/arena-spectator)
 
- ArenaSpectator [lua/ArenaSpectator](lua/ArenaSpectator)
+Acore_Lua_BuffNPC [lua/Acore_Lua_BuffNPC](lua/Acore_Lua_BuffNPC)
 
- Astoria-ClasslessSystem [lua/Astoria-ClasslessSystem](lua/Astoria-ClasslessSystem)
 
- azerothcore-eluna-accountwide [lua/azerothcore-eluna-accountwide](lua/azerothcore-eluna-accountwide)
+Acore_Lua_Mythic_Plus [lua/Acore_Lua_Mythic_Plus](lua/Acore_Lua_Mythic_Plus)
 
- AzerothCore-Eluna-Scripts [lua/AzerothCore-Eluna-Scripts](lua/AzerothCore-Eluna-Scripts)
 
- azerothcore-global-mail_banking_auctions [lua/azerothcore-global-mail_banking_auctions](lua/azerothcore-global-mail_banking_auctions)
+Acore_Lua_RandomlyAttacked [lua/Acore_Lua_RandomlyAttacked](lua/Acore_Lua_RandomlyAttacked)
 
- AzerothCore-lua-MultiVendor [lua/AzerothCore-lua-MultiVendor](lua/AzerothCore-lua-MultiVendor)
 
- azerothcore-wowhead-mod-lua [lua/azerothcore-wowhead-mod-lua](lua/azerothcore-wowhead-mod-lua)
+acore_lua_teleporter [lua/acore_lua_teleporter](lua/acore_lua_teleporter)
 
- Config_Rates [lua/Config_Rates](lua/Config_Rates)
 
- CSMH [lua/CSMH](lua/CSMH)
+Acore_Lua_Unlimited_Ammo [lua/Acore_Lua_Unlimited_Ammo](lua/Acore_Lua_Unlimited_Ammo)
 
- Custom_XP_Precise [lua/Custom_XP_Precise](lua/Custom_XP_Precise)
 
- DinklePack_Lua [lua/DinklePack_Lua](lua/DinklePack_Lua)
+Acore_RecruitAFriend [lua/Acore_RecruitAFriend](lua/Acore_RecruitAFriend)
 
- Dynamic-Trader [lua/Dynamic-Trader](lua/Dynamic-Trader)
 
- Eluna-AIO-StoreSystem [lua/Eluna-AIO-StoreSystem](lua/Eluna-AIO-StoreSystem)
+Acore_SendAndBind [lua/Acore_SendAndBind](lua/Acore_SendAndBind)
 
- Eluna-scripts [lua/Eluna-scripts](lua/Eluna-scripts)
 
- Extended-Holidays-Lua [lua/Extended-Holidays-Lua](lua/Extended-Holidays-Lua)
+Acore_Sortmachine [lua/Acore_Sortmachine](lua/Acore_Sortmachine)
 
- KaraLoot [lua/KaraLoot](lua/KaraLoot)
 
- LibAzerothCore-1.0 [lua/LibAzerothCore-1.0](lua/LibAzerothCore-1.0)
+Acore_Summonall [lua/Acore_Summonall](lua/Acore_Summonall)
 
- Lua-HardcoreMode [lua/Lua-HardcoreMode](lua/Lua-HardcoreMode)
 
- lua-ItemUpgrader-Template [lua/lua-ItemUpgrader-Template](lua/lua-ItemUpgrader-Template)
+Acore_TempAnnouncements [lua/Acore_TempAnnouncements](lua/Acore_TempAnnouncements)
 
- lua-NotOnly-RandomMorpher [lua/lua-NotOnly-RandomMorpher](lua/lua-NotOnly-RandomMorpher)
 
- lua-spell-bonus-action [lua/lua-spell-bonus-action](lua/lua-spell-bonus-action)
+Acore_Zonecheck [lua/Acore_Zonecheck](lua/Acore_Zonecheck)
 
- lua-Super-BufferNPC [lua/lua-Super-BufferNPC](lua/lua-Super-BufferNPC)
 
- Lua_creature_learning [lua/Lua_creature_learning](lua/Lua_creature_learning)
+Acore_ZoneDebuff [lua/Acore_ZoneDebuff](lua/Acore_ZoneDebuff)
 
- lua_scripts [lua/lua_scripts](lua/lua_scripts)
 
- lua_vip [lua/lua_vip](lua/lua_vip)
+ActiveChat [lua/ActiveChat](lua/ActiveChat)
 
- Mercenaries_Script [lua/Mercenaries_Script](lua/Mercenaries_Script)
 
- NetherBot [lua/NetherBot](lua/NetherBot)
+arena-spectator [lua/arena-spectator](lua/arena-spectator)
 
- NPCBotInventory [lua/NPCBotInventory](lua/NPCBotInventory)
 
- Npcbot_Extended_Commands [lua/Npcbot_Extended_Commands](lua/Npcbot_Extended_Commands)
+ArenaSpectator [lua/ArenaSpectator](lua/ArenaSpectator)
 
- PublicScripts [lua/PublicScripts](lua/PublicScripts)
 
- RandomScriptsforAzerothCore [lua/RandomScriptsforAzerothCore](lua/RandomScriptsforAzerothCore)
+Astoria-ClasslessSystem [lua/Astoria-ClasslessSystem](lua/Astoria-ClasslessSystem)
 
- Scripts [lua/Scripts](lua/Scripts)
 
- WardenInject [lua/WardenInject](lua/WardenInject)
+azerothcore-eluna-accountwide [lua/azerothcore-eluna-accountwide](lua/azerothcore-eluna-accountwide)
 
- World-of-Bloxcraft-Main [lua/World-of-Bloxcraft-Main](lua/World-of-Bloxcraft-Main)
 
- WowEmulationScriptPack [lua/WowEmulationScriptPack](lua/WowEmulationScriptPack)
+AzerothCore-Eluna-Scripts [lua/AzerothCore-Eluna-Scripts](lua/AzerothCore-Eluna-Scripts)
 
- WowLuaStuff [lua/WowLuaStuff](lua/WowLuaStuff)
 
- Acore_Mall [sql/Acore_Mall](sql/Acore_Mall)
+azerothcore-global-mail_banking_auctions [lua/azerothcore-global-mail_banking_auctions](lua/azerothcore-global-mail_banking_auctions)
 
- Custom_Spell_Scripts [c++/Custom_Spell_Scripts](c++/Custom_Spell_Scripts)
 
- spell-charges [c++/spell-charges](c++/spell-charges)
+AzerothCore-lua-MultiVendor [lua/AzerothCore-lua-MultiVendor](lua/AzerothCore-lua-MultiVendor)
 
- AzerothCoreDiscordBot [js/AzerothCoreDiscordBot](js/AzerothCoreDiscordBot)
 
- Atlas-Loot-Individual-Progression-3.3.5 [other/Atlas-Loot-Individual-Progression-3.3.5](other/Atlas-Loot-Individual-Progression-3.3.5)
+azerothcore-starting-zone-selector [lua/azerothcore-starting-zone-selector](lua/azerothcore-starting-zone-selector)
 
- dinklepack_client_patcher [other/dinklepack_client_patcher](other/dinklepack_client_patcher)
 
- LuaLS-Eluna-Parser [other/LuaLS-Eluna-Parser](other/LuaLS-Eluna-Parser)
+azerothcore-trivia-system [lua/azerothcore-trivia-system](lua/azerothcore-trivia-system)
 
- MaloWBotLK [other/MaloWBotLK](other/MaloWBotLK)
+
+azerothcore-wowhead-mod-lua [lua/azerothcore-wowhead-mod-lua](lua/azerothcore-wowhead-mod-lua)
+
+
+Config_Rates [lua/Config_Rates](lua/Config_Rates)
+
+
+CSMH [lua/CSMH](lua/CSMH)
+
+
+Custom_XP_Precise [lua/Custom_XP_Precise](lua/Custom_XP_Precise)
+
+
+DinklePack_Lua [lua/DinklePack_Lua](lua/DinklePack_Lua)
+
+
+Dynamic-Trader [lua/Dynamic-Trader](lua/Dynamic-Trader)
+
+
+Eluna-AIO-StoreSystem [lua/Eluna-AIO-StoreSystem](lua/Eluna-AIO-StoreSystem)
+
+
+Eluna-scripts [lua/Eluna-scripts](lua/Eluna-scripts)
+
+
+Extended-Holidays-Lua [lua/Extended-Holidays-Lua](lua/Extended-Holidays-Lua)
+
+
+KaraLoot [lua/KaraLoot](lua/KaraLoot)
+
+
+LibAzerothCore-1.0 [lua/LibAzerothCore-1.0](lua/LibAzerothCore-1.0)
+
+
+lua-aio-paragon-system [lua/lua-aio-paragon-system](lua/lua-aio-paragon-system)
+
+
+Lua-HardcoreMode [lua/Lua-HardcoreMode](lua/Lua-HardcoreMode)
+
+
+lua-ItemUpgrader-Template [lua/lua-ItemUpgrader-Template](lua/lua-ItemUpgrader-Template)
+
+
+lua-NotOnly-RandomMorpher [lua/lua-NotOnly-RandomMorpher](lua/lua-NotOnly-RandomMorpher)
+
+
+lua-Super-BufferNPC [lua/lua-Super-BufferNPC](lua/lua-Super-BufferNPC)
+
+
+Lua_creature_learning [lua/Lua_creature_learning](lua/Lua_creature_learning)
+
+
+lua_scripts [lua/lua_scripts](lua/lua_scripts)
+
+
+lua_vip [lua/lua_vip](lua/lua_vip)
+
+
+Mercenaries_Script [lua/Mercenaries_Script](lua/Mercenaries_Script)
+
+
+NetherBot [lua/NetherBot](lua/NetherBot)
+
+
+NPCBotInventory [lua/NPCBotInventory](lua/NPCBotInventory)
+
+
+Npcbot_Extended_Commands [lua/Npcbot_Extended_Commands](lua/Npcbot_Extended_Commands)
+
+
+PublicScripts [lua/PublicScripts](lua/PublicScripts)
+
+
+RandomScriptsforAzerothCore [lua/RandomScriptsforAzerothCore](lua/RandomScriptsforAzerothCore)
+
+
+Scripts [lua/Scripts](lua/Scripts)
+
+
+WardenInject [lua/WardenInject](lua/WardenInject)
+
+
+World-of-Bloxcraft-Main [lua/World-of-Bloxcraft-Main](lua/World-of-Bloxcraft-Main)
+
+
+WowEmulationScriptPack [lua/WowEmulationScriptPack](lua/WowEmulationScriptPack)
+
+
+WowLuaStuff [lua/WowLuaStuff](lua/WowLuaStuff)
+
+
+Acore_Mall [sql/Acore_Mall](sql/Acore_Mall)
+
+
+Custom_Spell_Scripts [c++/Custom_Spell_Scripts](c++/Custom_Spell_Scripts)
+
+
+spell-charges [c++/spell-charges](c++/spell-charges)
+
+
+AzerothCoreDiscordBot [js/AzerothCoreDiscordBot](js/AzerothCoreDiscordBot)
+
+
+Atlas-Loot-Individual-Progression-3.3.5 [other/Atlas-Loot-Individual-Progression-3.3.5](other/Atlas-Loot-Individual-Progression-3.3.5)
+
+
+dinklepack_client_patcher [other/dinklepack_client_patcher](other/dinklepack_client_patcher)
+
+
+LuaLS-Eluna-Parser [other/LuaLS-Eluna-Parser](other/LuaLS-Eluna-Parser)
+
+
+MaloWBotLK [other/MaloWBotLK](other/MaloWBotLK)
 
 
