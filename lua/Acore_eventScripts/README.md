@@ -5,7 +5,7 @@ The license applies to each and every `.lua` file and `.sql` file in the reposit
 This is not legal advice.
 
 ## EventScripts
-Lua scripts for Azerothcore with ElunaLUA to
+Lua scripts for Azerothcore with Eluna to
 - spawn (custom) NPCs and grant them scripted combat abilities (customWorldboss.lua)
 - a fun event to teleport players who opt-in to Gurubashi (funTools.lua)
 

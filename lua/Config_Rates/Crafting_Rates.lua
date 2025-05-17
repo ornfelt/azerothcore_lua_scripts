@@ -42,7 +42,7 @@ end
 
 function CraftingRatesNamespace.SetCraftRate(event, player, command)
     if not player then
-        return false
+        return
     end
     local mingmrank = 3
     local PUID = CraftingRatesNamespace.getPlayerCharacterGUID(player)

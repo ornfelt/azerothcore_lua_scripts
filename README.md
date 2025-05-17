@@ -161,9 +161,6 @@ lua-Super-BufferNPC [lua/lua-Super-BufferNPC](lua/lua-Super-BufferNPC)
 Lua_creature_learning [lua/Lua_creature_learning](lua/Lua_creature_learning)
 
 
-lua_scripts [lua/lua_scripts](lua/lua_scripts)
-
-
 lua_vip [lua/lua_vip](lua/lua_vip)
 
 

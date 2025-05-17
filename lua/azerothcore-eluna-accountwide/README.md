@@ -1,15 +1,15 @@
 # ![logo](https://raw.githubusercontent.com/azerothcore/azerothcore.github.io/master/images/logo-github.png) AzerothCore
 
 # Accountwide Systems Using Eluna
-Here is my implementation approach to all things Accountwide.  Eluna needs to be set up on your server for these scripts to work and each system has a module-like configuration where you can choose to enable/disable independently.  It is recommended to install these on a fresh server.
+Here is my implementation approach to all things Accountwide.  Eluna needs to be set up on your server for these scripts to work and each system has a module-like configuration where you can choose to enable/disable independently.  
+
+It is HIGHLY recommended to install these on a fresh server.
 
 ### Achievements
 Tired of repeating the same achievements on multiple characters?  This script will allow completed achievements to be synced across all characters on the account.  Once you complete an achievement, the next time you log into a different character, they will be awarded with the achievement as well.  This data will be stored in a new `accountwide_achievements` table.
 
 ### Currency
 This script will allow currencies to be synced across all characters on your account.  For example, if you have 100 Badge of Justice, all of your characters will have 100. If you spend 30, then all of your characters will now have 70.  This data will be stored in a new `accountwide_currency` table.
-
-The "currencyItemIDs" table on Line 19 of the script indicates which currencies are shared. These are the  IDs pulled from `CurrencyTypes.dbc`. Feel free to add/remove any to tailor to your server if needed.
 
 ### Money
 Gone are the days where you need to balance different amounts of gold on each of your characters.
@@ -26,6 +26,9 @@ This script allows learned pet companions to be shared across all characters on 
 
 All of the pets are defined in the "petSpellIDs" table on Line 18.  Feel free to add/remove any to tailor to your server if needed.
 
+### PvP Rank/Stats
+This script will sync your PvP Rank/Stats across all of your characters: Honorable Kills, Honor Points, Arena Points. This data will be stored in a new `accountwide_pvp_rank` table.
+
 ### Reputation
 Not sure if you are just like me and get tired of farming reputations on multiple characters, but this script allows all of the reputation progress to be shared across all of your characters.
 
@@ -39,7 +42,7 @@ This script will synchronize learned flight paths across all characters on your 
 Due to horde/alliance interactions, horde flight paths will only be shared with other horde characters and alliance flight paths will only be shared with other alliance characters on the same account.
 
 ### Titles
-Want to flaunt that hard earned title on all of your characters?  This script will synchronize earned character titles to the other characters on your account.
+Want to flaunt that hard earned title on all of your characters?  This script will synchronize earned character titles to the other characters on your account.  This data will be stored in a new `accountwide_titles` table.
 
 
 
@@ -52,4 +55,4 @@ Want to flaunt that hard earned title on all of your characters?  This script wi
 
 > [!WARNING]
 > # If you use AccountReputation:
-> - Make sure you use the correct AccountReputation script to avoid weird results.  If you are using base/unmodified AC-Wotlk server without custom races and without a modified Faction.dbc file, then use the `AccountReputation (default AC-Wotlk)` file.  Otherwise if you are using our modified Ashen Order server, then use the `AccountReputation (modified for Ashen Order)` file.  Be sure to delete out the other file that you are not using.  It is recommended to install this on a fresh server.
+> - Make sure you use the correct AccountReputation script to avoid weird results.  If you are using base/unmodified AC-Wotlk server without custom races and without a modified Faction.dbc file, then use the `AccountReputation (default AC-Wotlk)` file.  Otherwise if you are using our modified Ashen Order server, then use the `AccountReputation (modified for Ashen Order)` file.  Be sure to delete out the other file that you are not using.  It is HIGHLY recommended to install this on a fresh server.

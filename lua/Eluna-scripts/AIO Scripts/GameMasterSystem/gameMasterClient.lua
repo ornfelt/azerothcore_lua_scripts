@@ -848,6 +848,223 @@ local function trimSpaces(value)
 	return tostring(value):match("^%s*(.-)%s*$")
 end
 
+<<<<<<< HEAD
+-- Common menu item templates
+local MenuItems = {
+	CANCEL = {
+		text = "Cancel",
+		func = function() end,
+		notCheckable = true,
+	},
+	createTitle = function(text)
+		return {
+			text = text,
+			isTitle = true,
+			notCheckable = true,
+		}
+	end,
+	createDelete = function(type, entry, handler)
+		return {
+			text = "Delete",
+			func = function()
+				if IsControlKeyDown() then
+					handler(entry)
+				else
+					StaticPopup_Show("CONFIRM_DELETE_ENTITY", nil, nil, {
+						type = type,
+						entry = entry,
+					})
+				end
+			end,
+			notCheckable = true,
+		}
+	end,
+}
+
+MenuFactory = {
+	createContextMenu = function()
+		local menu = CreateFrame("Frame", "ContextMenu", UIParent, "UIDropDownMenuTemplate")
+		menu:SetSize(MENU_CONFIG.SIZE.WIDTH, MENU_CONFIG.SIZE.HEIGHT)
+		menu:SetPoint("CENTER")
+		menu:Hide()
+		return menu
+	end,
+
+	createNpcMenu = function(entity)
+		local trimmedEntry = trimSpaces(entity.entry)
+		return {
+			MenuItems.createTitle("Creature ID: " .. trimmedEntry),
+			{
+				text = "Spawn",
+				func = function()
+					if coreName == "TrinityCore" then
+						AIO.Handle("GameMasterSystem", "spawnNpcEntity", trimmedEntry)
+					elseif coreName == "AzerothCore" then
+						SendChatMessage(".npc add " .. trimmedEntry, "SAY")
+					end
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createDelete(MENU_CONFIG.TYPES.NPC, trimmedEntry, function(entry)
+				AIO.Handle("GameMasterSystem", "deleteNpcEntity", entry)
+			end),
+			{
+				text = "Morphing",
+				hasArrow = true,
+				menuList = MenuFactory.createMorphingSubmenu(entity),
+				notCheckable = true,
+			},
+			MenuItems.CANCEL,
+		}
+	end,
+
+	createMorphingSubmenu = function(entity)
+		local submenu = {
+			{
+				text = "Demorph",
+				func = function()
+					AIO.Handle("GameMasterSystem", "demorphNpcEntity")
+				end,
+				notCheckable = true,
+			},
+		}
+
+		-- Add model IDs
+		for i, modelId in ipairs(entity.modelid) do
+			table.insert(submenu, 1, {
+				text = "Model ID " .. i .. ": " .. modelId,
+				func = function()
+					AIO.Handle("GameMasterSystem", "morphNpcEntity", trimSpaces(modelId))
+				end,
+				notCheckable = true,
+			})
+		end
+
+		return submenu
+	end,
+
+	createGameObjectMenu = function(entity)
+		local trimmedEntry = trimSpaces(entity.entry)
+		return {
+			MenuItems.createTitle("GameObject ID: " .. trimmedEntry),
+			{
+				text = "Spawn",
+				func = function()
+					if coreName == "TrinityCore" then
+						AIO.Handle("GameMasterSystem", "spawnGameObject", trimmedEntry)
+					elseif coreName == "AzerothCore" then
+						SendChatMessage(".gobject add " .. trimmedEntry, "SAY")
+					end
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createDelete(MENU_CONFIG.TYPES.GAMEOBJECT, trimmedEntry, function(entry)
+				AIO.Handle("GameMasterSystem", "deleteGameObjectEntity", entry)
+			end),
+			MenuItems.CANCEL,
+		}
+	end,
+
+	createSpellMenu = function(entity)
+		local trimmedEntry = trimSpaces(entity.spellID)
+		return {
+			MenuItems.createTitle("Spell ID: " .. trimmedEntry),
+			{
+				text = "Learn",
+				func = function()
+					AIO.Handle("GameMasterSystem", "learnSpellEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createDelete(MENU_CONFIG.TYPES.SPELL, trimmedEntry, function(entry)
+				AIO.Handle("GameMasterSystem", "deleteSpellEntity", entry)
+			end),
+			{
+				text = "Cast on Self",
+				func = function()
+					AIO.Handle("GameMasterSystem", "castSelfSpellEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Cast from Target",
+				func = function()
+					AIO.Handle("GameMasterSystem", "castTargetSpellEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Copy Icon",
+				func = function()
+					copyIcon(entity)
+				end,
+				notCheckable = true,
+			},
+			MenuItems.CANCEL,
+		}
+	end,
+
+	createSpellVisualMenu = function(entity)
+		local trimmedEntry = trimSpaces(entity.spellVisualID)
+
+		return {
+			MenuItems.createTitle("SpellVisual ID: " .. trimmedEntry),
+			{
+				text = "Copy spellVisual",
+				func = function()
+					print(entity.FilePath)
+					local editBox = CreateFrame("EditBox")
+					editBox:SetText(entity.FilePath)
+					editBox:HighlightText()
+					print("Ctrl+C to copy the path")
+					editBox:SetScript("OnEscapePressed", function(self)
+						self:ClearFocus()
+						self:Hide()
+					end)
+					editBox:SetScript("OnEnterPressed", function(self)
+						self:ClearFocus()
+						self:Hide()
+					end)
+				end,
+				notCheckable = true,
+			},
+			MenuItems.CANCEL,
+		}
+	end,
+}
+
+-- Create single context menu instance
+local contextMenu = MenuFactory.createContextMenu()
+
+-- Show menu functions
+local function showContextMenu(menuType, card, entity)
+	local menuCreators = {
+		npc = MenuFactory.createNpcMenu,
+		gameobject = MenuFactory.createGameObjectMenu,
+		spell = MenuFactory.createSpellMenu,
+		spellvisual = MenuFactory.createSpellVisualMenu,
+	}
+
+	local menuCreator = menuCreators[menuType]
+	if menuCreator then
+		EasyMenu(menuCreator(entity), contextMenu, "cursor", 0, 0, "MENU")
+	end
+end
+
+-- Constants
+local SEARCH_CONFIG = {
+	TEXTURES = {
+		SEARCH = "Interface\\Common\\UI-Searchbox-Icon",
+		CLEAR = "Interface\\Buttons\\UI-Panel-MinimizeButton-Up",
+	},
+	SIZE = {
+		WIDTH = 200,
+		HEIGHT = 20,
+		ICON = 14,
+	},
+	INSETS = 5,
+}
+=======
 -- Example usage of MENU_CONFIG.TYPES
 local function getEntityType(type)
 	return MENU_CONFIG.TYPES[type:upper()] or type
@@ -1101,6 +1318,7 @@ local function showContextMenu(menuType, card, entity)
 		EasyMenu(menuCreator(entity), contextMenu, "cursor", 0, 0, "MENU")
 	end
 end
+>>>>>>> fc1ced3df299c9e422fb17154d9b67b2dd0ac91e
 
 -- Constants
 local SEARCH_CONFIG = {

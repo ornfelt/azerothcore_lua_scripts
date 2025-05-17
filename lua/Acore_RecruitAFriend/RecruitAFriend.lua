@@ -54,6 +54,9 @@ Config.displayLoginMessage = 1
 -- the level which a player must reach to reward it's recruiter and automatically end RAF
 Config.targetLevel = 58
 
+-- determines if the RAF link get removed when reaching the targetLevel
+Config.endOnLevel = 1
+
 -- set to 1 to grant always rested for premium past Config.targetLevel. Any other value including nil turns it off.
 Config.premiumFeature = 0
 
@@ -123,7 +126,7 @@ local PLAYER_EVENT_ON_LEVEL_CHANGE = 13  -- (event, player, oldLevel)
 local PLAYER_EVENT_ON_COMMAND = 42       -- (event, player, command) - player is nil if command used from console. Can return false
 
 CharDBQuery('CREATE DATABASE IF NOT EXISTS `'..Config.customDbName..'`;');
-CharDBQuery('CREATE TABLE IF NOT EXISTS `'..Config.customDbName..'`.`recruit_a_friend_links` (`account_id` INT NOT NULL, `recruiter_account` INT DEFAULT 0, `time_stamp` INT DEFAULT 0, `ip_abuse_counter` INT DEFAULT 0, `kick_counter` INT DEFAULT 0, `comment` varchar(255) DEFAULT "", PRIMARY KEY (`account_id`) );');
+CharDBQuery('CREATE TABLE IF NOT EXISTS `'..Config.customDbName..'`.`recruit_a_friend_links` (`account_id` INT NOT NULL, `recruiter_account` INT DEFAULT 0, `time_stamp` INT DEFAULT 0, `ip_abuse_counter` INT DEFAULT 0, `kick_counter` INT DEFAULT 0, `complete` TINYINT DEFAULT 0, `comment` varchar(255) DEFAULT "", PRIMARY KEY (`account_id`) );');
 CharDBQuery('CREATE TABLE IF NOT EXISTS `'..Config.customDbName..'`.`recruit_a_friend_rewards` (`recruiter_account` INT DEFAULT 0, `reward_level` INT DEFAULT 0, PRIMARY KEY (`recruiter_account`) );');
 
 --sanity check
@@ -144,6 +147,7 @@ RAF_sameIpCounter = {}
 RAF_kickCounter = {}
 RAF_lastIP = {}
 RAF_rewardLevel = {}
+RAF_complete = {}
 
 local function RAF_numeralise(n)
     n = tostring(n)
@@ -307,7 +311,7 @@ local function RAF_command(event, player, command, chatHandler)
             if RAF_recruiterAccount[accountId] == nil then
                 RAF_recruiterAccount[accountId] = tonumber(commandArray[3])
                 RAF_timeStamp[accountId] = (tonumber(tostring(GetGameTime())))
-                CharDBExecute('REPLACE INTO `'..Config.customDbName..'`.`recruit_a_friend_links` VALUES ('..accountId..', '..RAF_recruiterAccount[accountId]..', '..RAF_timeStamp[accountId]..', 0, 0, "");')
+                CharDBExecute('REPLACE INTO `'..Config.customDbName..'`.`recruit_a_friend_links` VALUES ('..accountId..', '..RAF_recruiterAccount[accountId]..', '..RAF_timeStamp[accountId]..', 0, 0, 0, "");')
                 chatHandler:SendSysMessage(commandSource.." has succesfully used the .bindraf command on recruit "..accountId.." and recruiter "..RAF_recruiterAccount[accountId]..".")
             else
                 chatHandler:SendSysMessage("The selected account "..accountId.." is already recruited by "..RAF_recruiterAccount[accountId]..".")
@@ -339,7 +343,7 @@ local function RAF_command(event, player, command, chatHandler)
             local accountId = tonumber(commandArray[2])
             RAF_recruiterAccount[accountId] = tonumber(commandArray[3])
             RAF_timeStamp[accountId] = (tonumber(tostring(GetGameTime())))
-            CharDBExecute('REPLACE INTO `'..Config.customDbName..'`.`recruit_a_friend_links` VALUES ('..accountId..', '..RAF_recruiterAccount[accountId]..', '..RAF_timeStamp[accountId]..', 0, 0, "");')
+            CharDBExecute('REPLACE INTO `'..Config.customDbName..'`.`recruit_a_friend_links` VALUES ('..accountId..', '..RAF_recruiterAccount[accountId]..', '..RAF_timeStamp[accountId]..', 0, 0, 0, "");')
             chatHandler:SendSysMessage(commandSource.." has succesfully used the .forcebindraf command on recruit "..accountId.." and recruiter "..RAF_recruiterAccount[accountId]..".")
         else
             chatHandler:SendSysMessage("Admin/GM Syntax: .bindraf $recruit $recruiter binds the accounts to each other.")
@@ -673,13 +677,25 @@ local function RAF_levelChange(event, player, oldLevel)
         end
     end
 
-    if oldLevel + 1 >= Config.targetLevel then
-        -- set time_stamp to 1 and Grant rewards
-        RAF_timeStamp[accountId] = 1
-        CharDBExecute('UPDATE `'..Config.customDbName..'`.`recruit_a_friend_links` SET time_stamp = 1 WHERE `account_id` = '..accountId..';')
-        GrantReward(RAF_recruiterAccount[accountId])
-        player:SendBroadcastMessage("Your RAF link has reached the level-limit. Your recruiter has earned a reward. Go and bring your friends, too!")
-        return false
+    if Config.endOnLevel == 1 then
+        if oldLevel + 1 >= Config.targetLevel then
+            -- set time_stamp to 1 and Grant rewards
+            RAF_timeStamp[accountId] = 1
+            CharDBExecute('UPDATE `'..Config.customDbName..'`.`recruit_a_friend_links` SET time_stamp = 1 WHERE `account_id` = '..accountId..';')
+            GrantReward(RAF_recruiterAccount[accountId])
+            player:SendBroadcastMessage("Your RAF link has reached the level-limit. Your recruiter has earned a reward. Go and bring your friends, too!")
+            return false
+        end
+    else
+        if oldLevel + 1 >= Config.targetLevel then
+            -- grant rewards
+            if RAF_complete[accountId] == 0 then
+                GrantReward(RAF_recruiterAccount[accountId])
+                CharDBExecute('UPDATE `'..Config.customDbName..'`.`recruit_a_friend_links` SET `complete` = 1 WHERE `account_id` = '..accountId..';')
+                player:SendBroadcastMessage("Your RAF link has reached the level-limit. Your recruiter has earned a reward. Go and bring your friends, too!")
+                return false
+            end
+        end
     end
 
     local recruiterId = RAF_recruiterAccount[accountId]
@@ -736,6 +752,7 @@ if RAF_Data_SQL ~= nil then
         RAF_timeStamp[RAF_id] = tonumber(RAF_Data_SQL:GetInt32(2))
         RAF_sameIpCounter[RAF_id] = RAF_Data_SQL:GetUInt32(3)
         RAF_kickCounter[RAF_id] = tonumber(RAF_Data_SQL:GetUInt32(4))
+        RAF_complete[RAF_id] = tonumber(RAF_Data_SQL:GetUInt32(5))
     until not RAF_Data_SQL:NextRow()
 else
     PrintError("RAF: Found no linked accounts in the recruit_a_friend table. Possibly there are none yet.")
