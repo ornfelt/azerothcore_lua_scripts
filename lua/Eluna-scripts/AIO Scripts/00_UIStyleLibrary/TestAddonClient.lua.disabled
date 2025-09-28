@@ -1,0 +1,167 @@
+local AIO = AIO or require("AIO")
+
+if AIO.AddAddon() then
+    return
+end
+
+-- ===================================
+-- UI STYLE LIBRARY TEST ADDON
+-- ===================================
+-- Simple test to verify the modular UIStyleLibrary is working
+
+-- Test that modules are loaded
+local function TestUIStyleLibrary()
+    print("=== UIStyleLibrary Test Starting ===")
+    
+    -- Test 1: Check if core constants are available
+    if UISTYLE_COLORS then
+        print("✓ Core module loaded - Colors available")
+    else
+        print("✗ Core module NOT loaded - Colors missing")
+        return
+    end
+    
+    if UISTYLE_BACKDROPS then
+        print("✓ Core module loaded - Backdrops available")
+    else
+        print("✗ Core module NOT loaded - Backdrops missing")
+        return
+    end
+    
+    -- Test 2: Check if MenuManager is available
+    if GlobalMenuManager then
+        print("✓ MenuManager module loaded")
+    else
+        print("✗ MenuManager module NOT loaded")
+    end
+    
+    -- Test 3: Check if basic widget functions are available
+    if CreateStyledFrame then
+        print("✓ BasicWidgets module loaded - CreateStyledFrame available")
+    else
+        print("✗ BasicWidgets module NOT loaded - CreateStyledFrame missing")
+    end
+    
+    if CreateStyledButton then
+        print("✓ BasicWidgets module loaded - CreateStyledButton available")
+    else
+        print("✗ BasicWidgets module NOT loaded - CreateStyledButton missing")
+    end
+    
+    if CreateStyledCheckbox then
+        print("✓ BasicWidgets module loaded - CreateStyledCheckbox available")
+    else
+        print("✗ BasicWidgets module NOT loaded - CreateStyledCheckbox missing")
+    end
+    
+    -- Test 4: Check if quality widgets are available
+    if CreateQualityToggle then
+        print("✓ QualityWidgets module loaded - CreateQualityToggle available")
+    else
+        print("✗ QualityWidgets module NOT loaded - CreateQualityToggle missing")
+    end
+    
+    if CreateCheckboxWithQualityToggles then
+        print("✓ QualityWidgets module loaded - CreateCheckboxWithQualityToggles available")
+    else
+        print("✗ QualityWidgets module NOT loaded - CreateCheckboxWithQualityToggles missing")
+    end
+    
+    -- Test 5: Check if scrolling functions are available
+    if CreateStyledScrollBar then
+        print("✓ Scrolling module loaded - CreateStyledScrollBar available")
+    else
+        print("✗ Scrolling module NOT loaded - CreateStyledScrollBar missing")
+    end
+    
+    if CreateScrollableFrame then
+        print("✓ Scrolling module loaded - CreateScrollableFrame available")
+    else
+        print("✗ Scrolling module NOT loaded - CreateScrollableFrame missing")
+    end
+    
+    print("=== Creating Test UI ===")
+    
+    -- Create a test frame
+    local testFrame = CreateStyledFrame(UIParent, UISTYLE_COLORS.DarkGrey)
+    testFrame:SetSize(400, 300)
+    testFrame:SetPoint("CENTER")
+    testFrame:EnableMouse(true)
+    testFrame:SetMovable(true)
+    testFrame:RegisterForDrag("LeftButton")
+    testFrame:SetScript("OnDragStart", testFrame.StartMoving)
+    testFrame:SetScript("OnDragStop", testFrame.StopMovingOrSizing)
+    
+    -- Add title
+    local title = testFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -10)
+    title:SetText("UIStyleLibrary Test")
+    title:SetTextColor(1, 1, 1, 1)
+    
+    -- Add a button
+    local testButton = CreateStyledButton(testFrame, "Test Button", 100, 30)
+    testButton:SetPoint("TOP", title, "BOTTOM", 0, -20)
+    testButton:SetScript("OnClick", function()
+        print("Button clicked!")
+    end)
+    
+    -- Add a checkbox
+    local testCheckbox = CreateStyledCheckbox(testFrame, "Test Checkbox")
+    testCheckbox:SetPoint("TOP", testButton, "BOTTOM", 0, -20)
+    testCheckbox:SetPoint("LEFT", testFrame, "LEFT", 20, 0)
+    testCheckbox:SetPoint("RIGHT", testFrame, "RIGHT", -20, 0)
+    
+    -- Add quality toggles
+    local qualityY = -20
+    for name, color in pairs({Poor = UISTYLE_COLORS.Poor, Common = UISTYLE_COLORS.Common, 
+                               Uncommon = UISTYLE_COLORS.Uncommon, Rare = UISTYLE_COLORS.Rare}) do
+        local toggle = CreateQualityToggle(testFrame, color, 20)
+        toggle:SetPoint("LEFT", testCheckbox, "LEFT", qualityY + 40, -40)
+        toggle:SetTooltip(name .. " Quality", "Click to toggle")
+        qualityY = qualityY + 25
+    end
+    
+    -- Add close button
+    local closeButton = CreateStyledButton(testFrame, "X", 20, 20)
+    closeButton:SetPoint("TOPRIGHT", -5, -5)
+    closeButton:SetScript("OnClick", function()
+        testFrame:Hide()
+    end)
+    
+    -- Add scrollable content area
+    local scrollContainer, scrollContent, scrollBar, updateScroll = CreateScrollableFrame(testFrame, 360, 100)
+    scrollContainer:SetPoint("BOTTOM", testFrame, "BOTTOM", 0, 20)
+    
+    -- Add some content to scroll area
+    local prevItem
+    for i = 1, 10 do
+        local item = scrollContent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        if prevItem then
+            item:SetPoint("TOPLEFT", prevItem, "BOTTOMLEFT", 0, -5)
+        else
+            item:SetPoint("TOPLEFT", 5, -5)
+        end
+        item:SetText("Scrollable Item " .. i)
+        prevItem = item
+    end
+    scrollContent:SetHeight(250)
+    updateScroll()
+    
+    print("✓ Test UI created successfully!")
+    print("=== UIStyleLibrary Test Complete ===")
+    
+    -- Show the frame
+    testFrame:Show()
+end
+
+-- Run test after a short delay to ensure all modules are loaded
+-- Using frame OnUpdate instead of CreateTimer since it might not be loaded yet
+local testFrame = CreateFrame("Frame")
+local elapsed = 0
+testFrame:SetScript("OnUpdate", function(self, delta)
+    elapsed = elapsed + delta
+    if elapsed >= 0.5 then
+        self:SetScript("OnUpdate", nil)
+        TestUIStyleLibrary()
+    end
+end)

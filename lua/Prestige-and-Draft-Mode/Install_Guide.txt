@@ -1,0 +1,62 @@
+**Prestige & Draft Mode Installation Guide**
+*Version: Wrath of the Lich King (3.3.5)**
+
+---
+
+## Server-Side Setup
+
+1. **Apply Core Prestige Schema** (Acore_characters)
+
+   * Run `Acore_characters/prestige.sql` against your **characters** database.
+   * This creates the tables that track prestige and draft progress.
+
+2. **Register Optional NPC Spawns** (Acore_World)
+
+   * In the `acore_world` folder you’ll find spawn data for the “Chromie” NPC (entry 2069426).
+   * Apply that SQL to your **world** database to enable the Chromie interface.
+
+3. **Augment Character-Creation Templates** (Acore_World)
+
+   * Execute the following `INSERT IGNORE` scripts on your **world** database (they add missing entries without overwriting existing data):
+
+     * `playercreateinfo_additions.sql`
+     * `playercreateinfo_action_additions.sql`
+     * `playercreateinfo_items_additions.sql`
+
+4. **Create Draft-Specific Tables** (Acore_World)
+
+   * Run `prestige_draft_specific_tables.sql` against your **world** database.
+   * This adds three read-only tables used only by the Prestige & Draft system—no existing data is modified.
+
+   * Run 'Professions_Allow_Patch.sql' against your **world** database.
+   * This adds permissiosn to all profession/pattern/recipe based spells so they're not auto deleted during draft mode. 
+
+5. **Deploy DBC Overrides**
+
+   * Copy **all** `.dbc` files from `Sql&ServersideFiles/DBC/` into your server’s `Data/dbc/` folder.
+
+6. **Install Lua Scripts**
+
+   * Merge the contents of `LuaFiles/` into your server’s `lua_scripts/` directory so it looks like:
+
+     ```
+     lua_scripts/
+     ├── Prestige & Draft Mode/          ← all .lua modules here  
+     └── prestige_and_spell_choice_config.lua
+     ```
+
+> Your server is now fully configured for Prestige & Draft Mode!
+
+---
+
+## Client-Side Setup
+
+1. **Install the AddOn**
+
+   * Copy the entire `PrestigeSystems/` folder from `ClientSideFiles/` into your WoW `Interface/AddOns/` directory.
+
+2. **Apply the Patch-P MPQ**
+
+   * Place `patch-P.mpq` from `MpqPatch/` into your WoW `Data/` folder (alongside other `.mpq` files).
+
+> Once both server- and client-side steps are complete, your Prestige & Draft Mode system is ready to go!

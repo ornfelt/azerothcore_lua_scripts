@@ -18,6 +18,7 @@ local paragon = {
         expScalingFactor = 1.2, -- Controls how quickly XP required per Paragon level increases.
         -- Higher values (e.g., 1.5) cause XP to increase more **exponentially**, making later Paragon levels harder.
         -- Lower values (e.g., 1.1) make Paragon leveling easier by reducing XP growth.
+        groupXpPenaltyStep = 0.1, -- % XP diminishing returns per extra group member (default 10%)
 
         fullXpRange = 5, -- Full XP is granted if the enemy is within this level range (±5 levels).
         halfXpRange = 10, -- Half XP is granted if the enemy is within this level range (±10 levels).
@@ -41,6 +42,8 @@ local paragon = {
 
 local paragon_addon = AIO.AddHandlers("AIO_Paragon", {})
 paragon.account = {}
+paragon.botCache = {}
+paragon.hasPlayerbots = nil -- we'll detect this once on first call
 
 
 function paragon_addon.sendInformations(msg, player)
@@ -87,7 +90,7 @@ end
 function paragon.onServerStart(event)
     CharDBExecute(string.format("CREATE DATABASE IF NOT EXISTS `%s`;", paragon.config.db_name))
     CharDBExecute(string.format("CREATE TABLE IF NOT EXISTS `%s`.`paragon_account` (`account_id` INT(11) NOT NULL, `level` INT(11) DEFAULT 1, `exp` INT(11) DEFAULT 0, PRIMARY KEY (`account_id`));", paragon.config.db_name))
-    CharDBExecute(string.format("CREATE TABLE IF NOT EXISTS `%s`.`paragon_characters` (`account_id` INT(11) NOT NULL, `guid` INT(11) NOT NULL, `strength` INT(11) DEFAULT 0, `agility` INT(11) DEFAULT 0, `stamina` INT(11) DEFAULT 0, `intellect` INT(11) DEFAULT 0, `spirit` INT(11) DEFAULT 0, `defense` INT(11) DEFAULT 0, PRIMARY KEY (`account_id`, `guid`));", paragon.config.db_name))
+    CharDBExecute(string.format("CREATE TABLE IF NOT EXISTS `%s`.`paragon_characters` (`account_id` INT(11) NOT NULL, `guid` INT(11) NOT NULL, `strength` INT(11) DEFAULT 0, `agility` INT(11) DEFAULT 0, `stamina` INT(11) DEFAULT 0, `intellect` INT(11) DEFAULT 0, `spirit` INT(11) DEFAULT 0, `defense` INT(11) DEFAULT 0, `points_spent` INT(11) DEFAULT 0, PRIMARY KEY (`account_id`, `guid`));", paragon.config.db_name))
 end
 RegisterServerEvent(14, paragon.onServerStart)
 
@@ -106,38 +109,50 @@ end
 
 
 function paragon_addon.setStatsInformation(player, stat, value, flags)
-    local inCombat = player:IsInCombat()
-    if (not inCombat) then
-        local pLevel = player:GetLevel()
-        if (pLevel >= paragon.config.minPlayerLevel) then
-            if flags then
-                -- Left click to add points
-                if ((player:GetData('paragon_points') - value) >= 0) then
-                    player:SetData('paragon_stats_'..stat, (player:GetData('paragon_stats_'..stat) + value))
-                    player:SetData('paragon_points', (player:GetData('paragon_points') - value))
-                    player:SetData('paragon_points_spend', (player:GetData('paragon_points_spend') + value))
-                else
-                    player:SendNotification('You have no more points to spend.')
-                    return false
-                end
-            else
-                -- Right click to refund points
-                if (player:GetData('paragon_stats_'..stat) > 0) then
-                    player:SetData('paragon_stats_'..stat, (player:GetData('paragon_stats_'..stat) - value))
-                    player:SetData('paragon_points', (player:GetData('paragon_points') + value))
-                    player:SetData('paragon_points_spend', (player:GetData('paragon_points_spend') - value))
-                else
-                    player:SendNotification('You have no points to refund.')
-                    return false
-                end
-            end
-            paragon.setAddonInfo(player)
+    -- Always clamp value to 1 for individual clicks (wheel and middle click will override this)
+    value = math.min(1, value or 1)
+
+    if player:IsInCombat() then
+        player:SendNotification("You can't do this in combat.")
+        return
+    end
+
+    local pLevel = player:GetLevel()
+    if pLevel < paragon.config.minPlayerLevel then
+        player:SendNotification("You don't have the level required to do that.")
+        return
+    end
+
+    -- Cache all necessary values with fallback
+    local keyStat = 'paragon_stats_' .. stat
+    local currentStat = player:GetData(keyStat) or 0
+    local currentPoints = player:GetData('paragon_points') or 0
+    local currentSpent = player:GetData('paragon_points_spend') or 0
+
+    if flags then
+        -- Left or mousewheel up: allocate points
+        if currentPoints >= value then
+            player:SetData(keyStat, currentStat + value)
+            player:SetData('paragon_points', currentPoints - value)
+            player:SetData('paragon_points_spend', currentSpent + value)
         else
-            player:SendNotification('You don\'t have the level required to do that.')
+            player:SendNotification("You have no more points to spend.")
+            return
         end
     else
-        player:SendNotification('You can\'t do this in combat.')
+        -- Right click or mousewheel down: refund points
+        if currentStat >= value then
+            player:SetData(keyStat, currentStat - value)
+            player:SetData('paragon_points', currentPoints + value)
+            player:SetData('paragon_points_spend', currentSpent - value)
+        else
+            player:SendNotification("You have no points to refund.")
+            return
+        end
     end
+
+    -- Sync updated state to client
+    paragon.setAddonInfo(player)
 end
 
 
@@ -151,22 +166,43 @@ function Player:setparagonInfo(strength, agility, stamina, intellect, spirit, de
 end
 
 
+function paragon.checkCoreVersion()
+    -- Detect whether we're on Playerbot branch
+    if paragon.hasPlayerbots == nil then
+        local coreVersion = GetCoreVersion()
+        paragon.hasPlayerbots = coreVersion and coreVersion:lower():find("playerbot") ~= nil
+    end
+end
+
+
+function paragon.isPlayerBotAccount(accountId)
+    paragon.checkCoreVersion()
+
+    if not paragon.hasPlayerbots then return false end
+    
+    local cached = paragon.botCache[accountId]
+    if cached ~= nil then return cached end
+
+    local result = AuthDBQuery(string.format("SELECT username FROM account WHERE id = %d", accountId))
+    if result then
+        local username = result:GetString(0)
+        local isBot = username:sub(1, 6) == "RNDBOT"
+        paragon.botCache[accountId] = isBot
+        return isBot
+    end
+
+    paragon.botCache[accountId] = false
+    return false
+end
+
+
 function paragon.onLogin(event, player)
     local pAcc = player:GetAccountId()
-    local getparagonCharInfo = CharDBQuery(string.format("SELECT strength, agility, stamina, intellect, spirit, defense FROM `%s`.`paragon_characters` WHERE account_id = %d", paragon.config.db_name, pAcc))
 
-    if getparagonCharInfo then
-        player:setparagonInfo(getparagonCharInfo:GetUInt32(0), getparagonCharInfo:GetUInt32(1), getparagonCharInfo:GetUInt32(2), getparagonCharInfo:GetUInt32(3), getparagonCharInfo:GetUInt32(4), getparagonCharInfo:GetUInt32(5))
-        local totalPoints = getparagonCharInfo:GetUInt32(0) + getparagonCharInfo:GetUInt32(1) + getparagonCharInfo:GetUInt32(2) + getparagonCharInfo:GetUInt32(3) + getparagonCharInfo:GetUInt32(4) + getparagonCharInfo:GetUInt32(5)
-        player:SetData('paragon_points', totalPoints)
-    else
-        local pGuid = player:GetGUIDLow()
-        CharDBExecute(string.format("INSERT INTO `%s`.`paragon_characters` VALUES (%d, %d, 0, 0, 0, 0, 0, 0)", paragon.config.db_name, pAcc, pGuid))
-        player:setparagonInfo(0, 0, 0, 0, 0, 0)
-        player:SetData('paragon_points', 0)
-    end
-    player:SetData('paragon_points_spend', player:GetData('paragon_points_spend') or 0)
+    -- Skip playerbot accounts
+    if paragon.isPlayerBotAccount(pAcc) then return end
 
+    -- Initialize account-level Paragon data if not yet loaded
     if not paragon.account[pAcc] then
         paragon.account[pAcc] = {
             level = 1,
@@ -175,6 +211,7 @@ function paragon.onLogin(event, player)
         }
     end
 
+    -- Load Paragon account-level data from DB
     local getparagonAccInfo = AuthDBQuery(string.format("SELECT level, exp FROM `%s`.`paragon_account` WHERE account_id = %d", paragon.config.db_name, pAcc))
     if getparagonAccInfo then
         paragon.account[pAcc].level = getparagonAccInfo:GetUInt32(0)
@@ -184,21 +221,47 @@ function paragon.onLogin(event, player)
         AuthDBExecute(string.format("INSERT INTO `%s`.`paragon_account` VALUES (%d, 1, 0)", paragon.config.db_name, pAcc))
     end
 
-    paragon_addon.setStats(player)
+    -- Load character-specific stat allocations
+    local getparagonCharInfo = CharDBQuery(string.format("SELECT strength, agility, stamina, intellect, spirit, defense, points_spent FROM `%s`.`paragon_characters` WHERE account_id = %d AND guid = %d", paragon.config.db_name, pAcc, player:GetGUIDLow()))
+    
+    local spent = 0
+    if getparagonCharInfo then
+        local strength  = getparagonCharInfo:GetUInt32(0)
+        local agility   = getparagonCharInfo:GetUInt32(1)
+        local stamina   = getparagonCharInfo:GetUInt32(2)
+        local intellect = getparagonCharInfo:GetUInt32(3)
+        local spirit    = getparagonCharInfo:GetUInt32(4)
+        local defense   = getparagonCharInfo:GetUInt32(5)
+        spent           = getparagonCharInfo:GetUInt32(6)
 
-    if(pAcc ~= nil) then
-        local level = paragon.account[pAcc].level
-        local pointsEarned = (level > 1) and ((level - 1) * paragon.config.pointsPerLevel) or 0
-        local pointsSpent = player:GetData('paragon_points_spend') or 0
-        player:SetData('paragon_points', pointsEarned - pointsSpent)
+        player:setparagonInfo(strength, agility, stamina, intellect, spirit, defense)
+    else
+        -- First time this character logs in
+        local pGuid = player:GetGUIDLow()
+        CharDBExecute(string.format("INSERT INTO `%s`.`paragon_characters` VALUES (%d, %d, 0, 0, 0, 0, 0, 0, 0)", paragon.config.db_name, pAcc, pGuid))
+        player:setparagonInfo(0, 0, 0, 0, 0, 0)
     end
+
+    -- Set spent and unspent point data
+    player:SetData('paragon_points_spend', spent)
+
+    local level = paragon.account[pAcc].level
+    local totalPointsEarned = (level > 1) and ((level - 1) * paragon.config.pointsPerLevel) or 0
+    local availablePoints = totalPointsEarned - spent
+
+    player:SetData('paragon_points', availablePoints)
+
+    -- Apply active stat auras
+    paragon_addon.setStats(player)
 end
 RegisterPlayerEvent(3, paragon.onLogin)
 
 
 function paragon.getPlayers(event)
     for _, player in pairs(GetPlayersInWorld()) do
-        paragon.onLogin(event, player)
+        if not paragon.isPlayerBotAccount(player:GetAccountId()) then
+            paragon.onLogin(event, player)
+        end
     end
 end
 RegisterServerEvent(33, paragon.getPlayers)
@@ -207,8 +270,12 @@ RegisterServerEvent(33, paragon.getPlayers)
 function paragon.onLogout(event, player)
     local pAcc = player:GetAccountId()
     local pGuid = player:GetGUIDLow()
-    local strength, agility, stamina, intellect, spirit, defense = player:GetData('paragon_stats_7464'), player:GetData('paragon_stats_7471'), player:GetData('paragon_stats_7477'), player:GetData('paragon_stats_7468'), player:GetData('paragon_stats_7474'), player:GetData('paragon_stats_7511')
-    CharDBExecute(string.format("REPLACE INTO `%s`.`paragon_characters` VALUES (%d, %d, %d, %d, %d, %d, %d, %d)", paragon.config.db_name, pAcc, pGuid, strength, agility, stamina, intellect, spirit, defense))
+
+    -- Skip playerbot accounts
+    if paragon.isPlayerBotAccount(pAcc) then return end
+
+    local strength, agility, stamina, intellect, spirit, defense, spent = player:GetData('paragon_stats_7464'), player:GetData('paragon_stats_7471'), player:GetData('paragon_stats_7477'), player:GetData('paragon_stats_7468'), player:GetData('paragon_stats_7474'), player:GetData('paragon_stats_7511'), player:GetData('paragon_points_spend')
+    CharDBExecute(string.format("REPLACE INTO `%s`.`paragon_characters` VALUES (%d, %d, %d, %d, %d, %d, %d, %d, %d)", paragon.config.db_name, pAcc, pGuid, strength, agility, stamina, intellect, spirit, defense, spent))
     
     if not paragon.account[pAcc] then
         paragon.account[pAcc] = {
@@ -226,7 +293,9 @@ RegisterPlayerEvent(4, paragon.onLogout)
 
 function paragon.setPlayers(event)
     for _, player in pairs(GetPlayersInWorld()) do
-        paragon.onLogout(event, player)
+        if not paragon.isPlayerBotAccount(player:GetAccountId()) then
+            paragon.onLogout(event, player)
+        end
     end
 end
 RegisterServerEvent(16, paragon.setPlayers)
@@ -287,13 +356,15 @@ function paragon.setExp(player, victim, numMembers)
         if levelDiff > paragon.config.halfXpRange then xpGain = math.floor(xpGain * paragon.config.quarterXpMultiplier) end
         if levelDiff > paragon.config.fullXpRange then xpGain = math.floor(xpGain * paragon.config.halfXpMultiplier) end
     end
-    
+        
+    -- Diminishing returns for group members
+    local groupPenalty = 1 - (math.min((numMembers or 1) - 1, 4) * paragon.config.groupXpPenaltyStep)
+    local adjustedXP = math.floor(xpGain * groupPenalty)
+
     if paragon.config.showXPGainedMessages then
-        player:SendBroadcastMessage(string.format("|CFF00A2FFYou earned %d Paragon XP!|r", xpGain))
+        player:SendBroadcastMessage(string.format("|CFF00A2FFYou earned %d Paragon XP!|r", adjustedXP))
     end
-    
-    -- Adjust XP for group members
-    local adjustedXP = math.floor(xpGain / (numMembers or 1))
+
     paragon.account[pAcc].exp = paragon.account[pAcc].exp + adjustedXP
 
     paragon.setAddonInfo(player)
@@ -315,10 +386,14 @@ function paragon.onKillCreatureOrPlayer(event, player, victim)
             local members = pGroup:GetMembers()
             local numMembers = #members
             for _, groupMember in pairs(members) do
-                paragon.setExp(groupMember, victim, numMembers)
+                if not paragon.isPlayerBotAccount(groupMember:GetAccountId()) then
+                    paragon.setExp(groupMember, victim, numMembers)
+                end
             end
         else
-            paragon.setExp(player, victim, 1)
+            if not paragon.isPlayerBotAccount(player:GetAccountId()) then
+                paragon.setExp(player, victim, 1)
+            end
         end
     end
 end

@@ -1,0 +1,142 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+
+  <!-- Virtual Template for Spell Choice Button -->
+<Button name="SpellChoiceButtonTemplate" virtual="true" enableMouse="true">
+  <Size><AbsDimension x="256" y="256"/></Size>
+  <HitRectInsets left="0" right="0" top="0" bottom="0"/>
+
+  <Layers>
+
+    <!-- Background -->
+    <Layer level="BACKGROUND">
+      <Texture name="$parentBackground" file="Interface\AddOns\PrestigeSystem\Textures\card.tga">
+        <Anchors>
+          <Anchor point="TOPLEFT"/>
+          <Anchor point="BOTTOMRIGHT"/>
+        </Anchors>
+      </Texture>
+    </Layer>
+
+    <!-- Spell Name -->
+    <Layer level="ARTWORK">
+      <FontString name="$parentName" inherits="GameFontNormal" justifyH="CENTER">
+        <Anchors>
+          <Anchor point="TOP" x="0" y="-38"/>
+        </Anchors>
+      </FontString>
+    </Layer>
+
+    <!-- Icon -->
+    <Layer level="ARTWORK">
+      <Texture name="$parentIcon" file="Interface\\Icons\\INV_Misc_QuestionMark" setAllPoints="false">
+        <Size x="120" y="120"/>
+        <Anchors>
+          <Anchor point="TOP" relativeTo="$parentName" relativePoint="BOTTOM" x="0" y="-25"/>
+        </Anchors>
+      </Texture>
+    </Layer>
+
+  <Layer level="OVERLAY">
+    <Texture name="$parentRarity" file="Interface\AddOns\PrestigeSystem\Textures\COMM.tga">
+      <Size x="32" y="32"/>
+      <Anchors>
+        <Anchor point="TOP" relativeTo="$parentIcon" relativePoint="BOTTOM" x="-0" y="18"/>
+      </Anchors>
+    </Texture>
+  </Layer>
+
+    <Layer level="OVERLAY">
+      <FontString name="$parentLevelReq" inherits="GameFontNormalSmall">
+        <Anchors>
+          <Anchor point="BOTTOM" x="0" y="51"/>
+        </Anchors>
+        <Color r="1.0" g="0.82" b="0.0"/>
+      </FontString>
+    </Layer>
+    <!-- Selection Border -->
+    <Layer level="OVERLAY">
+      <Texture name="$parentSelectionBorder" file="Interface\Buttons\UI-ActionButton-Border" hidden="true">
+        <Size><AbsDimension x="160" y="180"/></Size>
+        <Anchors>
+          <Anchor point="CENTER"/>
+        </Anchors>
+      </Texture>
+    </Layer>
+
+  </Layers>
+
+</Button>
+  <!-- Main Spell Choice Frame -->
+<Frame name="SpellChoiceFrame" parent="UIParent" hidden="true" movable="true" frameStrata="FULLSCREEN_DIALOG" enableMouse="true">
+    <Size><AbsDimension x="650" y="300"/></Size>
+    <Anchors>
+      <Anchor point="CENTER"/>
+    </Anchors>
+
+ 
+
+    <BackdropBorderColor r="1.0" g="0.82" b="0.0"/>
+
+    <Layers>
+      <Layer level="ARTWORK">
+        <FontString name="SpellChoiceTitle" inherits="GameFontNormalLarge">
+          <Anchors>
+            <Anchor point="TOP" x="0" y="-20"/>
+          </Anchors>
+          <Color r="1.0" g="0.85" b="0.1"/> <!-- Golden color -->
+          <ShadowOffset>
+            <AbsDimension x="1" y="-1"/>
+          </ShadowOffset>
+          <ShadowColor r="0" g="0" b="0" a="1"/>
+        </FontString>
+      </Layer>
+    </Layers>
+
+    <!-- Spell Option Buttons -->
+    <Frames>
+      <Button name="SpellChoiceButton1" inherits="SpellChoiceButtonTemplate" enableMouse="true">
+        <Anchors>
+          <Anchor point="CENTER" x="-210" y="0"/>
+        </Anchors>
+      </Button>
+
+      <Button name="SpellChoiceButton2" inherits="SpellChoiceButtonTemplate" enableMouse="true">
+        <Anchors>
+          <Anchor point="CENTER" x="0" y="0"/>
+        </Anchors>
+      </Button>
+
+      <Button name="SpellChoiceButton3" inherits="SpellChoiceButtonTemplate" enableMouse="true">
+        <Anchors>
+          <Anchor point="CENTER" x="210" y="0"/>
+        </Anchors>
+      </Button>
+
+      <!-- Reroll Button -->
+      <Button name="SpellChoiceRerollButton" inherits="UIPanelButtonTemplate" text="Reroll">
+        <Size><AbsDimension x="100" y="24"/></Size>
+        <Anchors>
+          <Anchor point="BOTTOM" relativeTo="SpellChoiceTitle" relativePoint="TOP" x="0" y="10"/>
+        </Anchors>
+        <Scripts>
+          <OnClick>
+            if SpellChoiceFrame and SpellChoiceFrame.RerollChoices then
+              SpellChoiceFrame:RerollChoices()
+            end
+          </OnClick>
+        </Scripts>
+      </Button>
+      <!-- Dismiss Button -->
+      <Button name="SpellChoiceDismissButton" inherits="UIPanelButtonTemplate" text="Dismiss">
+        <Size><AbsDimension x="100" y="24"/></Size>
+        <Anchors>
+          <Anchor point="CENTER" relativeTo="SpellChoiceTitle" relativePoint="TOP" x="0" y="-290"/>
+        </Anchors>
+        <Scripts>
+        </Scripts>
+      </Button>
+    </Frames>
+  </Frame>
+</Ui>

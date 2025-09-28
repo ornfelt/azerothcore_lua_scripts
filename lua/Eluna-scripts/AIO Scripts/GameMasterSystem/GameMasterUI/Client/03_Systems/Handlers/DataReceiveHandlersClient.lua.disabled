@@ -1,0 +1,348 @@
+local AIO = AIO or require("AIO")
+
+if AIO.AddAddon() then
+    return  -- Exit if on server
+end
+
+-- Use existing namespace
+local GameMasterSystem = _G.GameMasterSystem
+if not GameMasterSystem then
+    print("[GameMasterSystem] ERROR: Namespace not found in DataHandlers! Check load order.")
+    return
+end
+
+-- Access shared data and UI references
+local GMData = _G.GMData
+local GMUI = _G.GMUI
+local GMConfig = _G.GMConfig
+
+if not GMData then
+    print("[GameMasterSystem] ERROR: GMData not found! Check load order.")
+    return
+end
+
+-- ============================================================================
+-- Data Reception Handlers
+-- ============================================================================
+-- IMPORTANT: Client handlers ALWAYS receive player name as first parameter!
+
+-- Test handler to verify AIO is working
+function GameMasterSystem.testPing(player, message)
+    -- TEST PING received
+end
+
+-- Item data handler
+function GameMasterSystem.receiveItemData(player, data, offset, pageSize, hasMoreData, inventoryType, paginationInfo)
+    if not data then
+        -- No item data received
+        return
+    end
+
+    -- Ensure DataStore exists
+    if not GMData.DataStore then
+        GMData.DataStore = {}
+    end
+
+    GMData.DataStore.items = data
+    GMData.currentOffset = offset or 0
+    GMData.hasMoreData = hasMoreData or false
+    
+    -- Store enhanced pagination info if provided and sync hasMoreData
+    if paginationInfo then
+        GMData.paginationInfo = paginationInfo
+        -- Use pagination info as the source of truth
+        GMData.hasMoreData = paginationInfo.hasNextPage or false
+    end
+
+    -- Update UI if viewing items tab
+    if GMUI and GMUI.updateContentForActiveTab then
+        GMUI.updateContentForActiveTab()
+    end
+
+    -- Update pagination buttons
+    if GMUI and GMUI.updatePaginationButtons then
+        GMUI.updatePaginationButtons()
+    end
+end
+
+-- NPC data handler
+function GameMasterSystem.receiveNPCData(player, data, offset, pageSize, hasMoreData, paginationInfo)
+    if not data then
+        -- No NPC data received
+        return
+    end
+
+    -- Ensure DataStore exists
+    if not GMData.DataStore then
+        GMData.DataStore = {}
+    end
+
+    GMData.DataStore.npcs = data
+    GMData.currentOffset = offset or 0
+    GMData.hasMoreData = hasMoreData or false
+    
+    -- Store enhanced pagination info if provided and sync hasMoreData
+    if paginationInfo then
+        GMData.paginationInfo = paginationInfo
+        -- Use pagination info as the source of truth
+        GMData.hasMoreData = paginationInfo.hasNextPage or false
+    end
+
+    -- Update UI if viewing NPCs tab
+    if GMUI and GMUI.updateContentForActiveTab then
+        GMUI.updateContentForActiveTab()
+    end
+
+    -- Update pagination buttons
+    if GMUI and GMUI.updatePaginationButtons then
+        GMUI.updatePaginationButtons()
+    end
+end
+
+-- GameObject data handler
+function GameMasterSystem.receiveGameObjectData(player, data, offset, pageSize, hasMoreData, paginationInfo)
+    if not data then
+        -- No game object data received
+        return
+    end
+
+    -- Ensure DataStore exists
+    if not GMData.DataStore then
+        GMData.DataStore = {}
+    end
+
+    GMData.DataStore.gameobjects = data
+    GMData.currentOffset = offset or 0
+    GMData.hasMoreData = hasMoreData or false
+    
+    -- Store enhanced pagination info if provided and sync hasMoreData
+    if paginationInfo then
+        GMData.paginationInfo = paginationInfo
+        -- Use pagination info as the source of truth
+        GMData.hasMoreData = paginationInfo.hasNextPage or false
+    end
+    
+    -- Update UI if viewing game objects tab
+    if GMUI and GMUI.updateContentForActiveTab then
+        GMUI.updateContentForActiveTab()
+    end
+
+    -- Update pagination buttons
+    if GMUI and GMUI.updatePaginationButtons then
+        GMUI.updatePaginationButtons()
+    end
+end
+
+-- Spell data handler
+function GameMasterSystem.receiveSpellData(player, data, offset, pageSize, hasMoreData, paginationInfo)
+    if not data then
+        -- No spell data received
+        return
+    end
+
+    -- Ensure DataStore exists
+    if not GMData.DataStore then
+        GMData.DataStore = {}
+    end
+
+    GMData.DataStore.spells = data
+    GMData.currentOffset = offset or 0
+    GMData.hasMoreData = hasMoreData or false
+    
+    -- Store enhanced pagination info if provided and sync hasMoreData
+    if paginationInfo then
+        GMData.paginationInfo = paginationInfo
+        -- Use pagination info as the source of truth
+        GMData.hasMoreData = paginationInfo.hasNextPage or false
+    end
+
+    -- Update UI if viewing spells tab
+    if GMUI and GMUI.updateContentForActiveTab then
+        GMUI.updateContentForActiveTab()
+    end
+
+    -- Update pagination buttons
+    if GMUI and GMUI.updatePaginationButtons then
+        GMUI.updatePaginationButtons()
+    end
+end
+
+-- Spell visual data handler
+function GameMasterSystem.receiveSpellVisualData(player, data, offset, pageSize, hasMoreData, paginationInfo)
+    if not data then
+        -- No spell visual data received
+        return
+    end
+
+    -- Ensure DataStore exists
+    if not GMData.DataStore then
+        GMData.DataStore = {}
+    end
+
+    GMData.DataStore.spellvisuals = data
+    GMData.currentOffset = offset or 0
+    GMData.hasMoreData = hasMoreData or false
+    
+    -- Store enhanced pagination info if provided and sync hasMoreData
+    if paginationInfo then
+        GMData.paginationInfo = paginationInfo
+        -- Use pagination info as the source of truth
+        GMData.hasMoreData = paginationInfo.hasNextPage or false
+    end
+
+    -- Update UI if viewing spell visuals tab
+    if GMUI and GMUI.updateContentForActiveTab then
+        GMUI.updateContentForActiveTab()
+    end
+
+    -- Update pagination buttons
+    if GMUI and GMUI.updatePaginationButtons then
+        GMUI.updatePaginationButtons()
+    end
+end
+
+-- Player data handler
+function GameMasterSystem.receivePlayerData(player, data, offset, pageSize, hasMoreData, paginationInfo)
+    print("[PlayerList Handler] receivePlayerData called")
+    print("[PlayerList Handler] Data received:", data ~= nil)
+    if data then
+        print("[PlayerList Handler] Number of players received:", #data)
+        -- Debug: Show first few players and their online status
+        for i = 1, math.min(3, #data) do
+            local p = data[i]
+            print(string.format("[PlayerList Handler]   Player %d: %s (online: %s)", 
+                i, p.name or "unknown", tostring(p.online)))
+        end
+    end
+    
+    if not data then
+        print("[PlayerList Handler] No player data received - returning")
+        return
+    end
+
+    -- Ensure DataStore exists
+    if not GMData.DataStore then
+        GMData.DataStore = {}
+    end
+
+    -- Clear and replace the data completely
+    GMData.DataStore.players = nil  -- Clear old data first
+    GMData.DataStore.players = data  -- Set new data
+    GMData.currentOffset = offset or 0
+    GMData.hasMoreData = hasMoreData or false
+    
+    print("[PlayerList Handler] DataStore.players updated with", #data, "players")
+    
+    -- Store enhanced pagination info if provided and sync hasMoreData
+    if paginationInfo then
+        GMData.paginationInfo = paginationInfo
+        -- Use pagination info as the source of truth
+        GMData.hasMoreData = paginationInfo.hasNextPage or false
+    end
+    
+    -- Store player data for list view
+    if _G.GMCards then
+        _G.GMCards.currentPlayerData = data
+        print("[PlayerList Handler] Stored player data in GMCards.currentPlayerData")
+    end
+
+    -- Always update the content tab which will create the list if needed
+    if GMUI and GMUI.updateContentForActiveTab then
+        print("[PlayerList Handler] Calling updateContentForActiveTab")
+        GMUI.updateContentForActiveTab()
+    end
+
+    -- Update pagination buttons
+    if GMUI and GMUI.updatePaginationButtons then
+        GMUI.updatePaginationButtons()
+    end
+end
+
+-- ============================================================================
+-- Server Information Handlers
+-- ============================================================================
+
+-- GM level handler
+function GameMasterSystem.receiveGmLevel(player, gmLevel)
+    if not gmLevel then
+        -- No GM level received
+        return
+    end
+
+    GMData.PlayerGMLevel = gmLevel
+    -- Player GM level received
+
+    -- Update UI if it exists
+    if GMUI.mainFrame and GMUI.updateTitleWithGMLevel then
+        GMUI.updateTitleWithGMLevel()
+    end
+end
+
+-- Core name handler
+function GameMasterSystem.receiveCoreName(player, coreName)
+    if not coreName then
+        -- No core name received
+        return
+    end
+
+    GMData.CoreName = coreName
+    -- Core name received
+end
+
+-- Server capabilities handler
+function GameMasterSystem.receiveServerCapabilities(player, capabilities)
+    if not capabilities then
+        return
+    end
+    
+    -- Store server capabilities
+    GMData.ServerCapabilities = capabilities
+    print("[GameMasterSystem] Received server capabilities:")
+    print("  - Character ban support: " .. tostring(capabilities.supportsCharacterBan))
+    print("  - Server version: " .. (capabilities.serverVersion or "Unknown"))
+    
+    -- Update any UI elements that depend on capabilities
+    if not capabilities.supportsCharacterBan then
+        print("[GameMasterSystem] WARNING: Character bans are not supported on this server")
+    end
+end
+
+-- ============================================================================
+-- Modal Data Handlers
+-- ============================================================================
+
+-- Handler for receiving modal item data
+function GameMasterSystem.receiveModalItemData(player, items)
+    if not items then
+        -- No modal item data received
+        return
+    end
+    
+    -- Update the modal with received items
+    if _G.GMMenus and _G.GMMenus.updateModalItems then
+        _G.GMMenus.updateModalItems(items)
+    end
+end
+
+-- Handler for receiving spell search results
+function GameMasterSystem.receiveSpellSearchResults(player, spells, offset, pageSize, hasMoreData, totalCount)
+    if not spells then
+        -- No spell data received
+        return
+    end
+    
+    -- Update the spell modal with received data including pagination info
+    if _G.GMMenus and _G.GMMenus.updateSpellSearchResults then
+        _G.GMMenus.updateSpellSearchResults(spells, offset, pageSize, hasMoreData, totalCount)
+    end
+end
+
+-- ============================================================================
+-- Error Handlers
+-- ============================================================================
+
+
+-- Debug message
+if GMConfig and GMConfig.config and GMConfig.config.debug then
+    print("[GameMasterSystem] Data handlers module loaded")
+end

@@ -101,10 +101,16 @@ AzerothCore-Eluna-Scripts [lua/AzerothCore-Eluna-Scripts](lua/AzerothCore-Eluna-
 azerothcore-global-mail_banking_auctions [lua/azerothcore-global-mail_banking_auctions](lua/azerothcore-global-mail_banking_auctions)
 
 
+azerothcore-lua-ah-bot [lua/azerothcore-lua-ah-bot](lua/azerothcore-lua-ah-bot)
+
+
 AzerothCore-lua-MultiVendor [lua/AzerothCore-lua-MultiVendor](lua/AzerothCore-lua-MultiVendor)
 
 
 azerothcore-starting-zone-selector [lua/azerothcore-starting-zone-selector](lua/azerothcore-starting-zone-selector)
+
+
+azerothcore-transmog-3.3.5a [lua/azerothcore-transmog-3.3.5a](lua/azerothcore-transmog-3.3.5a)
 
 
 azerothcore-trivia-system [lua/azerothcore-trivia-system](lua/azerothcore-trivia-system)
@@ -174,6 +180,9 @@ NPCBotInventory [lua/NPCBotInventory](lua/NPCBotInventory)
 
 
 Npcbot_Extended_Commands [lua/Npcbot_Extended_Commands](lua/Npcbot_Extended_Commands)
+
+
+Prestige-and-Draft-Mode [lua/Prestige-and-Draft-Mode](lua/Prestige-and-Draft-Mode)
 
 
 PublicScripts [lua/PublicScripts](lua/PublicScripts)

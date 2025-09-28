@@ -3,6 +3,7 @@ name: Build LS files
 on:
   push:
   workflow_call:
+  workflow_dispatch:
   
 jobs:
   build-ls-files:

@@ -1,0 +1,1976 @@
+local AIO = AIO or require("AIO")
+
+if AIO.AddAddon() then
+    return -- Exit if on server
+end
+
+-- Get the shared namespace
+local GameMasterSystem = _G.GameMasterSystem
+if not GameMasterSystem then
+    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
+    return
+end
+
+-- Get references to other modules
+local GMConfig = _G.GMConfig
+local GMUtils = _G.GMUtils
+local GMData = _G.GMData
+
+-- Get configuration
+local MENU_CONFIG = GMConfig.MENU_CONFIG
+
+-- Module: Menu System
+local GMMenus = {}
+_G.GMMenus = GMMenus  -- Make it globally accessible
+GameMasterSystem.Menus = GMMenus
+
+-- Private variables
+
+-- Forward declare MenuFactory
+local MenuFactory
+
+-- Constants for button tooltips
+local BUTTON_CONFIG = {
+    TOOLTIP = {
+        TEXT = "Right-click to open context menu\nYou can hold middle mouse to move and scroll",
+    },
+}
+
+-- Helper function to get entity type display name
+local function getEntityType(type)
+    return MENU_CONFIG.TYPES[type:upper()] or type
+end
+
+-- Copy functions
+local function copyToClipboard(value, label)
+    local trimmedValue = GMUtils.trimSpaces(value)
+    if trimmedValue and trimmedValue ~= "" then
+        local editBox = CreateFrame("EditBox")
+        editBox:SetText(trimmedValue)
+        editBox:HighlightText()
+        editBox:SetScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+            self:Hide()
+        end)
+        editBox:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+            self:Hide()
+        end)
+        editBox:SetScript("OnEditFocusLost", function(self)
+            self:Hide()
+        end)
+        editBox:Show()
+        editBox:SetFocus()
+        print("Ctrl+C to copy " .. (label or "the value"))
+    else
+        print("Invalid value")
+    end
+end
+
+local function copyIcon(entity)
+    local entry = tostring(entity.spellID):match("^%s*(.-)%s*$") -- Trim spaces
+    local name, rank, icon = GetSpellInfo(entry)
+    if icon then
+        local editBox = CreateFrame("EditBox")
+        editBox:SetText(tostring(icon))
+        editBox:HighlightText()
+        editBox:SetScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+            self:Hide()
+        end)
+        editBox:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+            self:Hide()
+        end)
+        editBox:SetScript("OnEditFocusLost", function(self)
+            self:Hide()
+        end)
+        editBox:Show()
+        editBox:SetFocus()
+        print("Ctrl+C to copy the path")
+    end
+end
+
+-- Register static popup dialog for delete confirmation
+StaticPopupDialogs["CONFIRM_DELETE_ENTITY"] = {
+    text = "Are you sure you want to delete this %s with ID: %s?\nHold CTRL to skip this dialog next time.",
+    button1 = "Yes",
+    button2 = "No",
+    timeout = MENU_CONFIG.CONFIRM_DIALOG.TIMEOUT,
+    whileDead = 1,
+    hideOnEscape = true,
+    preferredIndex = MENU_CONFIG.CONFIRM_DIALOG.PREFERRED_INDEX,
+    OnAccept = function(self, data)
+        if not data or not data.type or not data.entry then
+            return
+        end
+
+        local handlers = {
+            npc = function(entry)
+                AIO.Handle("GameMasterSystem", "deleteNpcEntity", entry)
+            end,
+            gameobject = function(entry)
+                AIO.Handle("GameMasterSystem", "deleteGameObjectEntity", entry)
+            end,
+            spell = function(entry)
+                AIO.Handle("GameMasterSystem", "deleteSpellEntity", entry)
+            end,
+            spellvisual = function(entry)
+                AIO.Handle("GameMasterSystem", "deleteSpellVisualEntity", entry)
+            end,
+        }
+
+        if handlers[data.type] then
+            handlers[data.type](data.entry)
+            -- Notify UI to refresh if available
+            if GameMasterSystem.UI and GameMasterSystem.UI.RefreshCurrentView then
+                GameMasterSystem.UI.RefreshCurrentView()
+            end
+        end
+    end,
+}
+
+-- Helper function to show delete confirmation
+local function showDeleteConfirmation(type, entry)
+    if not type or not entry then
+        return
+    end
+
+    local displayType = getEntityType(type):gsub("^%l", string.upper)
+    StaticPopup_Show("CONFIRM_DELETE_ENTITY", displayType, entry, {
+        type = type,
+        entry = entry,
+    })
+end
+
+-- Common menu item templates
+local MenuItems = {
+    CANCEL = {
+        text = "Cancel",
+        func = function() end,
+        notCheckable = true,
+    },
+    
+    createTitle = function(text)
+        return {
+            text = text,
+            isTitle = true,
+            notCheckable = true,
+        }
+    end,
+    
+    createDelete = function(type, entry, handler)
+        return {
+            text = "Delete",
+            func = function()
+                if IsControlKeyDown() then
+                    handler(entry)
+                else
+                    showDeleteConfirmation(type, entry)
+                end
+            end,
+            notCheckable = true,
+        }
+    end,
+
+    createCopyMenu = function(entity)
+        local entry = entity.entry or entity.spellID or entity.spellVisualID
+        local name = entity.name
+        local subMenu = {}
+
+        if entry then
+            table.insert(subMenu, {
+                text = "Copy ID",
+                func = function()
+                    copyToClipboard(entry, "ID")
+                end,
+                notCheckable = true,
+            })
+        end
+
+        if name then
+            table.insert(subMenu, {
+                text = "Copy Name",
+                func = function()
+                    copyToClipboard(name, "Name")
+                end,
+                notCheckable = true,
+            })
+        end
+
+        -- For spell visuals, they might have a file path
+        if entity.FilePath then
+            table.insert(subMenu, {
+                text = "Copy FilePath",
+                func = function()
+                    copyToClipboard(entity.FilePath, "FilePath")
+                end,
+                notCheckable = true,
+            })
+        end
+
+        if #subMenu > 0 then
+            return {
+                text = "Copy",
+                hasArrow = true,
+                menuList = subMenu,
+                notCheckable = true,
+            }
+        end
+    end,
+}
+
+-- Menu Factory
+MenuFactory = {
+
+    createNpcMenu = function(entity)
+        local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+        return {
+            MenuItems.createTitle("Creature ID: " .. trimmedEntry),
+            {
+                text = "Spawn",
+                func = function()
+                    local trimmedEntry = tonumber(GMUtils.trimSpaces(entity.entry))
+                    if trimmedEntry then
+                        print("Spawning NPC with ID: " .. trimmedEntry)
+                        AIO.Handle("GameMasterSystem", "spawnNpcEntity", trimmedEntry)
+                    else
+                        print("Invalid NPC ID")
+                    end
+                end,
+                notCheckable = true,
+            },
+            MenuItems.createDelete(MENU_CONFIG.TYPES.NPC, trimmedEntry, function(entry)
+                AIO.Handle("GameMasterSystem", "deleteNpcEntity", entry)
+            end),
+            MenuItems.createCopyMenu(entity),
+            {
+                text = "Morphing",
+                hasArrow = true,
+                menuList = MenuFactory.createMorphingSubmenu(entity),
+                notCheckable = true,
+            },
+            {
+                text = "Duplicate to Database",
+                func = function()
+                    print("Duplicating NPC with ID: " .. trimmedEntry)
+                    AIO.Handle("GameMasterSystem", "duplicateNpcEntity", trimmedEntry)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Duplicate to Database",
+                tooltipText = "Duplicate this NPC to the database.\n\n"
+                    .. "This will create a new entry in the database with the same data as this NPC.\n\n"
+                    .. "You can then modify the new entry as needed.",
+                tooltipOnButton = true,
+            },
+            MenuItems.CANCEL,
+        }
+    end,
+
+    createMorphingSubmenu = function(entity)
+        local submenu = {
+            {
+                text = "Demorph",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "demorphNpcEntity")
+                end,
+                notCheckable = true,
+            },
+        }
+
+        -- Add model IDs
+        for i, modelId in ipairs(entity.modelid) do
+            table.insert(submenu, 1, {
+                text = "Model ID " .. i .. ": " .. modelId,
+                func = function()
+                    AIO.Handle("GameMasterSystem", "morphNpcEntity", GMUtils.trimSpaces(modelId))
+                end,
+                notCheckable = true,
+            })
+        end
+
+        return submenu
+    end,
+
+    createGameObjectMenu = function(entity)
+        local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+        return {
+            MenuItems.createTitle("GameObject ID: " .. trimmedEntry),
+            {
+                text = "Spawn",
+                func = function()
+                    local trimmedEntry = tonumber(GMUtils.trimSpaces(entity.entry))
+                    if trimmedEntry then
+                        print("Spawning GameObject with ID: " .. trimmedEntry)
+                        AIO.Handle("GameMasterSystem", "spawnGameObject", trimmedEntry)
+                    else
+                        print("Invalid GameObject ID")
+                    end
+                end,
+                notCheckable = true,
+            },
+            MenuItems.createDelete(MENU_CONFIG.TYPES.GAMEOBJECT, trimmedEntry, function(entry)
+                AIO.Handle("GameMasterSystem", "deleteGameObjectEntity", entry)
+            end),
+            MenuItems.createCopyMenu(entity),
+            {
+                text = "Duplicate to Database",
+                func = function()
+                    print("Duplicating GameObject with ID: " .. trimmedEntry)
+                    AIO.Handle("GameMasterSystem", "duplicateGameObjectEntity", trimmedEntry)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Duplicate to Database",
+                tooltipText = "Duplicate this GameObject to the database.\n\n"
+                    .. "This will create a new entry in the database with the same data as this GameObject.\n\n"
+                    .. "You can then modify the new entry as needed.",
+                tooltipOnButton = true,
+            },
+            MenuItems.CANCEL,
+        }
+    end,
+
+    createSpellMenu = function(entity)
+        local trimmedEntry = GMUtils.trimSpaces(entity.spellID)
+        return {
+            MenuItems.createTitle("Spell ID: " .. trimmedEntry),
+            {
+                text = "Learn",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "learnSpellEntity", trimmedEntry)
+                end,
+                notCheckable = true,
+            },
+            MenuItems.createDelete(MENU_CONFIG.TYPES.SPELL, trimmedEntry, function(entry)
+                AIO.Handle("GameMasterSystem", "deleteSpellEntity", entry)
+            end),
+            {
+                text = "Cast on Self",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "castSelfSpellEntity", trimmedEntry)
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Cast from Target",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "castTargetSpellEntity", trimmedEntry)
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Copy Icon",
+                func = function()
+                    copyIcon(entity)
+                end,
+                notCheckable = true,
+            },
+            MenuItems.createCopyMenu(entity),
+            MenuItems.CANCEL,
+        }
+    end,
+
+    createSpellVisualMenu = function(entity)
+        local trimmedEntry = GMUtils.trimSpaces(entity.spellVisualID)
+        return {
+            MenuItems.createTitle("SpellVisual ID: " .. trimmedEntry),
+            {
+                text = "Copy spellVisual",
+                func = function()
+                    copyToClipboard(entity.FilePath, "SpellVisual Path")
+                end,
+                notCheckable = true,
+            },
+            MenuItems.createCopyMenu(entity),
+            MenuItems.CANCEL,
+        }
+    end,
+
+    createItemMenu = function(entity)
+        local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+        return {
+            MenuItems.createTitle("Item ID: " .. trimmedEntry),
+            {
+                text = "Add Item to Player",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "addItemEntity", trimmedEntry, 1)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Add Item",
+                tooltipText = "Adds this item to yourself or your target",
+            },
+            {
+                text = "Add Item (5)",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "addItemEntity", trimmedEntry, 5)
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Add Item (Max Stack)",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "addItemEntityMax", trimmedEntry)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Add Max Stack",
+                tooltipText = "Adds the maximum stack size of this item",
+            },
+            {
+                text = "Duplicate to Database",
+                func = function()
+                    print("Duplicating Item with ID: " .. trimmedEntry)
+                    AIO.Handle("GameMasterSystem", "duplicateItemEntity", trimmedEntry)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Duplicate to Database",
+                tooltipText = "Duplicate this Item to the database.\n\n"
+                    .. "This will create a new entry in the database with the same data as this Item.\n\n"
+                    .. "You can then modify the new entry as needed.",
+                tooltipOnButton = true,
+            },
+            MenuItems.createCopyMenu(entity),
+            MenuItems.CANCEL,
+        }
+    end,
+    
+    createPlayerMenu = function(entity)
+        local playerName = GMUtils.trimSpaces(entity.name)
+        return {
+            MenuItems.createTitle("Player: " .. playerName),
+            {
+                text = "Give Gold",
+                func = function()
+                    -- Open dialog to give gold
+                    StaticPopup_Show("GM_GIVE_PLAYER_GOLD", playerName, nil, {name = playerName})
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Give Item",
+                func = function()
+                    -- Open new item selection modal
+                    GMMenus.createItemSelectionDialog(playerName)
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Buffs & Auras",
+                hasArrow = true,
+                menuList = MenuFactory.createBuffSubmenu(playerName),
+                notCheckable = true,
+            },
+            {
+                text = "Cast Spell",
+                hasArrow = true,
+                menuList = {
+                    {
+                        text = "Make Player Cast on Self",
+                        func = function()
+                            GMMenus.createSpellSelectionDialog(playerName, "self")
+                        end,
+                        notCheckable = true,
+                        tooltipTitle = "Cast on Self",
+                        tooltipText = "Make the player cast a spell on themselves",
+                    },
+                    {
+                        text = "Make Player Cast on Target",
+                        func = function()
+                            GMMenus.createSpellSelectionDialog(playerName, "target")
+                        end,
+                        notCheckable = true,
+                        tooltipTitle = "Cast on Target",
+                        tooltipText = "Make the player cast a spell on their current target",
+                    },
+                    {
+                        text = "Cast Spell on Player",
+                        func = function()
+                            GMMenus.createSpellSelectionDialog(playerName, "onplayer")
+                        end,
+                        notCheckable = true,
+                        tooltipTitle = "Cast on Player",
+                        tooltipText = "You cast a spell on the player",
+                    },
+                    {
+                        text = "Custom Spell ID...",
+                        func = function()
+                            StaticPopup_Show("GM_PLAYER_CAST_SELF", playerName, nil, {name = playerName})
+                        end,
+                        notCheckable = true,
+                        tooltipTitle = "Custom Spell",
+                        tooltipText = "Enter a custom spell ID to cast",
+                    },
+                },
+                notCheckable = true,
+            },
+            {
+                text = "Full Heal & Restore",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "healAndRestorePlayer", playerName)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Full Restore",
+                tooltipText = "Fully heal and restore the player's health, mana, and remove debuffs",
+            },
+            {
+                text = "Remove All Auras",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "removePlayerAuras", playerName)
+                end,
+                notCheckable = true,
+                tooltipTitle = "Remove Auras",
+                tooltipText = "Remove all buffs and debuffs from the player",
+            },
+            {
+                text = "Send Mail",
+                func = function()
+                    -- Open mail composition dialog
+                    if GameMasterSystem.OpenMailDialog then
+                        GameMasterSystem.OpenMailDialog(playerName)
+                    end
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Teleport To Player",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "teleportToPlayer", playerName)
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Summon Player",
+                func = function()
+                    AIO.Handle("GameMasterSystem", "summonPlayer", playerName)
+                end,
+                notCheckable = true,
+            },
+            {
+                text = "Kick Player",
+                func = function()
+                    StaticPopup_Show("GM_KICK_PLAYER", playerName, nil, {name = playerName})
+                end,
+                notCheckable = true,
+            },
+            MenuItems.createCopyMenu(entity),
+            MenuItems.CANCEL,
+        }
+    end,
+    
+    createBuffSubmenu = function(playerName)
+        local submenu = {}
+        
+        -- Add buff categories from config
+        for _, category in ipairs(GMConfig.SPELL_CATEGORIES) do
+            local categoryMenu = {
+                text = category.name,
+                hasArrow = true,
+                menuList = {},
+                notCheckable = true,
+            }
+            
+            -- Add spells in this category
+            for _, spell in ipairs(category.spells) do
+                table.insert(categoryMenu.menuList, {
+                    text = spell.name,
+                    func = function()
+                        AIO.Handle("GameMasterSystem", "applyBuffToPlayer", playerName, spell.spellId)
+                    end,
+                    notCheckable = true,
+                    icon = spell.icon,
+                })
+            end
+            
+            table.insert(submenu, categoryMenu)
+        end
+        
+        -- Add custom spell options
+        table.insert(submenu, {
+            text = "Browse All Buffs...",
+            func = function()
+                GMMenus.createSpellSelectionDialog(playerName, "buff")
+            end,
+            notCheckable = true,
+            tooltipTitle = "Browse Buffs",
+            tooltipText = "Open spell browser to select from all available buffs",
+        })
+        
+        table.insert(submenu, {
+            text = "Custom Spell ID...",
+            func = function()
+                StaticPopup_Show("GM_APPLY_CUSTOM_BUFF", playerName, nil, {name = playerName})
+            end,
+            notCheckable = true,
+            tooltipTitle = "Custom ID",
+            tooltipText = "Enter a specific spell ID to apply",
+        })
+        
+        return submenu
+    end,
+}
+
+-- Public API
+function GMMenus.Initialize()
+    print("[GMMenus] Menu system initialized")
+end
+
+function GMMenus.ShowContextMenu(menuType, anchor, entity)
+    local menuCreators = {
+        npc = MenuFactory.createNpcMenu,
+        gameobject = MenuFactory.createGameObjectMenu,
+        spell = MenuFactory.createSpellMenu,
+        spellvisual = MenuFactory.createSpellVisualMenu,
+        item = MenuFactory.createItemMenu,
+        player = MenuFactory.createPlayerMenu,
+    }
+
+    local menuCreator = menuCreators[menuType]
+    if menuCreator then
+        -- Use styled EasyMenu for consistent dark theme
+        ShowStyledEasyMenu(menuCreator(entity), "cursor")
+    end
+end
+
+-- Create info button for context menu
+function GMMenus.createInfoButton(parent, entity, type)
+    if not parent or not entity or not type then
+        return nil
+    end
+
+    local button = CreateFrame("Button", nil, parent)
+    button:SetSize(16, 16)  -- Standard icon size
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -5)
+    button:SetNormalTexture("Interface\\Icons\\INV_Misc_Book_09")
+    button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+    button:GetHighlightTexture():SetBlendMode("ADD")
+
+    button:SetScript("OnMouseUp", function(self, mouseButton)
+        if mouseButton == "RightButton" then
+            GMMenus.ShowContextMenu(type:lower(), parent, entity)
+        end
+    end)
+
+    -- Add tooltip
+    button:SetScript("OnEnter", function(self)
+        GMUtils.ShowTooltip(self, "ANCHOR_RIGHT", "Info", BUTTON_CONFIG.TOOLTIP.TEXT)
+    end)
+    
+    button:SetScript("OnLeave", function(self)
+        GMUtils.HideTooltip()
+    end)
+
+    return button
+end
+
+-- Item Selection Modal
+local itemSelectionModal = nil
+local selectedItems = {}
+local targetPlayerName = nil
+local currentItemData = {}
+
+-- Create the item selection modal dialog
+function GMMenus.createItemSelectionDialog(playerName)
+    -- Store target player name
+    targetPlayerName = playerName
+    selectedItems = {}
+    
+    -- Initialize filters
+    itemSelectionModal = itemSelectionModal or {}
+    itemSelectionModal.currentCategory = "all"
+    itemSelectionModal.qualityFilters = {0, 1, 2, 3, 4, 5}
+    
+    -- Create modal dialog
+    local options = {
+        title = "Select Items for " .. playerName,
+        width = 860,  -- Increased to accommodate 10 columns
+        height = 600,
+        closeOnEscape = true,
+        buttons = {
+            {
+                text = "Cancel",
+                callback = function()
+                    if itemSelectionModal then
+                        itemSelectionModal:Hide()
+                    end
+                end
+            },
+            {
+                text = "Give Items",
+                callback = function()
+                    GMMenus.confirmGiveItems()
+                end
+            }
+        }
+    }
+    
+    itemSelectionModal = CreateStyledDialog(options)
+    
+    -- Create custom content area within the dialog
+    local content = CreateFrame("Frame", nil, itemSelectionModal)
+    content:SetPoint("TOPLEFT", itemSelectionModal, "TOPLEFT", 10, -40)
+    content:SetPoint("BOTTOMRIGHT", itemSelectionModal, "BOTTOMRIGHT", -10, 50)
+    
+    -- Enable mouse and prevent click-through to stop modal from closing
+    content:EnableMouse(true)
+    content:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation - prevents closing when clicking inside
+    end)
+    
+    -- Create search box at top
+    local searchBox = CreateStyledSearchBox(content, 300, "Search items...", function(text)
+        GMMenus.filterItems(text)
+    end)
+    searchBox:SetPoint("TOP", content, "TOP", 0, -40)
+    itemSelectionModal.searchBox = searchBox
+    
+    -- Item count label
+    local itemCountLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    itemCountLabel:SetPoint("TOP", searchBox, "BOTTOM", 0, -5)
+    itemCountLabel:SetText("Showing 0 items")
+    itemCountLabel:SetTextColor(0.7, 0.7, 0.7)
+    itemSelectionModal.itemCountLabel = itemCountLabel
+    
+    -- Create category dropdown
+    local categoryLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    categoryLabel:SetPoint("TOPLEFT", content, "TOPLEFT", 20, -95)
+    categoryLabel:SetText("Category:")
+    categoryLabel:SetTextColor(0.8, 0.8, 0.8)
+    
+    local categoryItems = {
+        { text = "All Items", value = "all" },
+        { text = "Weapons", value = "weapon" },
+        { text = "Armor", value = "armor" },
+        { text = "Consumables", value = "consumable" },
+        { text = "Trade Goods", value = "trade" },
+        { text = "Quest Items", value = "quest" },
+        { text = "Gems", value = "gem" },
+        { text = "Miscellaneous", value = "misc" }
+    }
+    
+    local categoryDropdown = CreateFullyStyledDropdown(
+        content,
+        150,
+        categoryItems,
+        "All Items",
+        function(value)
+            GMMenus.filterByCategory(value)
+        end
+    )
+    categoryDropdown:SetPoint("LEFT", categoryLabel, "RIGHT", 10, 0)
+    itemSelectionModal.categoryDropdown = categoryDropdown
+    
+    -- Create quality filter toggles
+    local qualityLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qualityLabel:SetPoint("LEFT", categoryDropdown, "RIGHT", 30, 0)
+    qualityLabel:SetText("Quality:")
+    qualityLabel:SetTextColor(0.8, 0.8, 0.8)
+    
+    local qualityToggles = {}
+    local qualityTypes = {
+        { name = "Poor", color = UISTYLE_COLORS.Poor },
+        { name = "Common", color = UISTYLE_COLORS.Common },
+        { name = "Uncommon", color = UISTYLE_COLORS.Uncommon },
+        { name = "Rare", color = UISTYLE_COLORS.Rare },
+        { name = "Epic", color = UISTYLE_COLORS.Epic },
+        { name = "Legendary", color = UISTYLE_COLORS.Legendary }
+    }
+    
+    local xOffset = 0
+    for i, quality in ipairs(qualityTypes) do
+        local toggle = CreateQualityToggle(content, quality.color, 16)
+        toggle:SetPoint("LEFT", qualityLabel, "RIGHT", 10 + xOffset, 0)
+        toggle:SetChecked(true)
+        toggle:SetScript("OnClick", function(self)
+            -- Toggle the state first
+            self:SetChecked(not self:GetChecked())
+            -- Then update the filter
+            GMMenus.updateQualityFilter()
+        end)
+        toggle.qualityIndex = i - 1  -- WoW quality indices start at 0
+        -- Add tooltip
+        toggle:SetTooltip(quality.name, "Click to toggle " .. quality.name .. " quality items")
+        qualityToggles[i] = toggle
+        xOffset = xOffset + 20
+    end
+    itemSelectionModal.qualityToggles = qualityToggles
+    
+    -- Create scrollable item grid
+    local gridContainer = CreateStyledFrame(content, UISTYLE_COLORS.OptionBg)
+    gridContainer:SetPoint("TOPLEFT", content, "TOPLEFT", 10, -135)
+    gridContainer:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -10, 100)
+    
+    -- Enable mouse to prevent click-through
+    gridContainer:EnableMouse(true)
+    gridContainer:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation
+    end)
+    
+    local scrollContainer, scrollContent, scrollBar, updateScroll = CreateScrollableFrame(
+        gridContainer,
+        gridContainer:GetWidth() - 4,
+        gridContainer:GetHeight() - 4
+    )
+    scrollContainer:SetPoint("TOPLEFT", 2, -2)
+    
+    itemSelectionModal.scrollContent = scrollContent
+    itemSelectionModal.updateScroll = updateScroll
+    itemSelectionModal.itemCards = {}
+    
+    -- Enable mouse on scroll content to prevent click-through
+    scrollContent:EnableMouse(true)
+    scrollContent:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation
+    end)
+    
+    -- Create quantity controls at bottom
+    local quantityFrame = CreateStyledFrame(content, UISTYLE_COLORS.SectionBg)
+    quantityFrame:SetHeight(80)
+    quantityFrame:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 10, 10)
+    quantityFrame:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -10, 10)
+    
+    -- Enable mouse to prevent click-through
+    quantityFrame:EnableMouse(true)
+    quantityFrame:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation
+    end)
+    
+    -- Selected items display
+    local selectedLabel = quantityFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    selectedLabel:SetPoint("TOPLEFT", quantityFrame, "TOPLEFT", 10, -10)
+    selectedLabel:SetText("Selected: 0 items")
+    itemSelectionModal.selectedLabel = selectedLabel
+    
+    -- Unselect All button
+    local unselectAllBtn = CreateStyledButton(quantityFrame, "Unselect All", 80, 20)
+    unselectAllBtn:SetPoint("LEFT", selectedLabel, "RIGHT", 20, 0)
+    unselectAllBtn:SetScript("OnClick", function()
+        GMMenus.unselectAllItems()
+    end)
+    itemSelectionModal.unselectAllBtn = unselectAllBtn
+    
+    -- Select All button
+    local selectAllBtn = CreateStyledButton(quantityFrame, "Select All", 70, 20)
+    selectAllBtn:SetPoint("LEFT", unselectAllBtn, "RIGHT", 10, 0)
+    selectAllBtn:SetScript("OnClick", function()
+        GMMenus.selectAllItems()
+    end)
+    itemSelectionModal.selectAllBtn = selectAllBtn
+    
+    -- Quantity controls
+    local qtyLabel = quantityFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qtyLabel:SetPoint("TOPLEFT", quantityFrame, "TOPLEFT", 10, -35)
+    qtyLabel:SetText("Quantity:")
+    
+    -- Quick quantity buttons
+    local qtyButtons = { 1, 5, 10, 20, 50 }  -- Added 50
+    local btnXOffset = 0
+    for _, qty in ipairs(qtyButtons) do
+        local btn = CreateStyledButton(quantityFrame, tostring(qty), 40, 24)
+        btn:SetPoint("LEFT", qtyLabel, "RIGHT", 10 + btnXOffset, 0)
+        btn:SetScript("OnClick", function()
+            if itemSelectionModal.quantitySlider and itemSelectionModal.quantitySlider.slider then
+                itemSelectionModal.quantitySlider.slider:SetValue(qty)
+            end
+            itemSelectionModal.currentQuantity = qty
+        end)
+        btnXOffset = btnXOffset + 45
+    end
+    
+    -- Max stack button
+    local maxBtn = CreateStyledButton(quantityFrame, "Max", 50, 24)
+    maxBtn:SetPoint("LEFT", qtyLabel, "RIGHT", 10 + btnXOffset, 0)
+    maxBtn:SetScript("OnClick", function()
+        -- Set to max stack of selected item
+        if itemSelectionModal.selectedItem then
+            local maxStack = math.min(itemSelectionModal.selectedItem.maxStack or 100, 100)  -- Cap at 100
+            if itemSelectionModal.quantitySlider and itemSelectionModal.quantitySlider.slider then
+                itemSelectionModal.quantitySlider.slider:SetValue(maxStack)
+            end
+            itemSelectionModal.currentQuantity = maxStack
+        else
+            -- Default to max slider value if no item selected
+            if itemSelectionModal.quantitySlider and itemSelectionModal.quantitySlider.slider then
+                itemSelectionModal.quantitySlider.slider:SetValue(100)
+            end
+            itemSelectionModal.currentQuantity = 100
+        end
+    end)
+    
+    -- Quantity slider
+    local quantitySlider = CreateStyledSliderWithRange(
+        quantityFrame,
+        200,
+        20,
+        1,
+        100,  -- Increased max value from 20 to 100
+        1,
+        1,
+        ""
+    )
+    quantitySlider:SetPoint("LEFT", maxBtn, "RIGHT", 20, 0)
+    itemSelectionModal.quantitySlider = quantitySlider
+    itemSelectionModal.currentQuantity = 1  -- Store quantity separately as fallback
+    
+    -- Ensure slider is enabled
+    if quantitySlider.slider then
+        quantitySlider.slider:EnableMouse(true)
+        
+        -- Debug: verify slider is created properly
+        print("[GMMenus] Quantity slider created. Min:", 1, "Max:", 100, "Current:", quantitySlider.slider:GetValue())
+    end
+    
+    -- Add onChange handler
+    quantitySlider:SetOnValueChanged(function(value)
+        itemSelectionModal.currentQuantity = value
+        print("[GMMenus] Quantity changed to:", value)
+    end)
+    
+    -- Request initial item data
+    GMMenus.requestItemsForModal()
+    
+    -- Show the modal
+    itemSelectionModal:Show()
+    
+    return itemSelectionModal
+end
+
+-- Helper function to create item cards in the modal
+function GMMenus.createModalItemCard(parent, itemData, index)
+    -- Convert numeric quality to string
+    local qualityNames = {
+        [0] = "Poor",
+        [1] = "Common", 
+        [2] = "Uncommon",
+        [3] = "Rare",
+        [4] = "Epic",
+        [5] = "Legendary",
+        [6] = "Artifact",
+        [7] = "Heirloom"
+    }
+    
+    local qualityName = qualityNames[itemData.quality] or "Common"
+    
+    local card = CreateStyledCard(parent, 64, {
+        texture = GetItemIconSafe(itemData.entry),
+        count = 1,
+        quality = qualityName,
+        link = itemData.link,
+        onClick = function(self)
+            GMMenus.selectItemCard(self, itemData)
+        end
+    })
+    
+    -- Position in grid (10 columns)
+    local col = (index - 1) % 10
+    local row = math.floor((index - 1) / 10)
+    -- Calculate centered position
+    -- Total grid width = 10 cards * 70 pixels = 700 pixels
+    -- Parent width is approximately 840 pixels (860 modal - 20 padding)
+    -- Center offset = (840 - 700) / 2 = 70 pixels
+    card:SetPoint("TOPLEFT", parent, "TOPLEFT", 70 + (col * 70), -10 - (row * 70))
+    
+    -- Add selection overlay
+    card.selectionOverlay = card:CreateTexture(nil, "OVERLAY")
+    card.selectionOverlay:SetTexture("Interface\\Buttons\\CheckButtonHilight")
+    card.selectionOverlay:SetBlendMode("ADD")
+    card.selectionOverlay:SetAlpha(0.3)
+    card.selectionOverlay:SetAllPoints()
+    card.selectionOverlay:Hide()
+    
+    card.itemData = itemData
+    card.isSelected = false
+    
+    return card
+end
+
+-- Select/deselect item card
+function GMMenus.selectItemCard(card, itemData)
+    if card.isSelected then
+        -- Deselect
+        card.isSelected = false
+        card.selectionOverlay:Hide()
+        selectedItems[itemData.entry] = nil
+    else
+        -- Select
+        card.isSelected = true
+        card.selectionOverlay:Show()
+        selectedItems[itemData.entry] = {
+            entry = itemData.entry,
+            name = itemData.name,
+            icon = GetItemIconSafe(itemData.entry),
+            quality = itemData.quality,
+            maxStack = itemData.maxStack or 20
+        }
+        
+        -- Update selected item for quantity controls
+        itemSelectionModal.selectedItem = selectedItems[itemData.entry]
+        
+        -- Update max stack for slider
+        local maxStack = math.min(itemData.maxStack or 100, 100)  -- Cap at 100
+        if itemSelectionModal.quantitySlider and itemSelectionModal.quantitySlider.slider then
+            itemSelectionModal.quantitySlider.slider:SetMinMaxValues(1, maxStack)
+        end
+    end
+    
+    -- Update selected count
+    local count = 0
+    for _ in pairs(selectedItems) do
+        count = count + 1
+    end
+    itemSelectionModal.selectedLabel:SetText("Selected: " .. count .. " items")
+end
+
+-- Filter items by search text
+function GMMenus.filterItems(searchText)
+    -- Request filtered data from server (just use the main request function)
+    GMMenus.requestItemsForModal()
+end
+
+-- Filter by category
+function GMMenus.filterByCategory(category)
+    itemSelectionModal.currentCategory = category
+    GMMenus.requestItemsForModal()
+end
+
+-- Update quality filter
+function GMMenus.updateQualityFilter()
+    local qualityFilters = {}
+    for i, toggle in ipairs(itemSelectionModal.qualityToggles) do
+        if toggle:GetChecked() then
+            table.insert(qualityFilters, toggle.qualityIndex)
+        end
+    end
+    itemSelectionModal.qualityFilters = qualityFilters
+    
+    -- Debug output
+    print("[GMMenus] Quality filters updated. Active qualities:", table.concat(qualityFilters, ", "))
+    
+    GMMenus.requestItemsForModal()
+end
+
+-- Request items from server
+function GMMenus.requestItemsForModal()
+    local searchText = ""
+    if itemSelectionModal.searchBox and itemSelectionModal.searchBox.editBox then
+        searchText = itemSelectionModal.searchBox.editBox:GetText() or ""
+    end
+    local category = itemSelectionModal.currentCategory or "all"
+    local qualities = itemSelectionModal.qualityFilters or {0, 1, 2, 3, 4, 5}
+    
+    -- Debug output
+    print("[GMMenus] Requesting items - Search:", searchText, "Category:", category, "Qualities:", #qualities)
+    
+    -- Convert qualities array to comma-separated string for AIO
+    local qualitiesStr = table.concat(qualities, ",")
+    
+    AIO.Handle("GameMasterSystem", "requestModalItems", searchText, category, qualitiesStr)
+end
+
+-- Update modal with item data
+function GMMenus.updateModalItems(items)
+    print("[GMMenus] Updating modal with", #items, "items")
+    
+    -- Clear existing cards
+    for _, card in ipairs(itemSelectionModal.itemCards) do
+        card:Hide()
+        card:SetParent(nil)
+    end
+    wipe(itemSelectionModal.itemCards)
+    
+    -- Update item count display
+    if itemSelectionModal.itemCountLabel then
+        itemSelectionModal.itemCountLabel:SetText("Showing " .. #items .. " items")
+    end
+    
+    -- Create new cards
+    currentItemData = items
+    for i, itemData in ipairs(items) do
+        local card = GMMenus.createModalItemCard(itemSelectionModal.scrollContent, itemData, i)
+        table.insert(itemSelectionModal.itemCards, card)
+    end
+    
+    -- Update scroll content height
+    local rows = math.ceil(#items / 10)
+    itemSelectionModal.scrollContent:SetHeight(math.max(400, rows * 70 + 20))
+    itemSelectionModal.updateScroll()
+end
+
+-- Unselect all items
+function GMMenus.unselectAllItems()
+    -- Clear selected items
+    wipe(selectedItems)
+    
+    -- Update all card visual states
+    if itemSelectionModal.itemCards then
+        for _, card in ipairs(itemSelectionModal.itemCards) do
+            if card.isSelected then
+                card.isSelected = false
+                card.selectionOverlay:Hide()
+            end
+        end
+    end
+    
+    -- Update selected count
+    itemSelectionModal.selectedLabel:SetText("Selected: 0 items")
+    
+    -- Clear selected item for quantity controls
+    itemSelectionModal.selectedItem = nil
+end
+
+-- Select all visible items
+function GMMenus.selectAllItems()
+    -- Clear first to start fresh
+    wipe(selectedItems)
+    
+    -- Select all visible cards
+    if itemSelectionModal.itemCards and currentItemData then
+        for i, card in ipairs(itemSelectionModal.itemCards) do
+            if card:IsVisible() and currentItemData[i] then
+                local itemData = currentItemData[i]
+                card.isSelected = true
+                card.selectionOverlay:Show()
+                selectedItems[itemData.entry] = {
+                    entry = itemData.entry,
+                    name = itemData.name,
+                    icon = GetItemIconSafe(itemData.entry),
+                    quality = itemData.quality,
+                    maxStack = itemData.maxStack or 20
+                }
+            end
+        end
+    end
+    
+    -- Update selected count
+    local count = 0
+    for _ in pairs(selectedItems) do
+        count = count + 1
+    end
+    itemSelectionModal.selectedLabel:SetText("Selected: " .. count .. " items")
+    
+    -- Set first item as selected for quantity controls
+    for _, itemData in pairs(selectedItems) do
+        itemSelectionModal.selectedItem = itemData
+        break
+    end
+end
+
+-- Confirm giving items
+function GMMenus.confirmGiveItems()
+    local quantity = itemSelectionModal.currentQuantity or 1
+    
+    for itemId, itemData in pairs(selectedItems) do
+        AIO.Handle("GameMasterSystem", "givePlayerItem", targetPlayerName, itemId, quantity)
+    end
+    
+    -- Show success message
+    print(string.format("Gave %d items to %s", quantity, targetPlayerName))
+    
+    -- Close modal
+    if itemSelectionModal then
+        itemSelectionModal:Hide()
+    end
+end
+
+-- Spell Selection Modal
+local spellSelectionModal = nil
+local selectedSpells = {}
+local targetPlayerNameForSpell = nil
+local currentSpellData = {}
+
+-- Spell Search Module for better organization and reusability
+local SpellSearchModule = {}
+
+-- Default configuration constants
+SpellSearchModule.DEFAULT_PAGE_SIZE = 50
+SpellSearchModule.MIN_PAGE_SIZE = 10
+SpellSearchModule.MAX_PAGE_SIZE = 500
+
+-- Create pagination state with safe defaults
+function SpellSearchModule.createModalState(castType)
+    return {
+        castType = castType,
+        currentOffset = 0,
+        pageSize = 50, -- Use literal value to avoid self-reference
+        hasMoreData = false,
+        totalSpells = 0
+    }
+end
+
+-- Safely get pageSize with fallback
+function SpellSearchModule.getValidPageSize(modalState)
+    if not modalState then return 50 end
+    local pageSize = modalState.pageSize or 50
+    return math.max(10, math.min(500, pageSize))
+end
+
+-- Update modal state from server response
+function SpellSearchModule.updateModalState(modalState, offset, pageSize, hasMoreData, totalCount)
+    if not modalState then return end
+    
+    modalState.currentOffset = offset or 0
+    modalState.hasMoreData = hasMoreData or false
+    modalState.totalSpells = totalCount or 0
+    
+    -- Preserve pageSize if server doesn't provide it, otherwise use server value
+    if pageSize then
+        modalState.pageSize = pageSize
+    end
+    -- Ensure pageSize is never nil (fallback to default)
+    modalState.pageSize = SpellSearchModule.getValidPageSize(modalState)
+end
+
+-- Handle search request with safe parameters
+function SpellSearchModule.handleSearchRequest(modalState, searchText)
+    if not modalState then return end
+    
+    modalState.currentOffset = 0
+    local pageSize = SpellSearchModule.getValidPageSize(modalState)
+    AIO.Handle("GameMasterSystem", "searchSpells", searchText or "", modalState.currentOffset, pageSize)
+end
+
+-- Handle pagination navigation
+function SpellSearchModule.handlePreviousPage(modalState, searchText)
+    if not modalState or modalState.currentOffset <= 0 then return end
+    
+    local pageSize = SpellSearchModule.getValidPageSize(modalState)
+    modalState.currentOffset = math.max(0, modalState.currentOffset - pageSize)
+    AIO.Handle("GameMasterSystem", "searchSpells", searchText or "", modalState.currentOffset, pageSize)
+end
+
+function SpellSearchModule.handleNextPage(modalState, searchText)
+    if not modalState or not modalState.hasMoreData then return end
+    
+    local pageSize = SpellSearchModule.getValidPageSize(modalState)
+    modalState.currentOffset = modalState.currentOffset + pageSize
+    AIO.Handle("GameMasterSystem", "searchSpells", searchText or "", modalState.currentOffset, pageSize)
+end
+
+-- Calculate pagination info for display
+function SpellSearchModule.getPaginationInfo(modalState)
+    if not modalState then
+        return { currentPage = 1, startNum = 0, endNum = 0, totalSpells = 0 }
+    end
+    
+    local pageSize = SpellSearchModule.getValidPageSize(modalState)
+    local currentPage = math.floor(modalState.currentOffset / pageSize) + 1
+    local startNum = modalState.currentOffset + 1
+    local endNum = math.min(modalState.currentOffset + pageSize, modalState.totalSpells)
+    
+    return {
+        currentPage = currentPage,
+        startNum = startNum,
+        endNum = endNum,
+        totalSpells = modalState.totalSpells
+    }
+end
+
+-- Smart spell icon patterns based on common WoW spell ID ranges and patterns
+local function getSmartSpellIcon(spellId)
+    -- Convert to number for range checks
+    local id = tonumber(spellId)
+    if not id then return nil end
+    
+    -- Common spell icon patterns based on WoW 3.3.5 spell ranges
+    local iconPatterns = {
+        -- Paladin spells (Blessing, Seal, etc.)
+        { min = 20100, max = 20500, icon = "Interface\\Icons\\Spell_Holy_SealOfMight" },
+        { min = 48930, max = 48950, icon = "Interface\\Icons\\Spell_Holy_FistsOfFury" }, -- Blessings
+        
+        -- Priest spells (Power Word, Divine, etc.)
+        { min = 48160, max = 48170, icon = "Interface\\Icons\\Spell_Holy_WordFortitude" }, -- Power Word
+        { min = 48070, max = 48080, icon = "Interface\\Icons\\Spell_Holy_DivineSpirit" }, -- Divine Spirit
+        
+        -- Druid spells (Mark of the Wild, etc.)
+        { min = 48460, max = 48480, icon = "Interface\\Icons\\Spell_Nature_Regeneration" }, -- Mark of the Wild
+        
+        -- Mage spells (Arcane, Fire, Frost)
+        { min = 42890, max = 42920, icon = "Interface\\Icons\\Spell_Arcane_Blast" }, -- Arcane spells
+        { min = 47610, max = 47650, icon = "Interface\\Icons\\Spell_Fire_Fireball" }, -- Fire spells
+        { min = 42840, max = 42860, icon = "Interface\\Icons\\Spell_Frost_Frostbolt" }, -- Frost spells
+        
+        -- Warlock spells
+        { min = 47860, max = 47890, icon = "Interface\\Icons\\Spell_Shadow_ShadowBolt" }, -- Shadow Bolt
+        { min = 47810, max = 47830, icon = "Interface\\Icons\\Spell_Fire_Immolation" }, -- Immolate
+        
+        -- Warrior spells
+        { min = 47440, max = 47470, icon = "Interface\\Icons\\Ability_Warrior_Sunder" }, -- Sunder Armor
+        { min = 47500, max = 47520, icon = "Interface\\Icons\\Ability_ThunderBolt" }, -- Thunder Clap
+        
+        -- Hunter spells
+        { min = 49000, max = 49030, icon = "Interface\\Icons\\Ability_Hunter_AimedShot" }, -- Aimed Shot
+        { min = 49050, max = 49080, icon = "Interface\\Icons\\Ability_Hunter_MultiShot" }, -- Multi-Shot
+        
+        -- Rogue spells
+        { min = 48650, max = 48680, icon = "Interface\\Icons\\Ability_BackStab" }, -- Backstab
+        { min = 48630, max = 48650, icon = "Interface\\Icons\\Ability_Rogue_Eviscerate" }, -- Eviscerate
+        
+        -- Shaman spells
+        { min = 49270, max = 49290, icon = "Interface\\Icons\\Spell_Nature_Lightning" }, -- Lightning Bolt
+        { min = 49230, max = 49250, icon = "Interface\\Icons\\Spell_Fire_Elemental_Totem" }, -- Earth Shock
+    }
+    
+    -- Check if spell ID falls within any known pattern range
+    for _, pattern in pairs(iconPatterns) do
+        if id >= pattern.min and id <= pattern.max then
+            return pattern.icon
+        end
+    end
+    
+    -- School-based fallbacks for unknown spells
+    -- Use modulo to create some variety based on spell ID
+    local mod = id % 10
+    if mod >= 0 and mod <= 2 then
+        return "Interface\\Icons\\Spell_Holy_Heal" -- Holy/Light magic
+    elseif mod >= 3 and mod <= 4 then
+        return "Interface\\Icons\\Spell_Fire_Fireball" -- Fire magic
+    elseif mod >= 5 and mod <= 6 then
+        return "Interface\\Icons\\Spell_Frost_Frostbolt" -- Frost/Ice magic
+    elseif mod >= 7 and mod <= 8 then
+        return "Interface\\Icons\\Spell_Nature_Lightning" -- Nature magic
+    else
+        return "Interface\\Icons\\Spell_Arcane_Blast" -- Arcane magic
+    end
+end
+
+-- Test function to verify icon resolution works with various spell IDs
+local function testSpellIconResolution()
+    if not (GMConfig and GMConfig.config and GMConfig.config.debug) then
+        return
+    end
+    
+    print("[GMMenus] Testing spell icon resolution...")
+    
+    -- Test various spell IDs
+    local testSpells = {
+        133, -- Fireball (should work with GetSpellTexture)
+        2136, -- Fire Blast
+        48161, -- Power Word: Fortitude (predefined)
+        12345, -- Random ID (should use smart fallback)
+        99999, -- High ID (should use school-based fallback)
+    }
+    
+    for _, spellId in ipairs(testSpells) do
+        -- Test GetSpellInfo (primary method)
+        local name, rank, infoIcon = GetSpellInfo(spellId)
+        -- Test GetSpellTexture (fallback method)
+        local textureIcon = GetSpellTexture(spellId)
+        -- Test smart fallback
+        local smartIcon = getSmartSpellIcon(spellId)
+        
+        print(string.format("[GMMenus] Spell %d (%s):", spellId, name or "Unknown"))
+        print(string.format("  GetSpellInfo icon: '%s'", infoIcon or "nil"))
+        print(string.format("  GetSpellTexture: '%s'", textureIcon or "nil"))
+        print(string.format("  Smart fallback: '%s'", smartIcon or "nil"))
+    end
+end
+
+-- Auto-run test when debug is enabled
+if GMConfig and GMConfig.config and GMConfig.config.debug then
+    testSpellIconResolution()
+end
+
+-- Real-time search implementation with debouncing (WoW 3.3.5 compatible)
+local realtimeSearchFrame = nil
+local realtimeSearchText = nil
+local SEARCH_DELAY = 0.5 -- 500ms delay after user stops typing
+
+-- Initialize search timer frame (WoW 3.3.5 compatible)
+local function initializeSearchTimer()
+    if not realtimeSearchFrame then
+        realtimeSearchFrame = CreateFrame("Frame")
+        realtimeSearchFrame:Hide()
+        realtimeSearchFrame:SetScript("OnUpdate", function(self, elapsed)
+            self.timeLeft = (self.timeLeft or 0) - elapsed
+            if self.timeLeft <= 0 then
+                self:Hide()
+                -- Execute the search
+                if realtimeSearchText and spellSelectionModal and spellSelectionModal:IsVisible() then
+                    local currentText = ""
+                    if spellSelectionModal.searchBox and spellSelectionModal.searchBox.editBox then
+                        currentText = spellSelectionModal.searchBox.editBox:GetText() or ""
+                    end
+                    
+                    -- Verify search text is still the same (user hasn't typed more)
+                    if currentText == realtimeSearchText and realtimeSearchText ~= "" then
+                        -- Trigger database search via SpellSearchModule
+                        if GMConfig and GMConfig.config and GMConfig.config.debug then
+                            print("[GMMenus] Real-time search executing for:", realtimeSearchText)
+                        end
+                        SpellSearchModule.handleSearchRequest(spellSelectionModal, realtimeSearchText)
+                    end
+                end
+            end
+        end)
+    end
+end
+
+function GMMenus.handleRealtimeSpellSearch(searchText)
+    -- Initialize timer frame if needed
+    initializeSearchTimer()
+    
+    -- Cancel previous timer by hiding the frame
+    if realtimeSearchFrame then
+        realtimeSearchFrame:Hide()
+    end
+    
+    -- Handle empty search - show predefined spells immediately
+    if not searchText or searchText == "" or string.len(searchText) == 0 then
+        GMMenus.filterSpells("")
+        -- Update UI to show we're in predefined mode
+        if spellSelectionModal.spellCountLabel then
+            spellSelectionModal.spellCountLabel:SetText("Showing predefined spells")
+        end
+        return
+    end
+    
+    -- For very short search terms, still show predefined spells filtered
+    if string.len(searchText) < 2 then
+        GMMenus.filterSpells(searchText)
+        if spellSelectionModal.spellCountLabel then
+            spellSelectionModal.spellCountLabel:SetText("Filtering predefined spells...")
+        end
+        return
+    end
+    
+    -- Show immediate feedback for longer search terms
+    if spellSelectionModal.spellCountLabel then
+        spellSelectionModal.spellCountLabel:SetText("Searching database...")
+        spellSelectionModal.spellCountLabel:SetTextColor(1, 1, 0) -- Yellow while searching
+    end
+    
+    -- Store search text and start timer for database search (debounced)
+    realtimeSearchText = searchText
+    realtimeSearchFrame.timeLeft = SEARCH_DELAY
+    realtimeSearchFrame:Show()
+end
+
+-- Slash command to test specific spell icon resolution
+SLASH_TESTSPELLICON1 = "/testspellicon"
+SlashCmdList["TESTSPELLICON"] = function(msg)
+    local spellId = tonumber(msg)
+    if not spellId then
+        print("[GMMenus] Usage: /testspellicon <spellID>")
+        return
+    end
+    
+    print("[GMMenus] Testing spell icon resolution for spell ID:", spellId)
+    
+    -- Test GetSpellInfo (WoW 3.3.5 recommended method)
+    local name, rank, infoIcon, castTime, minRange, maxRange = GetSpellInfo(spellId)
+    print(string.format("[GMMenus] GetSpellInfo results:"))
+    print(string.format("  Name: %s", name or "nil"))
+    print(string.format("  Rank: %s", rank or "nil"))
+    print(string.format("  Icon: %s", infoIcon or "nil"))
+    print(string.format("  Cast Time: %s", castTime or "nil"))
+    
+    -- Test GetSpellTexture (fallback method)
+    local textureIcon = GetSpellTexture(spellId)
+    print(string.format("[GMMenus] GetSpellTexture: %s", textureIcon or "nil"))
+    
+    -- Test smart fallback
+    local smartIcon = getSmartSpellIcon(spellId)
+    print(string.format("[GMMenus] Smart fallback: %s", smartIcon or "nil"))
+    
+    -- Show final resolved icon
+    local finalIcon = infoIcon or textureIcon or smartIcon or "Interface\\Icons\\INV_Misc_QuestionMark"
+    print(string.format("[GMMenus] Final resolved icon: %s", finalIcon))
+end
+
+-- Create the spell selection modal dialog
+function GMMenus.createSpellSelectionDialog(playerName, castType)
+    -- Store target player name and cast type
+    targetPlayerNameForSpell = playerName
+    selectedSpells = {}
+    
+    -- Initialize modal state using SpellSearchModule
+    spellSelectionModal = spellSelectionModal or SpellSearchModule.createModalState(castType)
+    
+    -- Create modal dialog
+    local options = {
+        title = "Select Spell for " .. playerName,
+        width = 700,
+        height = 600, -- Increased height for pagination controls
+        closeOnEscape = true,
+        buttons = {
+            {
+                text = "Cancel",
+                callback = function()
+                    if spellSelectionModal then
+                        spellSelectionModal:Hide()
+                    end
+                end
+            },
+            {
+                text = "Cast Spell",
+                callback = function()
+                    GMMenus.confirmCastSpell()
+                end
+            }
+        }
+    }
+    
+    spellSelectionModal = CreateStyledDialog(options)
+    
+    -- Create custom content area within the dialog
+    local content = CreateFrame("Frame", nil, spellSelectionModal)
+    content:SetPoint("TOPLEFT", spellSelectionModal, "TOPLEFT", 10, -40)
+    content:SetPoint("BOTTOMRIGHT", spellSelectionModal, "BOTTOMRIGHT", -10, 50)
+    
+    -- Enable mouse and prevent click-through
+    content:EnableMouse(true)
+    content:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation
+    end)
+    
+    -- Create search box with real-time search capability
+    local searchBox = CreateStyledSearchBox(content, 300, "Search spells...", function(text)
+        -- Real-time search with debouncing
+        GMMenus.handleRealtimeSpellSearch(text)
+    end)
+    searchBox:SetPoint("TOP", content, "TOP", 0, -20)
+    spellSelectionModal.searchBox = searchBox
+    
+    -- Add "Show All Spells" button for database browsing
+    local searchAllBtn = CreateStyledButton(content, "Browse All", 100, 24)
+    searchAllBtn:SetPoint("LEFT", searchBox, "RIGHT", 10, 0)
+    searchAllBtn:SetScript("OnClick", function()
+        -- Clear search box and show all spells from database
+        if searchBox.editBox then
+            searchBox.editBox:SetText("")
+        end
+        -- Cancel any pending search timer
+        if realtimeSearchFrame then
+            realtimeSearchFrame:Hide()
+        end
+        -- Use SpellSearchModule to browse all spells
+        SpellSearchModule.handleSearchRequest(spellSelectionModal, "")
+    end)
+    
+    -- Spell count label
+    local spellCountLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    spellCountLabel:SetPoint("TOP", searchBox, "BOTTOM", 0, -5)
+    spellCountLabel:SetText("Showing 0 spells")
+    spellCountLabel:SetTextColor(0.7, 0.7, 0.7)
+    spellSelectionModal.spellCountLabel = spellCountLabel
+    
+    -- Create scrollable spell list
+    local listContainer = CreateStyledFrame(content, UISTYLE_COLORS.OptionBg)
+    listContainer:SetPoint("TOPLEFT", content, "TOPLEFT", 10, -80)
+    listContainer:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -10, 50) -- Leave room for pagination
+    
+    -- Enable mouse to prevent click-through
+    listContainer:EnableMouse(true)
+    listContainer:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation
+    end)
+    
+    local scrollContainer, scrollContent, scrollBar, updateScroll = CreateScrollableFrame(
+        listContainer,
+        listContainer:GetWidth() - 4,
+        listContainer:GetHeight() - 4
+    )
+    scrollContainer:SetPoint("TOPLEFT", 2, -2)
+    
+    spellSelectionModal.scrollContent = scrollContent
+    spellSelectionModal.updateScroll = updateScroll
+    spellSelectionModal.spellRows = {}
+    
+    -- Enable mouse on scroll content to prevent click-through
+    scrollContent:EnableMouse(true)
+    scrollContent:SetScript("OnMouseDown", function(self, button)
+        -- Stop event propagation
+    end)
+    
+    -- Add toggle buttons for spell source
+    local predefinedBtn = CreateStyledButton(content, "Show Predefined", 100, 20)
+    predefinedBtn:SetPoint("BOTTOMLEFT", listContainer, "TOPLEFT", 0, 5)
+    predefinedBtn:SetScript("OnClick", function()
+        spellSelectionModal.currentOffset = 0
+        GMMenus.loadPredefinedSpells(castType)
+    end)
+    
+    local allSpellsBtn = CreateStyledButton(content, "Show All Spells", 100, 20)
+    allSpellsBtn:SetPoint("LEFT", predefinedBtn, "RIGHT", 10, 0)
+    allSpellsBtn:SetScript("OnClick", function()
+        -- Use SpellSearchModule for consistent search handling
+        SpellSearchModule.handleSearchRequest(spellSelectionModal, "")
+    end)
+    
+    -- Add pagination controls
+    local paginationFrame = CreateFrame("Frame", nil, content)
+    paginationFrame:SetHeight(40)
+    paginationFrame:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 10, 5)
+    paginationFrame:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -10, 5)
+    
+    -- Previous button
+    local prevButton = CreateStyledButton(paginationFrame, "< Previous", 80, 24)
+    prevButton:SetPoint("LEFT", paginationFrame, "LEFT", 0, 0)
+    prevButton:SetScript("OnClick", function()
+        local searchText = ""
+        if spellSelectionModal.searchBox and spellSelectionModal.searchBox.editBox then
+            searchText = spellSelectionModal.searchBox.editBox:GetText() or ""
+        end
+        SpellSearchModule.handlePreviousPage(spellSelectionModal, searchText)
+    end)
+    spellSelectionModal.prevButton = prevButton
+    
+    -- Page info
+    local pageInfo = paginationFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    pageInfo:SetPoint("CENTER", paginationFrame, "CENTER", 0, 0)
+    pageInfo:SetText("Page 1")
+    spellSelectionModal.pageInfo = pageInfo
+    
+    -- Next button
+    local nextButton = CreateStyledButton(paginationFrame, "Next >", 80, 24)
+    nextButton:SetPoint("RIGHT", paginationFrame, "RIGHT", 0, 0)
+    nextButton:SetScript("OnClick", function()
+        local searchText = ""
+        if spellSelectionModal.searchBox and spellSelectionModal.searchBox.editBox then
+            searchText = spellSelectionModal.searchBox.editBox:GetText() or ""
+        end
+        SpellSearchModule.handleNextPage(spellSelectionModal, searchText)
+    end)
+    spellSelectionModal.nextButton = nextButton
+    
+    -- Load predefined spells based on type
+    GMMenus.loadPredefinedSpells(castType)
+    
+    -- Show the modal
+    spellSelectionModal:Show()
+    
+    return spellSelectionModal
+end
+
+-- Load predefined spells
+function GMMenus.loadPredefinedSpells(castType)
+    local spells = {}
+    
+    -- Add all spell categories
+    for _, category in ipairs(GMConfig.SPELL_CATEGORIES) do
+        for _, spell in ipairs(category.spells) do
+            table.insert(spells, {
+                spellId = spell.spellId,
+                name = spell.name,
+                icon = spell.icon,
+                category = category.name
+            })
+        end
+    end
+    
+    -- Reset pagination for predefined spells
+    spellSelectionModal.currentOffset = 0
+    spellSelectionModal.hasMoreData = false
+    spellSelectionModal.totalSpells = #spells
+    
+    -- Hide pagination controls for predefined spells
+    if spellSelectionModal.prevButton then
+        spellSelectionModal.prevButton:Hide()
+    end
+    if spellSelectionModal.nextButton then
+        spellSelectionModal.nextButton:Hide()
+    end
+    if spellSelectionModal.pageInfo then
+        spellSelectionModal.pageInfo:Hide()
+    end
+    
+    -- Update display
+    GMMenus.updateSpellList(spells)
+end
+
+-- Update spell list display
+function GMMenus.updateSpellList(spells)
+    -- Clear existing rows
+    for _, row in ipairs(spellSelectionModal.spellRows) do
+        row:Hide()
+        row:SetParent(nil)
+    end
+    wipe(spellSelectionModal.spellRows)
+    
+    -- Update count
+    if spellSelectionModal.spellCountLabel then
+        spellSelectionModal.spellCountLabel:SetText("Showing " .. #spells .. " spells")
+    end
+    
+    -- Create spell rows
+    currentSpellData = spells
+    for i, spellData in ipairs(spells) do
+        local row = GMMenus.createSpellRow(spellSelectionModal.scrollContent, spellData, i)
+        table.insert(spellSelectionModal.spellRows, row)
+    end
+    
+    -- Update scroll content height
+    spellSelectionModal.scrollContent:SetHeight(math.max(400, #spells * 35 + 10))
+    spellSelectionModal.updateScroll()
+end
+
+-- Create a spell row
+function GMMenus.createSpellRow(parent, spellData, index)
+    local row = CreateStyledFrame(parent, UISTYLE_COLORS.SectionBg)
+    row:SetHeight(30)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -5 - ((index - 1) * 35))
+    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -25, -5 - ((index - 1) * 35))
+    
+    -- Enable mouse for selection
+    row:EnableMouse(true)
+    
+    -- Icon with enhanced resolution
+    local icon = row:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(24, 24)
+    icon:SetPoint("LEFT", row, "LEFT", 5, 0)
+    
+    -- Enhanced icon resolution with multiple fallback strategies
+    local function resolveSpellIcon(spellId, fallbackIcon)
+        -- Debug mode toggle (can be enabled/disabled as needed)
+        local debugIcons = GMConfig and GMConfig.config and GMConfig.config.debug or false
+        
+        -- Strategy 1: Try GetSpellInfo API (more reliable than GetSpellTexture)
+        -- GetSpellInfo returns: name, rank, icon, castTime, minRange, maxRange
+        local name, rank, spellIcon = GetSpellInfo(spellId)
+        if spellIcon and spellIcon ~= "" then
+            if debugIcons then
+                print("[GMMenus] GetSpellInfo success for spell", spellId, ":", name, "icon:", spellIcon)
+            end
+            return spellIcon
+        else
+            if debugIcons then
+                print("[GMMenus] GetSpellInfo failed for spell", spellId, "- name:", name or "nil", "icon:", spellIcon or "nil")
+            end
+        end
+        
+        -- Strategy 1b: Fallback to GetSpellTexture API
+        local spellTexture = GetSpellTexture(spellId)
+        if spellTexture and spellTexture ~= "" then
+            if debugIcons then
+                print("[GMMenus] GetSpellTexture success for spell", spellId, ":", spellTexture)
+            end
+            return spellTexture
+        else
+            if debugIcons then
+                print("[GMMenus] GetSpellTexture also failed for spell", spellId, "- returned:", spellTexture or "nil")
+            end
+        end
+        
+        -- Strategy 2: Use provided fallback icon (for predefined spells)
+        if fallbackIcon and fallbackIcon ~= "" then
+            if debugIcons then
+                print("[GMMenus] Using fallback icon for spell", spellId, ":", fallbackIcon)
+            end
+            return fallbackIcon
+        end
+        
+        -- Strategy 3: Smart icon patterns based on spell ID ranges
+        local smartIcon = getSmartSpellIcon(spellId)
+        if smartIcon then
+            if debugIcons then
+                print("[GMMenus] Using smart icon for spell", spellId, ":", smartIcon)
+            end
+            return smartIcon
+        end
+        
+        -- Strategy 4: Final fallback
+        if debugIcons then
+            print("[GMMenus] Using question mark icon for spell", spellId)
+        end
+        return "Interface\\Icons\\INV_Misc_QuestionMark"
+    end
+    
+    local resolvedIcon = resolveSpellIcon(spellData.spellId, spellData.icon)
+    icon:SetTexture(resolvedIcon)
+    
+    -- Spell name
+    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    nameText:SetPoint("LEFT", icon, "RIGHT", 5, 0)
+    nameText:SetText(spellData.name)
+    nameText:SetTextColor(1, 1, 1)
+    
+    -- Spell ID
+    local idText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    idText:SetPoint("LEFT", nameText, "RIGHT", 10, 0)
+    idText:SetText("(ID: " .. spellData.spellId .. ")")
+    idText:SetTextColor(0.7, 0.7, 0.7)
+    
+    -- Category
+    if spellData.category then
+        local categoryText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        categoryText:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+        categoryText:SetText(spellData.category)
+        categoryText:SetTextColor(0.6, 0.8, 1)
+    end
+    
+    -- Selection highlight
+    local highlight = row:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight")
+    highlight:SetBlendMode("ADD")
+    highlight:SetAlpha(0.3)
+    
+    -- Click handler
+    row:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            -- Deselect all other rows
+            for _, otherRow in ipairs(spellSelectionModal.spellRows) do
+                if otherRow.selected then
+                    otherRow.selected = false
+                    otherRow:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+                end
+            end
+            
+            -- Select this row
+            self.selected = true
+            self:SetBackdropBorderColor(1, 0.8, 0, 1)
+            
+            -- Store selected spell
+            selectedSpells = {spellData}
+        end
+    end)
+    
+    row.spellData = spellData
+    
+    return row
+end
+
+-- Filter spells by search text
+function GMMenus.filterSpells(searchText)
+    if not searchText or searchText == "" then
+        GMMenus.loadPredefinedSpells(spellSelectionModal.castType)
+        return
+    end
+    
+    searchText = searchText:lower()
+    local filteredSpells = {}
+    
+    -- Search through all spell categories
+    for _, category in ipairs(GMConfig.SPELL_CATEGORIES) do
+        for _, spell in ipairs(category.spells) do
+            if spell.name:lower():find(searchText, 1, true) or tostring(spell.spellId):find(searchText, 1, true) then
+                table.insert(filteredSpells, {
+                    spellId = spell.spellId,
+                    name = spell.name,
+                    icon = spell.icon,
+                    category = category.name
+                })
+            end
+        end
+    end
+    
+    -- Hide pagination for filtered predefined spells
+    if spellSelectionModal.prevButton then
+        spellSelectionModal.prevButton:Hide()
+    end
+    if spellSelectionModal.nextButton then
+        spellSelectionModal.nextButton:Hide()
+    end
+    if spellSelectionModal.pageInfo then
+        spellSelectionModal.pageInfo:Hide()
+    end
+    
+    GMMenus.updateSpellList(filteredSpells)
+end
+
+-- Confirm spell cast
+function GMMenus.confirmCastSpell()
+    if #selectedSpells == 0 then
+        print("No spell selected")
+        return
+    end
+    
+    local spell = selectedSpells[1]
+    local castType = spellSelectionModal.castType
+    
+    if castType == "buff" then
+        AIO.Handle("GameMasterSystem", "applyBuffToPlayer", targetPlayerNameForSpell, spell.spellId)
+    elseif castType == "self" then
+        AIO.Handle("GameMasterSystem", "makePlayerCastOnSelf", targetPlayerNameForSpell, spell.spellId)
+    elseif castType == "target" then
+        AIO.Handle("GameMasterSystem", "makePlayerCastOnTarget", targetPlayerNameForSpell, spell.spellId)
+    elseif castType == "onplayer" then
+        AIO.Handle("GameMasterSystem", "castSpellOnPlayer", targetPlayerNameForSpell, spell.spellId)
+    end
+    
+    -- Close modal
+    if spellSelectionModal then
+        spellSelectionModal:Hide()
+    end
+end
+
+-- Handle spell search results from server
+function GMMenus.updateSpellSearchResults(spells, offset, pageSize, hasMoreData, totalCount)
+    if not spellSelectionModal or not spellSelectionModal:IsVisible() then
+        return
+    end
+    
+    print("[GMMenus] Received", #spells, "spells from server, offset:", offset, "hasMore:", hasMoreData, "total:", totalCount)
+    
+    -- Update modal state using SpellSearchModule
+    SpellSearchModule.updateModalState(spellSelectionModal, offset, pageSize, hasMoreData, totalCount)
+    
+    -- Reset search feedback text color and show results count
+    if spellSelectionModal.spellCountLabel then
+        spellSelectionModal.spellCountLabel:SetTextColor(0.7, 0.7, 0.7) -- Reset to normal gray
+        local searchText = ""
+        if spellSelectionModal.searchBox and spellSelectionModal.searchBox.editBox then
+            searchText = spellSelectionModal.searchBox.editBox:GetText() or ""
+        end
+        if searchText ~= "" then
+            spellSelectionModal.spellCountLabel:SetText("Database search: " .. #spells .. " results")
+        else
+            spellSelectionModal.spellCountLabel:SetText("Browsing all spells: " .. #spells .. " results")
+        end
+    end
+    
+    -- Show pagination controls for database results
+    if spellSelectionModal.prevButton then
+        spellSelectionModal.prevButton:Show()
+    end
+    if spellSelectionModal.nextButton then
+        spellSelectionModal.nextButton:Show()
+    end
+    if spellSelectionModal.pageInfo then
+        spellSelectionModal.pageInfo:Show()
+    end
+    
+    -- Update pagination controls
+    GMMenus.updatePaginationControls()
+    
+    -- Update the spell list with server results
+    GMMenus.updateSpellList(spells)
+end
+
+-- Update pagination controls visibility and text
+function GMMenus.updatePaginationControls()
+    if not spellSelectionModal then return end
+    
+    -- Update previous button (WoW 3.3.5 uses Enable/Disable)
+    if spellSelectionModal.prevButton then
+        if spellSelectionModal.currentOffset > 0 then
+            spellSelectionModal.prevButton:Enable()
+        else
+            spellSelectionModal.prevButton:Disable()
+        end
+    end
+    
+    -- Update next button (WoW 3.3.5 uses Enable/Disable)
+    if spellSelectionModal.nextButton then
+        if spellSelectionModal.hasMoreData then
+            spellSelectionModal.nextButton:Enable()
+        else
+            spellSelectionModal.nextButton:Disable()
+        end
+    end
+    
+    -- Update page info using SpellSearchModule
+    if spellSelectionModal.pageInfo then
+        local paginationInfo = SpellSearchModule.getPaginationInfo(spellSelectionModal)
+        
+        if paginationInfo.totalSpells > 0 then
+            spellSelectionModal.pageInfo:SetText(string.format("Showing %d-%d of %d", 
+                paginationInfo.startNum, paginationInfo.endNum, paginationInfo.totalSpells))
+        else
+            spellSelectionModal.pageInfo:SetText("Page " .. paginationInfo.currentPage)
+        end
+    end
+end
+
+-- Export menu configuration for other modules
+GMMenus.MENU_CONFIG = MENU_CONFIG
+
+print("[GMMenus] Module loaded")

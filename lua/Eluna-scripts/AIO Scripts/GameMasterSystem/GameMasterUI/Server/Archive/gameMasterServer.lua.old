@@ -1,0 +1,1509 @@
+-- Require the config module
+local config = require("GameMasterUI.Server.config")
+local npcTypes = config.npcTypes
+local gameObjectTypes = config.gameObjectTypes
+
+-- Require the queries module
+local queriesModule = require("GameMasterUI.Server.queries")
+local queries = queriesModule.queries
+local getQuery = queriesModule.getQuery
+
+-- Require the init module
+local initModule = require("GameMasterUI.Server.init")
+
+-- Require the utils module
+local utils = require("GameMasterUI.Server.utils")
+local escapeString = utils.escapeString
+local validatePageSize = utils.validatePageSize
+local validateSortOrder = utils.validateSortOrder
+local calculatePosition = utils.calculatePosition
+local sendMessage = utils.sendMessage
+
+-- Require the entityHandlers module
+local entityHandlers = require("GameMasterUI.Server.entityHandlers")
+local spawnNpcEntity = entityHandlers.spawnNpcEntity
+local deleteNpcEntity = entityHandlers.deleteNpcEntity
+local morphNpcEntity = entityHandlers.morphNpcEntity
+local demorphNpcEntity = entityHandlers.demorphNpcEntity
+local spawnGameObject = entityHandlers.spawnGameObject
+local deleteGameObjectEntity = entityHandlers.deleteGameObjectEntity
+local spawnAndDeleteNpcEntity = entityHandlers.spawnAndDeleteNpcEntity
+local spawnAndDeleteGameObjectEntity = entityHandlers.spawnAndDeleteGameObjectEntity
+local learnSpellEntity = entityHandlers.learnSpellEntity
+local deleteSpellEntity = entityHandlers.deleteSpellEntity
+
+-- AIO for TrinityCore 3.3.5 with WoW client 3.3.5
+local AIO = AIO or require("AIO")
+
+local GameMasterSystem = AIO.AddHandlers("GameMasterSystem", {})
+
+-- Function to display debug messages
+local function debugMessage(...)
+	if config.debug then
+		print("DEBUG:", ...)
+	end
+end
+
+-- Server-side handler for item data requests
+function GameMasterSystem.getItemData(player, offset, pageSize, sortOrder, inventoryType)
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+
+	local coreName = GetCoreName()
+	local query = getQuery(coreName, "itemData")(sortOrder, pageSize, offset, inventoryType)
+	local result = WorldDBQuery(query)
+	local itemData = {}
+
+	if result then
+		repeat
+			local item = {
+				entry = result:GetUInt32(0),
+				name = result:GetString(1),
+				description = result:GetString(2),
+				displayid = result:GetUInt32(3),
+				inventoryType = result:GetUInt32(4),
+				quality = result:GetUInt32(5),
+				itemLevel = result:GetUInt32(6),
+				class = result:GetUInt32(7),
+				subclass = result:GetUInt32(8),
+			}
+			table.insert(itemData, item)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #itemData == pageSize
+
+	if #itemData == 0 then
+		player:SendBroadcastMessage("No item data available.")
+	else
+		debugMessage("Sending item data to player")
+		AIO.Handle(
+			player,
+			"GameMasterSystem",
+			"receiveItemData",
+			itemData,
+			offset,
+			pageSize,
+			hasMoreData,
+			inventoryType
+		)
+	end
+end
+
+-- Alias for backward compatibility if needed
+GameMasterSystem.handleItemCategory = GameMasterSystem.getItemData
+
+-- Function to search item data
+function GameMasterSystem.searchItemData(player, query, offset, pageSize, sortOrder, inventoryType)
+    if not query or query == "" then
+        return GameMasterSystem.getItemData(player, offset, pageSize, sortOrder, inventoryType)
+    end
+
+    -- Ensure parameters are valid
+    query = escapeString(query)
+    offset = tonumber(offset) or 0
+    pageSize = validatePageSize(pageSize or config.defaultPageSize)
+    sortOrder = validateSortOrder(sortOrder or "DESC")
+
+
+    local coreName = GetCoreName()
+    local searchQuery = getQuery(coreName, "searchItemData")(query, sortOrder, pageSize, offset, inventoryType)
+
+    if config.debug then
+        print("Item search query:", searchQuery)
+    end
+
+    local result = WorldDBQuery(searchQuery)
+    local itemData = {}
+
+    if result then
+        repeat
+            local item = {
+                entry = result:GetUInt32(0),
+                name = result:GetString(1),
+                description = result:GetString(2),
+                displayid = result:GetUInt32(3),
+                quality = result:GetUInt32(4),
+                inventoryType = result:GetUInt32(5),
+                itemLevel = result:GetUInt32(6),
+                class = result:GetUInt32(7),
+                subclass = result:GetUInt32(8),
+            }
+            table.insert(itemData, item)
+        until not result:NextRow()
+    end
+
+    local hasMoreData = #itemData == pageSize
+
+    if #itemData == 0 then
+        player:SendBroadcastMessage("No item data found for the search query: " .. query)
+    else
+        AIO.Handle(player, "GameMasterSystem", "receiveItemData", itemData, offset, pageSize, hasMoreData, inventoryType)
+    end
+end
+
+--  Function to ge the spell visual data
+function GameMasterSystem.getSpellVisualData(player, offset, pageSize, sortOrder)
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+
+	local coreName = GetCoreName()
+	local query = getQuery(coreName, "spellVisualData")(sortOrder, pageSize, offset)
+
+	local result = WorldDBQuery(query)
+
+	local spellVisualData = {}
+
+	if result then
+		repeat
+			local spellVisual = {
+				ID = result:GetUInt32(0),
+				Name = result:GetString(1),
+				FilePath = result:GetString(2),
+				AreaEffectSize = result:GetFloat(3),
+				Scale = result:GetFloat(4),
+				MinAllowedScale = result:GetFloat(5),
+				MaxAllowedScale = result:GetFloat(6),
+			}
+
+			table.insert(spellVisualData, spellVisual)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #spellVisualData == pageSize
+
+	if #spellVisualData == 0 then
+		player:SendBroadcastMessage("No spell visual data available for the given page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveSpellVisualData", spellVisualData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Function to search spell visual data
+function GameMasterSystem.searchSpellVisualData(player, query, offset, pageSize, sortOrder)
+	query = escapeString(query) -- Escape special characters
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+	local coreName = GetCoreName()
+
+	local searchQuery = getQuery(coreName, "searchSpellVisualData")(query, sortOrder, pageSize, offset)
+	local result = WorldDBQuery(searchQuery)
+	local spellVisualData = {}
+
+	if result then
+		repeat
+			local spellVisual = {
+				ID = result:GetUInt32(0),
+				Name = result:GetString(1),
+				FilePath = result:GetString(2),
+				AreaEffectSize = result:GetFloat(3),
+				Scale = result:GetFloat(4),
+				MinAllowedScale = result:GetFloat(5),
+				MaxAllowedScale = result:GetFloat(6),
+			}
+			table.insert(spellVisualData, spellVisual)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #spellVisualData == pageSize
+
+	if #spellVisualData == 0 then
+		player:SendBroadcastMessage("No spell visual data found for the given query and page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveSpellVisualData", spellVisualData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Function to query NPC data from the database with pagination
+function GameMasterSystem.getNPCData(player, offset, pageSize, sortOrder)
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+	local coreName = GetCoreName()
+	local query = getQuery(coreName, "npcData")(sortOrder, pageSize, offset)
+	local result = WorldDBQuery(query)
+	local npcData = {}
+
+	if result then
+		repeat
+			local npc = {
+				entry = result:GetUInt32(0),
+				modelid = {},
+				name = result:GetString(coreName == "TrinityCore" and 5 or 2),
+				subname = result:GetString(coreName == "TrinityCore" and 6 or 3),
+				type = result:GetUInt32(coreName == "TrinityCore" and 7 or 4),
+			}
+
+			if coreName == "TrinityCore" then
+				for i = 1, 4 do
+					local modelId = result:GetUInt32(i)
+					if modelId ~= 0 then
+						table.insert(npc.modelid, modelId)
+					end
+				end
+			elseif coreName == "AzerothCore" then
+				local modelId = result:GetUInt32(1)
+				if modelId ~= 0 then
+					table.insert(npc.modelid, modelId)
+				end
+			end
+
+			table.insert(npcData, npc)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #npcData == pageSize
+	if #npcData == 0 then
+		player:SendBroadcastMessage("No NPC data available for the given page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveNPCData", npcData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Server-side handler to search NPC data
+function GameMasterSystem.searchNPCData(player, query, offset, pageSize, sortOrder)
+	query = escapeString(query) -- Escape special characters
+	local typeId = nil
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+	local coreName = GetCoreName()
+
+	local typeQuery = query:match("^%((.-)%)$")
+	if typeQuery then
+		typeId = npcTypes[typeQuery]
+		if not typeId then
+			player:SendBroadcastMessage("Invalid NPC type: " .. typeQuery)
+			return
+		end
+	end
+
+	local searchQuery = getQuery(coreName, "searchNpcData")(query, typeId, sortOrder, pageSize, offset)
+	local result = WorldDBQuery(searchQuery)
+	local npcData = {}
+
+	if result then
+		repeat
+			local npc = {
+				entry = result:GetUInt32(0),
+				modelid = {},
+				name = result:GetString(coreName == "TrinityCore" and 5 or 2),
+				subname = result:GetString(coreName == "TrinityCore" and 6 or 3),
+				type = result:GetUInt32(coreName == "TrinityCore" and 7 or 4),
+			}
+
+			if coreName == "TrinityCore" then
+				for i = 1, 4 do
+					local modelId = result:GetUInt32(i)
+					if modelId ~= 0 then
+						table.insert(npc.modelid, modelId)
+					end
+				end
+			elseif coreName == "AzerothCore" then
+				local modelId = result:GetUInt32(1)
+				if modelId ~= 0 then
+					table.insert(npc.modelid, modelId)
+				end
+			end
+
+			table.insert(npcData, npc)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #npcData == pageSize
+	if #npcData == 0 then
+		player:SendBroadcastMessage("No NPC data found for the given query and page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveNPCData", npcData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Function to query GameObject data from the database with pagination
+function GameMasterSystem.getGameObjectData(player, offset, pageSize, sortOrder)
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+
+	local query = getQuery(GetCoreName(), "gobData")(sortOrder, pageSize, offset)
+
+	local result = WorldDBQuery(query)
+	local gobData = {}
+
+	if result then
+		repeat
+			local gob = {
+				entry = result:GetUInt32(0),
+				displayid = result:GetUInt32(1),
+				name = result:GetString(2),
+				modelName = result:GetString(3),
+			}
+			table.insert(gobData, gob)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #gobData == pageSize
+
+	if #gobData == 0 then
+		player:SendBroadcastMessage("No gameobject data available for the given page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveGameObjectData", gobData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Server-side handler to search GameObject data
+function GameMasterSystem.searchGameObjectData(player, query, offset, pageSize, sortOrder)
+	query = escapeString(query) -- Escape special characters
+	local typeId = nil
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+
+	-- Check if the query is enclosed in parentheses
+	local typeQuery = query:match("^%((.-)%)$")
+	if typeQuery then
+		typeQuery = typeQuery:lower() -- Convert the type query to lowercase
+		typeId = gameObjectTypes[typeQuery] -- Get the type ID from the extracted type name
+		if not typeId then
+			player:SendBroadcastMessage("Invalid GameObject type: " .. typeQuery)
+			return
+		end
+	end
+
+	local searchQuery = getQuery(GetCoreName(), "searchGobData")(query, typeId, sortOrder, pageSize, offset)
+	local result = WorldDBQuery(searchQuery)
+	local gobData = {}
+
+	if result then
+		repeat
+			local gob = {
+				entry = result:GetUInt32(0),
+				displayid = result:GetUInt32(1),
+				name = result:GetString(2),
+				type = result:GetUInt32(3),
+				modelName = result:GetString(4),
+			}
+			table.insert(gobData, gob)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #gobData == pageSize
+
+	if #gobData == 0 then
+		player:SendBroadcastMessage("No gameobject data found for the given query and page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveGameObjectData", gobData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Server-side handler to get the spell data for tab3
+function GameMasterSystem.getSpellData(player, offset, pageSize, sortOrder)
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+
+	local query = getQuery(GetCoreName(), "spellData")(sortOrder, pageSize, offset)
+
+	local result = WorldDBQuery(query)
+	local spellData = {}
+
+	if result then
+		repeat
+			local spell = {
+				spellID = result:GetUInt32(0),
+				spellName = result:GetString(1),
+				spellDescription = result:GetString(2),
+				spellToolTip = result:GetString(3),
+			}
+			table.insert(spellData, spell)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #spellData == pageSize
+
+	if #spellData == 0 then
+		player:SendBroadcastMessage("No spell data available for the given page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveSpellData", spellData, offset, pageSize, hasMoreData)
+	end
+end
+
+-- Server-side handler to search spell data
+function GameMasterSystem.searchSpellData(player, query, offset, pageSize, sortOrder)
+	query = escapeString(query) -- Escape special characters
+	sortOrder = validateSortOrder(sortOrder or "DESC")
+
+	local searchQuery = getQuery(GetCoreName(), "searchSpellData")(query, sortOrder, pageSize, offset)
+
+	local result = WorldDBQuery(searchQuery)
+	local spellData = {}
+
+	if result then
+		repeat
+			local spell = {
+				spellID = result:GetUInt32(0),
+				spellName = result:GetString(1),
+				spellDescription = result:GetString(2),
+				spellToolTip = result:GetString(3),
+			}
+			table.insert(spellData, spell)
+		until not result:NextRow()
+	end
+
+	local hasMoreData = #spellData == pageSize
+
+	if #spellData == 0 then
+		player:SendBroadcastMessage("No spell data found for the given query and page.")
+	else
+		AIO.Handle(player, "GameMasterSystem", "receiveSpellData", spellData, offset, pageSize, hasMoreData)
+	end
+end
+
+----------------------------------------------------------
+
+-- Usage Examples:
+-- sendErrorMessage(player, "Invalid spell ID.")
+-- sendSuccessMessage(player, "Spell learned successfully.")
+-- sendInfoMessage(player, "You have 10 seconds remaining.")
+-- sendWarningMessage(player, "Low health!")
+
+-- Entity action handlers using imported functions from entityHandlers
+function GameMasterSystem.spawnNpcEntity(player, entry)
+	entityHandlers.spawnNpcEntity(player, entry)
+end
+
+function GameMasterSystem.deleteNpcEntity(player, entry)
+	entityHandlers.deleteNpcEntity(player, entry)
+end
+
+function GameMasterSystem.morphNpcEntity(player, entry)
+	entityHandlers.morphNpcEntity(player, entry)
+end
+
+function GameMasterSystem.demorphNpcEntity(player)
+	entityHandlers.demorphNpcEntity(player)
+end
+
+function GameMasterSystem.spawnGameObject(player, entry)
+	entityHandlers.spawnGameObject(player, entry)
+end
+
+function GameMasterSystem.deleteGameObjectEntity(player, entry)
+	entityHandlers.deleteGameObjectEntity(player, entry)
+end
+
+function GameMasterSystem.spawnAndDeleteNpcEntity(player, entry)
+	entityHandlers.spawnAndDeleteNpcEntity(player, entry)
+end
+
+function GameMasterSystem.spawnAndDeleteGameObjectEntity(player, entry)
+	entityHandlers.spawnAndDeleteGameObjectEntity(player, entry)
+end
+
+function GameMasterSystem.duplicateNpcEntity(player, entry)
+    return entityHandlers.duplicateNpcEntity(player, entry)
+end
+
+function GameMasterSystem.duplicateGameObjectEntity(player, entry)
+    return entityHandlers.duplicateGameObjectEntity(player, entry)
+end
+
+function GameMasterSystem.duplicateItemEntity(player, entry)
+    return entityHandlers.duplicateItemEntity(player, entry)
+end
+
+
+-- Function to get the target of the player
+function GameMasterSystem.getTarget(player)
+	local target = player:GetSelection()
+	local isSelf = false
+
+	if not target then
+		sendMessage(player, "info", "No valid target selected. Defaulting to yourself.")
+		target = player
+		isSelf = true
+	else
+		sendMessage(player, "info", "Target selected: " .. target:GetName())
+	end
+
+	return target, isSelf
+end
+
+-- Server-side handler to add spell learnSpell
+function GameMasterSystem.learnSpellEntity(player, spellID)
+	local target, isSelf = GameMasterSystem.getTarget(player)
+
+	if not target:HasSpell(spellID) then
+		target:LearnSpell(spellID)
+		if isSelf then
+			sendMessage(player, "success", string.format("You have successfully learned spell (ID: %d).", spellID))
+		else
+			sendMessage(player, "success", string.format("Target has successfully learned spell (ID: %d).", spellID))
+		end
+	else
+		if isSelf then
+			sendMessage(player, "warning", string.format("You already know spell (ID: %d).", spellID))
+		else
+			sendMessage(player, "warning", string.format("Target already knows spell (ID: %d).", spellID))
+		end
+	end
+end
+
+-- Server-side handler to delete spell deleteEntitySpell
+function GameMasterSystem.deleteSpellEntity(player, spellID)
+	local target, isSelf = GameMasterSystem.getTarget(player)
+
+	if target:HasSpell(spellID) then
+		target:RemoveSpell(spellID)
+		if isSelf then
+			sendMessage(player, "success", string.format("You have successfully removed spell (ID: %d).", spellID))
+		else
+			sendMessage(player, "success", string.format("Target has successfully removed spell (ID: %d).", spellID))
+		end
+	else
+		if isSelf then
+			sendMessage(player, "warning", string.format("You do not know spell (ID: %d).", spellID))
+		else
+			sendMessage(player, "warning", string.format("Target does not know spell (ID: %d).", spellID))
+		end
+	end
+end
+
+-- Server-side handler to castSelfSpellEntity
+function GameMasterSystem.castSelfSpellEntity(player, spellID)
+	local target, isSelf = GameMasterSystem.getTarget(player)
+	if not target or isSelf then
+		sendMessage(player, "success", "Casting spell on yourself.")
+		player:CastSpell(player, spellID, true)
+	else
+		sendMessage(player, "success", "Cast spell on target.")
+		player:CastSpell(target, spellID, true)
+	end
+end
+
+-- Server-side handler to castTargetSpellEntity
+function GameMasterSystem.castTargetSpellEntity(player, spellID)
+	local target, isSelf = GameMasterSystem.getTarget(player)
+	if not isSelf then
+		sendMessage(player, "success", "Cast spell from target.")
+		target:CastSpell(player, spellID, true)
+	end
+end
+
+-- Server-side handler to add item to target or player
+-- Server-side handler to add item to target or player
+function GameMasterSystem.addItemEntity(player, itemID, amount)
+    print("Adding item to target or player" .. itemID .. " amount: " .. amount)
+    -- Validate inputs
+    itemID = tonumber(itemID)
+    amount = tonumber(amount) or 1
+
+
+
+    if not itemID or itemID <= 0 then
+        utils.sendMessage(player, "error", "Invalid item ID.")
+        return
+    end
+
+    if amount <= 0 or amount > 100 then
+        amount = 1 -- Sanitize amount
+    end
+
+    local target, isSelf = GameMasterSystem.getTarget(player)
+
+    -- Verify item exists
+    local itemQuery = WorldDBQuery("SELECT entry FROM item_template WHERE entry = " .. itemID)
+    if not itemQuery then
+        utils.sendMessage(player, "error", "Item ID " .. itemID .. " does not exist.")
+        return
+    end
+
+    local success = target:AddItem(itemID, amount)
+
+    if success then
+        if isSelf then
+            utils.sendMessage(player, "success", string.format("Added %d x item %d to your inventory.", amount, itemID))
+        else
+            utils.sendMessage(player, "success", string.format("Added %d x item %d to %s's inventory.",
+                amount, itemID, target:GetName()))
+        end
+    else
+        utils.sendMessage(player, "error", "Failed to add item. Inventory might be full.")
+    end
+end
+
+function GameMasterSystem.addItemEntityMax(player, itemID)
+    -- Validate inputs
+    itemID = tonumber(itemID)
+
+    if not itemID or itemID <= 0 then
+        utils.sendMessage(player, "error", "Invalid item ID.")
+        return
+    end
+
+    local target, isSelf = GameMasterSystem.getTarget(player)
+
+    -- Query item information from database
+    local itemQuery = WorldDBQuery(string.format(
+        "SELECT entry, name, stackable FROM item_template WHERE entry = %d",
+        itemID
+    ))
+
+    if not itemQuery then
+        utils.sendMessage(player, "error", "Item ID " .. itemID .. " does not exist.")
+        return
+    end
+
+    -- Get stack size
+    local itemName = itemQuery:GetString(1)
+    local maxStack = itemQuery:GetUInt32(2)
+
+    -- Ensure valid stack size
+    if not maxStack or maxStack <= 0 then
+        maxStack = 1
+    elseif maxStack > 1000 then
+        maxStack = 1000  -- Safety cap
+    end
+
+    -- Add item to target's inventory
+    local success = target:AddItem(itemID, maxStack)
+
+    if success then
+        if isSelf then
+            utils.sendMessage(
+                player,
+                "success",
+                string.format("Added maximum stack (%d) of %s to your inventory.",
+                    maxStack, itemName or "item #" .. itemID)
+            )
+        else
+            utils.sendMessage(
+                player,
+                "success",
+                string.format("Added maximum stack (%d) of %s to %s's inventory.",
+                    maxStack, itemName or "item #" .. itemID, target:GetName())
+            )
+        end
+    else
+        utils.sendMessage(player, "error", "Failed to add item. Inventory might be full.")
+    end
+end
+
+-- Check GM rank and handle GM level for GameMasterSystem
+function GameMasterSystem.handleGMLevel(player)
+	local gmRank = player:GetGMRank()
+	-- if gmRank < 2 then
+	--     player:SendBroadcastMessage("You do not have permission to use this command.")
+	--     return false
+	-- end
+
+	AIO.Handle(player, "GameMasterSystem", "receiveGmLevel", gmRank)
+	-- return true
+end
+
+-- send core to player with functions
+function GameMasterSystem.getCoreName(player)
+	local coreName = GetCoreName()
+	AIO.Handle(player, "GameMasterSystem", "receiveCoreName", coreName)
+end
+
+-- Player Management Functions
+function GameMasterSystem.getPlayerData(player, offset, pageSize, sortOrder)
+	print("[GameMasterSystem] getPlayerData called by", player:GetName())
+	
+	-- Send test ping to verify AIO is working
+	AIO.Handle(player, "GameMasterSystem", "testPing", "Testing AIO connection")
+	
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "ASC")
+	
+	local playerData = {}
+	local onlinePlayers = GetPlayersInWorld()
+	
+	print("[GameMasterSystem] Found", #onlinePlayers, "online players")
+	
+	-- Debug: Check what type onlinePlayers is
+	print("[GameMasterSystem] onlinePlayers type:", type(onlinePlayers))
+	if #onlinePlayers > 0 then
+		print("[GameMasterSystem] First player type:", type(onlinePlayers[1]))
+	end
+	
+	-- Sort players by name
+	table.sort(onlinePlayers, function(a, b)
+		if sortOrder == "ASC" then
+			return a:GetName() < b:GetName()
+		else
+			return a:GetName() > b:GetName()
+		end
+	end)
+	
+	-- Apply pagination
+	local startIdx = offset + 1
+	local endIdx = math.min(offset + pageSize, #onlinePlayers)
+	
+	print("[GameMasterSystem] Pagination: startIdx=", startIdx, "endIdx=", endIdx, "pageSize=", pageSize)
+	
+	for i = startIdx, endIdx do
+		local targetPlayer = onlinePlayers[i]
+		print("[GameMasterSystem] Processing player", i, ":", targetPlayer and targetPlayer:GetName() or "nil")
+		
+		if targetPlayer then
+			-- Wrap player data collection in pcall for error handling
+			local success, err = pcall(function()
+				local classInfo = {
+					[1] = {name = "Warrior", color = "C79C6E"},
+					[2] = {name = "Paladin", color = "F58CBA"},
+					[3] = {name = "Hunter", color = "ABD473"},
+					[4] = {name = "Rogue", color = "FFF569"},
+					[5] = {name = "Priest", color = "FFFFFF"},
+					[6] = {name = "Death Knight", color = "C41F3B"},
+					[7] = {name = "Shaman", color = "0070DE"},
+					[8] = {name = "Mage", color = "69CCF0"},
+					[9] = {name = "Warlock", color = "9482C9"},
+					[11] = {name = "Druid", color = "FF7D0A"}
+				}
+				
+				local raceInfo = {
+					[1] = "Human",
+					[2] = "Orc",
+					[3] = "Dwarf",
+					[4] = "Night Elf",
+					[5] = "Undead",
+					[6] = "Tauren",
+					[7] = "Gnome",
+					[8] = "Troll",
+					[10] = "Blood Elf",
+					[11] = "Draenei"
+				}
+				
+				-- Safely get player properties with nil checks
+				local name = targetPlayer:GetName() or "Unknown"
+				print("[GameMasterSystem] Getting data for player:", name)
+				
+				local class = targetPlayer:GetClass() or 1
+				local race = targetPlayer:GetRace() or 1
+				local level = targetPlayer:GetLevel() or 1
+				local guild = targetPlayer:GetGuild()
+				local totalMoney = targetPlayer:GetCoinage() or 0
+				local gold = math.floor(totalMoney / 10000)
+				
+				-- Try to get display ID, with fallback
+				local displayId = 0
+				local displaySuccess = pcall(function()
+					displayId = targetPlayer:GetDisplayId() or 0
+				end)
+				if not displaySuccess then
+					print("[GameMasterSystem] Warning: Could not get display ID for", name)
+					displayId = 0 -- Use 0 as fallback
+				end
+				
+				-- Try to get zone name
+				local zoneName = "Unknown"
+				local zoneSuccess = pcall(function()
+					zoneName = targetPlayer:GetZoneName() or "Unknown"
+				end)
+				if not zoneSuccess then
+					print("[GameMasterSystem] Warning: Could not get zone name for", name)
+				end
+				
+				local playerInfo = {
+					name = name,
+					level = level,
+					class = classInfo[class] and classInfo[class].name or "Unknown",
+					classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+					race = raceInfo[race] or "Unknown",
+					zone = zoneName,
+					gold = gold,
+					guildName = guild and guild:GetName() or nil,
+					online = true,
+					displayId = displayId
+				}
+				
+				print("[GameMasterSystem] Created playerInfo for", playerInfo.name)
+				print("[GameMasterSystem] Player details: Level", playerInfo.level, playerInfo.race, playerInfo.class)
+				table.insert(playerData, playerInfo)
+				print("[GameMasterSystem] playerData now has", #playerData, "entries")
+			end)
+			
+			if not success then
+				print("[GameMasterSystem] ERROR collecting player data:", err)
+			end
+		else
+			print("[GameMasterSystem] Warning: targetPlayer is nil at index", i)
+		end
+	end
+	
+	local hasMoreData = endIdx < #onlinePlayers
+	
+	print("[GameMasterSystem] Sending", #playerData, "players to client")
+	print("[GameMasterSystem] Data sample:", playerData[1] and playerData[1].name or "no data")
+	
+	-- Wrap AIO.Handle in pcall to catch any sending errors
+	local sendSuccess, sendErr = pcall(function()
+		AIO.Handle(player, "GameMasterSystem", "receivePlayerData", playerData, offset, pageSize, hasMoreData)
+	end)
+	
+	if sendSuccess then
+		print("[GameMasterSystem] Successfully sent player data to client")
+	else
+		print("[GameMasterSystem] ERROR sending player data:", sendErr)
+	end
+end
+
+function GameMasterSystem.searchPlayerData(player, query, offset, pageSize, sortOrder)
+	if not query or query == "" then
+		return GameMasterSystem.getPlayerData(player, offset, pageSize, sortOrder)
+	end
+	
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or config.defaultPageSize)
+	sortOrder = validateSortOrder(sortOrder or "ASC")
+	
+	local playerData = {}
+	local onlinePlayers = GetPlayersInWorld()
+	local matchingPlayers = {}
+	
+	-- Filter players by search query
+	query = query:lower()
+	for _, targetPlayer in ipairs(onlinePlayers) do
+		if targetPlayer:GetName():lower():find(query, 1, true) then
+			table.insert(matchingPlayers, targetPlayer)
+		end
+	end
+	
+	-- Sort matching players
+	table.sort(matchingPlayers, function(a, b)
+		if sortOrder == "ASC" then
+			return a:GetName() < b:GetName()
+		else
+			return a:GetName() > b:GetName()
+		end
+	end)
+	
+	-- Apply pagination to matching players
+	local startIdx = offset + 1
+	local endIdx = math.min(offset + pageSize, #matchingPlayers)
+	
+	for i = startIdx, endIdx do
+		local targetPlayer = matchingPlayers[i]
+		if targetPlayer then
+			-- Same player data collection as above
+			local classInfo = {
+				[1] = {name = "Warrior", color = "C79C6E"},
+				[2] = {name = "Paladin", color = "F58CBA"},
+				[3] = {name = "Hunter", color = "ABD473"},
+				[4] = {name = "Rogue", color = "FFF569"},
+				[5] = {name = "Priest", color = "FFFFFF"},
+				[6] = {name = "Death Knight", color = "C41F3B"},
+				[7] = {name = "Shaman", color = "0070DE"},
+				[8] = {name = "Mage", color = "69CCF0"},
+				[9] = {name = "Warlock", color = "9482C9"},
+				[11] = {name = "Druid", color = "FF7D0A"}
+			}
+			
+			local raceInfo = {
+				[1] = "Human",
+				[2] = "Orc",
+				[3] = "Dwarf",
+				[4] = "Night Elf",
+				[5] = "Undead",
+				[6] = "Tauren",
+				[7] = "Gnome",
+				[8] = "Troll",
+				[10] = "Blood Elf",
+				[11] = "Draenei"
+			}
+			
+			local class = targetPlayer:GetClass()
+			local race = targetPlayer:GetRace()
+			local guild = targetPlayer:GetGuild()
+			local totalMoney = targetPlayer:GetCoinage()
+			local gold = math.floor(totalMoney / 10000)
+			
+			local playerInfo = {
+				name = targetPlayer:GetName(),
+				level = targetPlayer:GetLevel(),
+				class = classInfo[class] and classInfo[class].name or "Unknown",
+				classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+				race = raceInfo[race] or "Unknown",
+				zone = targetPlayer:GetZoneName() or "Unknown",
+				gold = gold,
+				guildName = guild and guild:GetName() or nil,
+				online = true,
+				displayId = targetPlayer:GetDisplayId()
+			}
+			
+			print("[GameMasterSystem] Created playerInfo for", playerInfo.name)
+			table.insert(playerData, playerInfo)
+			print("[GameMasterSystem] playerData now has", #playerData, "entries")
+		end
+	end
+	
+	local hasMoreData = endIdx < #matchingPlayers
+	
+	AIO.Handle(player, "GameMasterSystem", "receivePlayerData", playerData, offset, pageSize, hasMoreData)
+end
+
+-- Player management action handlers
+function GameMasterSystem.givePlayerGold(player, targetName, amount)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	amount = tonumber(amount)
+	if not amount or amount <= 0 then
+		sendMessage(player, "error", "Invalid gold amount.")
+		return
+	end
+	
+	-- Convert gold to copper (1 gold = 10000 copper)
+	local copper = amount * 10000
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Give gold
+	targetPlayer:ModifyMoney(copper)
+	
+	-- Notify both players
+	sendMessage(player, "success", string.format("Gave %d gold to %s.", amount, targetName))
+	targetPlayer:SendBroadcastMessage(string.format("You received %d gold from GM %s.", amount, player:GetName()))
+end
+
+-- Handler for requesting items for the modal
+function GameMasterSystem.requestModalItems(player, searchText, category, qualitiesStr)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Convert qualities string back to table if needed
+	local qualities = {}
+	if qualitiesStr and qualitiesStr ~= "" then
+		if type(qualitiesStr) == "string" then
+			-- Split comma-separated string
+			for quality in string.gmatch(qualitiesStr, "[^,]+") do
+				table.insert(qualities, tonumber(quality))
+			end
+		elseif type(qualitiesStr) == "table" then
+			qualities = qualitiesStr
+		end
+	end
+	
+	-- Build the query
+	local query = "SELECT entry, name, Quality, ItemLevel, class, subclass, stackable, displayid FROM item_template WHERE 1=1"
+	
+	-- Add search filter
+	if searchText and searchText ~= "" then
+		query = query .. " AND (name LIKE '%" .. searchText .. "%' OR entry = '" .. searchText .. "')"
+	end
+	
+	-- Add category filter
+	if category and category ~= "all" then
+		if category == "weapon" then
+			query = query .. " AND class = 2"
+		elseif category == "armor" then
+			query = query .. " AND class = 4"
+		elseif category == "consumable" then
+			query = query .. " AND class = 0"
+		elseif category == "trade" then
+			query = query .. " AND class = 7"
+		elseif category == "quest" then
+			query = query .. " AND class = 12"
+		elseif category == "gem" then
+			query = query .. " AND class = 3"
+		elseif category == "misc" then
+			query = query .. " AND class = 15"
+		end
+	end
+	
+	-- Add quality filter
+	if qualities and #qualities > 0 then
+		local qualityStr = table.concat(qualities, ",")
+		query = query .. " AND Quality IN (" .. qualityStr .. ")"
+		print("[GameMasterSystem] Quality filter applied: " .. qualityStr)
+	end
+	
+	-- Limit results
+	query = query .. " ORDER BY Quality DESC, name ASC LIMIT 100"
+	
+	-- Execute query
+	local results = WorldDBQuery(query)
+	local items = {}
+	
+	if results then
+		repeat
+			local entry = results:GetUInt32(0)
+			local name = results:GetString(1)
+			local quality = results:GetUInt32(2)
+			local itemLevel = results:GetUInt32(3)
+			local class = results:GetUInt32(4)
+			local subclass = results:GetUInt32(5)
+			local maxStack = results:GetUInt32(6)
+			local displayId = results:GetUInt32(7)
+			
+			table.insert(items, {
+				entry = entry,
+				name = name,
+				quality = quality,
+				itemLevel = itemLevel,
+				class = class,
+				subclass = subclass,
+				maxStack = maxStack,
+				displayId = displayId,
+				link = "item:" .. entry .. ":0:0:0:0:0:0:0"
+			})
+		until not results:NextRow()
+	end
+	
+	-- Send data to client
+	AIO.Handle(player, "GameMasterSystem", "receiveModalItemData", items)
+end
+
+-- Handler for searching items in the modal
+function GameMasterSystem.searchItemsForModal(player, searchText, category, qualities)
+	-- Just redirect to requestModalItems with the search parameters
+	GameMasterSystem.requestModalItems(player, searchText, category, qualities)
+end
+
+function GameMasterSystem.givePlayerItem(player, targetName, itemId, count)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	itemId = tonumber(itemId)
+	count = tonumber(count) or 1
+	
+	if not itemId or itemId <= 0 then
+		sendMessage(player, "error", "Invalid item ID.")
+		return
+	end
+	
+	if count <= 0 then
+		count = 1
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Verify item exists
+	local itemQuery = WorldDBQuery("SELECT name FROM item_template WHERE entry = " .. itemId)
+	if not itemQuery then
+		sendMessage(player, "error", "Item ID " .. itemId .. " does not exist.")
+		return
+	end
+	
+	local itemName = itemQuery:GetString(0)
+	
+	-- Add item to target
+	local success = targetPlayer:AddItem(itemId, count)
+	
+	if success then
+		sendMessage(player, "success", string.format("Gave %dx %s to %s.", count, itemName, targetName))
+		targetPlayer:SendBroadcastMessage(string.format("You received %dx %s from GM %s.", count, itemName, player:GetName()))
+	else
+		sendMessage(player, "error", "Failed to give item. Target's inventory might be full.")
+	end
+end
+
+function GameMasterSystem.teleportToPlayer(player, targetName)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Teleport GM to player
+	player:Teleport(
+		targetPlayer:GetMapId(),
+		targetPlayer:GetX(),
+		targetPlayer:GetY(),
+		targetPlayer:GetZ(),
+		targetPlayer:GetO()
+	)
+	
+	sendMessage(player, "success", "Teleported to " .. targetName .. ".")
+end
+
+function GameMasterSystem.summonPlayer(player, targetName)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Summon player to GM
+	targetPlayer:Teleport(
+		player:GetMapId(),
+		player:GetX(),
+		player:GetY(),
+		player:GetZ(),
+		player:GetO()
+	)
+	
+	sendMessage(player, "success", "Summoned " .. targetName .. " to your location.")
+	targetPlayer:SendBroadcastMessage("You have been summoned by GM " .. player:GetName() .. ".")
+end
+
+function GameMasterSystem.kickPlayer(player, targetName, reason)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	reason = reason or "Kicked by GM"
+	
+	-- Kick the player
+	targetPlayer:KickPlayer()
+	
+	sendMessage(player, "success", string.format("Kicked %s. Reason: %s", targetName, reason))
+end
+
+function GameMasterSystem.sendPlayerMail(player, targetName, subject, body, gold)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Validate inputs
+	if not subject or subject == "" then
+		sendMessage(player, "error", "Mail subject cannot be empty.")
+		return
+	end
+	
+	if not body or body == "" then
+		sendMessage(player, "error", "Mail body cannot be empty.")
+		return
+	end
+	
+	gold = tonumber(gold) or 0
+	if gold < 0 then
+		gold = 0
+	end
+	
+	-- Convert gold to copper
+	local copper = gold * 10000
+	
+	-- Find target player (can be offline for mail)
+	local targetGuid = nil
+	local targetPlayer = GetPlayerByName(targetName)
+	
+	if targetPlayer then
+		targetGuid = targetPlayer:GetGUIDLow()
+	else
+		-- Try to find offline player
+		local result = CharDBQuery(string.format("SELECT guid FROM characters WHERE name = '%s'", targetName))
+		if result then
+			targetGuid = result:GetUInt32(0)
+		else
+			sendMessage(player, "error", "Player '" .. targetName .. "' not found.")
+			return
+		end
+	end
+	
+	-- Send mail using Eluna's SendMail function
+	-- SendMail(subject, body, receiverGuid, senderGuid, stationary, delay, money, cod, entry, amount)
+	SendMail(subject, body, targetGuid, player:GetGUIDLow(), 41, 0, copper, 0, 0, 0)
+	
+	sendMessage(player, "success", string.format("Mail sent to %s with subject: %s", targetName, subject))
+	
+	-- Notify online player
+	if targetPlayer then
+		targetPlayer:SendBroadcastMessage(string.format("You have received mail from GM %s.", player:GetName()))
+	end
+end
+
+-- Buff/Aura Management Functions
+function GameMasterSystem.applyBuffToPlayer(player, targetName, spellId)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	spellId = tonumber(spellId)
+	if not spellId or spellId <= 0 then
+		sendMessage(player, "error", "Invalid spell ID.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Apply the buff/aura using the correct Eluna API
+	-- The caster (GM) adds the aura to the target
+	player:AddAura(spellId, targetPlayer)
+	
+	sendMessage(player, "success", string.format("Applied buff (ID: %d) to %s.", spellId, targetName))
+	targetPlayer:SendBroadcastMessage(string.format("You received a buff from GM %s.", player:GetName()))
+end
+
+function GameMasterSystem.removePlayerAuras(player, targetName)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Remove all auras
+	targetPlayer:RemoveAllAuras()
+	
+	sendMessage(player, "success", string.format("Removed all auras from %s.", targetName))
+	targetPlayer:SendBroadcastMessage(string.format("All your auras have been removed by GM %s.", player:GetName()))
+end
+
+function GameMasterSystem.healAndRestorePlayer(player, targetName)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Full heal
+	targetPlayer:SetHealth(targetPlayer:GetMaxHealth())
+	
+	-- Restore mana/energy/rage
+	local powerType = targetPlayer:GetPowerType()
+	targetPlayer:SetPower(targetPlayer:GetMaxPower(powerType), powerType)
+	
+	-- Remove common debuffs by spell ID
+	-- Common debuff IDs in 3.3.5
+	local commonDebuffs = {
+		15007, -- Resurrection Sickness
+		25771, -- Forbearance
+		57723, -- Exhaustion (heroism/bloodlust debuff)
+		57724, -- Sated (heroism/bloodlust debuff)
+		26013, -- Deserter
+		-- Add more common debuffs as needed
+	}
+	
+	for _, debuffId in ipairs(commonDebuffs) do
+		if targetPlayer:HasAura(debuffId) then
+			targetPlayer:RemoveAura(debuffId)
+		end
+	end
+	
+	-- Alternative: Remove ALL auras (both positive and negative)
+	-- This is more thorough but also removes buffs
+	-- targetPlayer:RemoveAllAuras()
+	
+	sendMessage(player, "success", string.format("Fully healed and restored %s.", targetName))
+	targetPlayer:SendBroadcastMessage(string.format("You have been fully restored by GM %s.", player:GetName()))
+end
+
+function GameMasterSystem.makePlayerCastOnSelf(player, targetName, spellId)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	spellId = tonumber(spellId)
+	if not spellId or spellId <= 0 then
+		sendMessage(player, "error", "Invalid spell ID.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Make player cast spell on themselves
+	targetPlayer:CastSpell(targetPlayer, spellId, true)
+	
+	sendMessage(player, "success", string.format("Made %s cast spell (ID: %d) on themselves.", targetName, spellId))
+end
+
+function GameMasterSystem.makePlayerCastOnTarget(player, targetName, spellId)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	spellId = tonumber(spellId)
+	if not spellId or spellId <= 0 then
+		sendMessage(player, "error", "Invalid spell ID.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- Get player's target
+	local playersTarget = targetPlayer:GetSelection()
+	if not playersTarget then
+		sendMessage(player, "error", targetName .. " has no target selected.")
+		return
+	end
+	
+	-- Make player cast spell on their target
+	targetPlayer:CastSpell(playersTarget, spellId, true)
+	
+	sendMessage(player, "success", string.format("Made %s cast spell (ID: %d) on their target.", targetName, spellId))
+end
+
+function GameMasterSystem.castSpellOnPlayer(player, targetName, spellId)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	spellId = tonumber(spellId)
+	if not spellId or spellId <= 0 then
+		sendMessage(player, "error", "Invalid spell ID.")
+		return
+	end
+	
+	-- Find target player
+	local targetPlayer = GetPlayerByName(targetName)
+	if not targetPlayer then
+		sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+		return
+	end
+	
+	-- GM casts spell on target player
+	player:CastSpell(targetPlayer, spellId, true)
+	
+	sendMessage(player, "success", string.format("Cast spell (ID: %d) on %s.", spellId, targetName))
+	targetPlayer:SendBroadcastMessage(string.format("GM %s cast a spell on you.", player:GetName()))
+end
+
+-- Handler for searching spells from database
+function GameMasterSystem.searchSpells(player, searchText, offset, pageSize)
+	-- Validate GM permissions
+	if player:GetGMRank() < 2 then
+		sendMessage(player, "error", "You do not have permission to use this command.")
+		return
+	end
+	
+	offset = offset or 0
+	pageSize = validatePageSize(pageSize or 50)
+	
+	-- First get total count
+	local countQuery
+	if searchText and searchText ~= "" then
+		searchText = escapeString(searchText)
+		countQuery = string.format([[
+			SELECT COUNT(*) 
+			FROM spell 
+			WHERE spellName0 LIKE '%%%s%%' OR id = '%s'
+		]], searchText, searchText)
+	else
+		countQuery = [[
+			SELECT COUNT(*) 
+			FROM spell 
+			WHERE spellName0 != ''
+		]]
+	end
+	
+	local countResult = WorldDBQuery(countQuery)
+	local totalCount = 0
+	if countResult then
+		totalCount = countResult:GetUInt32(0)
+	end
+	
+	-- Now get the actual spells
+	local query
+	if searchText and searchText ~= "" then
+		-- Search by name or ID
+		query = string.format([[
+			SELECT id, spellName0 
+			FROM spell 
+			WHERE spellName0 LIKE '%%%s%%' OR id = '%s'
+			ORDER BY id ASC 
+			LIMIT %d OFFSET %d
+		]], searchText, searchText, pageSize, offset)
+	else
+		-- Get all spells
+		query = string.format([[
+			SELECT id, spellName0 
+			FROM spell 
+			WHERE spellName0 != '' 
+			ORDER BY id ASC 
+			LIMIT %d OFFSET %d
+		]], pageSize, offset)
+	end
+	
+	local result = WorldDBQuery(query)
+	local spells = {}
+	
+	if result then
+		repeat
+			local spellId = result:GetUInt32(0)
+			local spellName = result:GetString(1)
+			
+			-- Don't get icon on server side - client will get it
+			table.insert(spells, {
+				spellId = spellId,
+				name = spellName,
+				-- icon will be fetched on client side using GetSpellTexture
+			})
+		until not result:NextRow()
+	end
+	
+	-- Calculate if there are more results
+	local hasMoreData = (offset + #spells) < totalCount
+	
+	-- Send data to client with pagination info
+	AIO.Handle(player, "GameMasterSystem", "receiveSpellSearchResults", spells, offset, pageSize, hasMoreData, totalCount)
+end

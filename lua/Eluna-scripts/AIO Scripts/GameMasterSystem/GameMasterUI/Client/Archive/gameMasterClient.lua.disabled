@@ -1,0 +1,2674 @@
+-- AIO for TrinityCore 3.3.5 with WoW client 3.3.5
+local AIO = AIO or require("AIO")
+
+if AIO.AddAddon() then
+	return
+end
+
+GameMasterSystem = GameMasterSystem or AIO.AddHandlers("GameMasterSystem", {})
+
+-- Function tables for better organization and scoping
+local GMUtils = {}
+local UIManager = {}
+local ModelManager = {}
+local MenuHandler = {}
+local DataHandler = {}
+local CardFactory = {}
+
+-- Create the GameMasterSystem table for server communication
+-- GameMasterSystem = GameMasterSystem or {}
+
+-- Global state management (legacy)
+local DataStore = {}
+local coreName = ""
+local gmLevel = 3 -- Default to non-GM level
+
+-- State flags to track data fetching (legacy)
+local isGmLevelFetched = false
+local isCoreNameFetched = false
+
+-- Legacy variables for backward compatibility
+local contentFrames, mainFrame, currentOffset, activeTab, refreshButton, nextButton, prevButton, sortOrder, currentSearchQuery, hasMoreData
+
+-- Initialize legacy variables with default values
+currentOffset = 0
+activeTab = 1
+sortOrder = "ASC"
+currentSearchQuery = ""
+hasMoreData = false
+
+-- Add utility function to get item icon from item ID
+local function GetItemIcon(itemID)
+	if not itemID or itemID == 0 then
+		return nil
+	end
+
+	-- Use GetItemInfoInstant or fallback to GetItemInfo for better performance
+	local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice =
+		GetItemInfo(itemID)
+
+	-- Return the texture path or nil if not found
+	return itemTexture
+end
+
+-- ===========================================================================
+-- Configuration
+-- ===========================================================================
+local config = {
+	debug = false, -- Set to true for debugging
+	REQUIRED_GM_LEVEL = 2,
+	
+	-- Legacy properties for backward compatibility
+	BG_WIDTH = 800,
+	BG_HEIGHT = 600,
+	PAGE_SIZE = 15,
+	NUM_COLUMNS = 5,
+	NUM_ROWS = 3,
+	
+	-- Responsive sizing
+	ui = {
+		width = {
+			min = 600,
+			default = 800,
+			max = 1200,
+		},
+		height = {
+			min = 400,
+			default = 600,
+			max = 900,
+		},
+		padding = 10,
+		spacing = 5,
+	},
+	
+	-- Grid layout
+	grid = {
+		columns = {
+			small = 3,
+			medium = 4,
+			large = 5,
+		},
+		rows = 3,
+		pageSize = 15,
+	},
+	
+	-- Performance
+	performance = {
+		modelPoolSize = 15,
+		cacheTimeout = 300, -- 5 minutes
+		batchSize = 50,
+	},
+}
+
+-- Calculate responsive values
+function config.getResponsiveColumns(width)
+	if width < 700 then
+		return config.grid.columns.small
+	elseif width < 1000 then
+		return config.grid.columns.medium
+	else
+		return config.grid.columns.large
+	end
+end
+
+function config.getPageSize(width)
+	local columns = config.getResponsiveColumns(width)
+	return columns * config.grid.rows
+end
+-- Utility functions
+GMUtils.debug = function(...)
+	if config.debug then
+		print("DEBUG:", ...)
+	end
+end
+
+---Creates a custom timer that executes a function after a specified delay
+---@param delay number The delay in seconds before the function executes
+---@param func function The function to execute after the delay
+---@return void
+GMUtils.customTimer = function(delay, func)
+	local frame = CreateFrame("Frame")
+	local elapsed = 0
+	frame:SetScript("OnUpdate", function(self, delta)
+		elapsed = elapsed + delta
+		if elapsed >= delay then
+			func()
+			self:SetScript("OnUpdate", nil)
+		end
+	end)
+end
+
+-- --[[]]
+--     Creates a delayed execution of a function using a frame timer.
+
+--     @param delay number The delay in seconds before executing the function
+--     @param func function The function to execute after the delay
+
+--     Creates a hidden frame that tracks elapsed time and executes the provided function
+--     after the specified delay has passed. The frame is automatically cleaned up after
+--     execution.
+
+--     Example usage:
+--     DelayedExecution(2.5, function()
+--         print("This prints after 2.5 seconds")
+--     end)
+-- ]]
+GMUtils.delayedExecution = function(delay, func)
+	local elapsed = 0
+	local frame = CreateFrame("Frame")
+	frame:SetScript("OnUpdate", function(self, delta)
+		elapsed = elapsed + delta
+		if elapsed >= delay then
+			func()
+			self:SetScript("OnUpdate", nil)
+			self:Hide()
+		end
+	end)
+	frame:Show()
+end
+
+-- Trims leading and trailing spaces from a string.
+function GMUtils.trimSpaces(value)
+	return tostring(value):match("^%s*(.-)%s*$")
+end
+
+-- Creates a throttled version of a function that can only be called once per delay period
+function GMUtils.throttle(func, delay)
+	local lastCall = 0
+	return function(...)
+		local now = GetTime()
+		if now - lastCall >= delay then
+			lastCall = now
+			return func(...)
+		end
+	end
+end
+
+-- Function to calculate card dimensions based on mainFrame size
+UIManager.calculateCardDimensions = function(parent)
+	local parentWidth = parent:GetWidth()
+	local parentHeight = parent:GetHeight()
+
+	-- Calculate card dimensions as a fraction of the parent frame's size
+	local cardWidth = (parentWidth - 60) / config.NUM_COLUMNS
+	local cardHeight = (parentHeight - 120) / config.NUM_ROWS
+
+	return cardWidth, cardHeight
+end
+-- Constants for menu configuration
+local MENU_CONFIG = {
+	SIZE = {
+		WIDTH = 150,
+		HEIGHT = 200,
+	},
+	CONFIRM_DIALOG = {
+		TIMEOUT = 0,
+		PREFERRED_INDEX = 3,
+	},
+	TYPES = {
+		NPC = "npc",
+		GAMEOBJECT = "gameobject",
+		SPELL = "spell",
+		SPELLVISUAL = "spellvisual",
+		ITEM = "item",
+	},
+	DROPDOWN = {
+		MAX_DEPTH = 10,
+		DEFAULT_LEVEL = 1,
+		ITEM = {
+			WIDTH = 180,
+			MIN_WIDTH = 120,
+			PADDING = 20,
+			TEXT_OFFSET = 5,
+		},
+	},
+}
+local sortOptions = {
+	{
+		text = "Ascending",
+		value = "ASC",
+	},
+	{
+		text = "Descending",
+		value = "DESC",
+	}, -- Add more options here in the future
+}
+
+-- Then define CardTypes with access to updateCards
+local CardTypes = {
+	NPC = {
+		tabIndex = 1,
+		dataKey = "npcData",
+	},
+	GameObject = {
+		tabIndex = 2,
+		dataKey = "gobData",
+	},
+	Spell = {
+		tabIndex = 3,
+		dataKey = "spellData",
+	},
+	SpellVisual = {
+		tabIndex = 4,
+		dataKey = "spellVisualData",
+	},
+	Item = {
+		tabIndex = 5,
+		dataKey = "itemData",
+		updateCards = function(data)
+			updateCards("Item", data)
+		end,
+		-- Enhanced item category system
+		categories = {
+			Equipment = {
+				tabIndex = 100,
+				subCategories = {
+					Head = { tabIndex = 101, inventoryType = 1 },
+					Neck = { tabIndex = 102, inventoryType = 2 },
+					Shoulder = { tabIndex = 103, inventoryType = 3 },
+					Shirt = { tabIndex = 104, inventoryType = 4 },
+					Chest = { tabIndex = 105, inventoryType = 5 },
+					Waist = { tabIndex = 106, inventoryType = 6 },
+					Legs = { tabIndex = 107, inventoryType = 7 },
+					Feet = { tabIndex = 108, inventoryType = 8 },
+					Wrists = { tabIndex = 109, inventoryType = 9 },
+					Hands = { tabIndex = 110, inventoryType = 10 },
+					Finger = { tabIndex = 111, inventoryType = 11 },
+					Trinket = { tabIndex = 112, inventoryType = 12 },
+					Back = { tabIndex = 113, inventoryType = 16 },
+				},
+			},
+			Weapons = {
+				tabIndex = 200,
+				subCategories = {
+					OneHand = { tabIndex = 201, inventoryType = 13 },
+					TwoHand = { tabIndex = 202, inventoryType = 17 },
+					MainHand = { tabIndex = 203, inventoryType = 21 },
+					OffHand = { tabIndex = 204, inventoryType = 22 },
+					Ranged = { tabIndex = 205, inventoryType = 15 },
+				},
+			},
+			Misc = {
+				tabIndex = 300,
+				subCategories = {
+					NonEquip = { tabIndex = 301, inventoryType = 0 },
+					Bags = { tabIndex = 302, inventoryType = 18 },
+					Tabard = { tabIndex = 303, inventoryType = 19 },
+					Robe = { tabIndex = 304, inventoryType = 20 },
+					Ammo = { tabIndex = 305, inventoryType = 24 },
+					Thrown = { tabIndex = 306, inventoryType = 25 },
+					Relic = { tabIndex = 307, inventoryType = 28 },
+				},
+			},
+		},
+	},
+}
+
+-- Constants for tab types
+local TAB_TYPES = {
+	CREATURE = 1,
+	OBJECT = 2,
+	SPELL = 3,
+	SPELL_VISUAL = 4,
+	ITEM = {
+		ALL = 5,
+		CATEGORY = 50, -- New constant for dynamic item category handling
+	},
+}
+
+-- Helper function to create category menu items
+local function createCategoryMenuItem(text, slot)
+	return {
+		text = string.format("%s (%d)", text, slot),
+		func = function()
+			config.showTab(contentFrames, slot, { resetOffset = true, handleSearch = true })
+		end,
+		notCheckable = true,
+	}
+end
+
+-- Generate equipment, weapons, and misc menu items
+local function generateSubMenuItems()
+	local equipmentMenu = {}
+	local equipment = CardTypes.Item.categories.Equipment.subCategories
+	for subName, subCategory in pairs(equipment) do
+		table.insert(equipmentMenu, createCategoryMenuItem(subName, subCategory.tabIndex))
+	end
+
+	local weaponsMenu = {}
+	local weapons = CardTypes.Item.categories.Weapons.subCategories
+	for subName, subCategory in pairs(weapons) do
+		table.insert(weaponsMenu, createCategoryMenuItem(subName, subCategory.tabIndex))
+	end
+
+	local miscMenu = {}
+	local misc = CardTypes.Item.categories.Misc.subCategories
+	for subName, subCategory in pairs(misc) do
+		table.insert(miscMenu, createCategoryMenuItem(subName, subCategory.tabIndex))
+	end
+
+	return {
+		{
+			text = "Equipment",
+			notCheckable = true,
+			subItems = equipmentMenu,
+		},
+		{
+			text = "Weapons",
+			notCheckable = true,
+			subItems = weaponsMenu,
+		},
+		{
+			text = "Misc",
+			notCheckable = true,
+			subItems = miscMenu,
+		},
+	}
+end
+
+-- Main menu structure
+local menuItems = {
+	{
+		text = "Creature",
+		func = function()
+			config.showTab(contentFrames, TAB_TYPES.CREATURE, { resetOffset = true, handleSearch = true })
+		end,
+		notCheckable = true,
+	},
+	{
+		text = "Objects",
+		func = function()
+			config.showTab(contentFrames, TAB_TYPES.OBJECT, { resetOffset = true, handleSearch = true })
+		end,
+		notCheckable = true,
+	},
+	{
+		text = "Spell",
+		notCheckable = true,
+		subItems = {
+			{
+				text = "Spell",
+				func = function()
+					config.showTab(contentFrames, TAB_TYPES.SPELL, { resetOffset = true, handleSearch = true })
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Spell Visual",
+				func = function()
+					config.showTab(contentFrames, TAB_TYPES.SPELL_VISUAL, { resetOffset = true, handleSearch = true })
+				end,
+				notCheckable = true,
+			},
+		},
+	},
+	{
+		text = "Items",
+		notCheckable = true,
+		subItems = {
+			{
+				text = "Search Items",
+				func = function()
+					config.showTab(contentFrames, TAB_TYPES.ITEM.ALL, { resetOffset = true, handleSearch = true })
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Item Categories",
+				notCheckable = true,
+				subItems = generateSubMenuItems(),
+			},
+		},
+	},
+}
+
+-- Improved menu item validation
+local function isValidMenuItem(item)
+	return item and type(item.text) == "string" and (item.func == nil or type(item.func) == "function")
+end
+
+-- Get submenu items based on path
+local function getSubmenuItems(path)
+	if not path then
+		return menuItems
+	end
+
+	local indices = { strsplit(",", path) }
+	local currentItems = menuItems
+
+	for _, indexStr in ipairs(indices) do
+		local menuIndex = tonumber(indexStr)
+		if not menuIndex or not currentItems or not currentItems[menuIndex] or not currentItems[menuIndex].subItems then
+			return nil
+		end
+		currentItems = currentItems[menuIndex].subItems
+	end
+
+	return currentItems
+end
+
+-- Update handleMenuLevel to use new config name
+local function handleMenuLevel(info, items, level, menuPath)
+	level = level or MENU_CONFIG.DROPDOWN.DEFAULT_LEVEL
+	if not items or type(items) ~= "table" or level > MENU_CONFIG.DROPDOWN.MAX_DEPTH then
+		return
+	end
+
+	for index, item in ipairs(items) do
+		if isValidMenuItem(item) then
+			wipe(info)
+			info.text = item.text
+			info.notCheckable = item.notCheckable
+			info.padding = MENU_CONFIG.DROPDOWN.ITEM.PADDING
+			info.leftPadding = MENU_CONFIG.DROPDOWN.ITEM.TEXT_OFFSET
+			info.minWidth = MENU_CONFIG.DROPDOWN.ITEM.MIN_WIDTH
+			info.tooltipOnButton = true
+
+			-- -- Check if item.func is a valid function
+			-- if type(item.func) == "function" then
+			-- 	info.func = item.func
+			-- else
+			-- 	info.func = nil
+			-- 	info.notClickable = true
+			-- end
+
+			-- Extend clickable area
+			info.customFrame = true
+			info.func = item.func
+
+			-- Add submenu handling
+			if item.subItems and type(item.subItems) == "table" and #item.subItems > 0 then
+				info.hasArrow = true
+				local newPath = menuPath and (menuPath .. "," .. index) or tostring(index)
+				info.menuList = newPath
+			end
+
+			UIDropDownMenu_AddButton(info, level)
+		end
+	end
+end
+
+-- Main initialization function
+local function initializeDropdownMenu(frame, level, menuList)
+	if not frame then
+		return
+	end
+	level = level or MENU_CONFIG.DROPDOWN.DEFAULT_LEVEL
+
+	-- print("Menu levels are: ", level)
+
+	local info = UIDropDownMenu_CreateInfo()
+	level = level or MENU_CONFIG.DEFAULT_LEVEL
+
+	local currentItems = getSubmenuItems(menuList)
+	if currentItems and type(currentItems) == "table" then
+		handleMenuLevel(info, currentItems, level, menuList)
+		-- print("Menu list is: ", menuList)
+	end
+end
+
+-- Define handlers table
+local handlers = {
+	[1] = {
+		get = "getNPCData",
+		search = "searchNPCData",
+	},
+	[2] = {
+		get = "getGameObjectData",
+		search = "searchGameObjectData",
+	},
+	[3] = {
+		get = "getSpellData",
+		search = "searchSpellData",
+	},
+	[4] = {
+		get = "getSpellVisualData",
+		search = "searchSpellVisualData",
+	},
+	[5] = {
+		get = "getItemData",
+		search = "searchItemData",
+	},
+}
+
+-- Function to get handler for any tab
+local function getHandler(tabIndex)
+	-- Return the direct handler if it exists
+	if handlers[tabIndex] then
+		return handlers[tabIndex]
+	end
+
+	-- Check if it's an item subcategory (ranges 100-399)
+	if tabIndex >= 100 and tabIndex < 400 then
+		return {
+			get = "getItemData",
+			search = "searchItemData",
+		}
+	end
+
+	-- Default fallback
+	return nil
+end
+
+-- -- log every handlers
+-- for k, v in pairs(handlers) do
+-- 	for k2, v2 in pairs(v) do
+-- 		print(k, k2, v2)
+-- 	end
+-- end
+function config.handleAIO(tabIndex, query, offset, pageSize, order)
+	if not tabIndex then
+		GMUtils.debug("tabIndex is nil")
+		return
+	end
+	
+	-- Only log when there's a search query
+	if query and query ~= "" then
+		GMUtils.debug("handleAIO search:", "tab=", tabIndex, "query=", query)
+	end
+
+	local handler = getHandler(tabIndex)
+	if not handler then
+		GMUtils.debug("No handler found for tab:", tabIndex)
+		return
+	end
+
+	-- Find inventory type for category tabs
+	local inventoryType = nil
+
+	-- Check if this is a subcategory tab
+	if tabIndex >= 100 and tabIndex < 400 then
+		-- Look through all categories and subcategories to find the matching tab
+		for categoryName, category in pairs(CardTypes.Item.categories) do
+			for subName, subCategory in pairs(category.subCategories) do
+				if subCategory.tabIndex == tabIndex then
+					inventoryType = subCategory.inventoryType
+					break
+				end
+			end
+			if inventoryType then
+				break
+			end
+		end
+	end
+
+	if query == "" then
+		-- Handle normal data fetch
+		-- GMUtils.debug("Fetching data without search")
+		if handler.get == "getItemData" and inventoryType then
+			-- GMUtils.debug("Calling", handler.get, "with inventoryType", inventoryType)
+			AIO.Handle("GameMasterSystem", handler.get, offset, pageSize, order, inventoryType)
+		else
+			-- GMUtils.debug("Calling", handler.get)
+			AIO.Handle("GameMasterSystem", handler.get, offset, pageSize, order)
+		end
+	else
+		-- Handle search
+		GMUtils.debug("Searching with query:", query)
+		if handler.search == "searchItemData" and inventoryType then
+			GMUtils.debug("Calling", handler.search, "with query", query, "and inventoryType", inventoryType)
+			AIO.Handle("GameMasterSystem", handler.search, query, offset, pageSize, order, inventoryType)
+		else
+			GMUtils.debug("Calling", handler.search, "with query", query)
+			AIO.Handle("GameMasterSystem", handler.search, query, offset, pageSize, order)
+		end
+	end
+end
+-- Create content frames such as NPC, GameObject, Spell, etc.
+local function createContentFrames(parent, tabConfig)
+	local frames = {}
+	if not tabConfig then
+		GMUtils.debug("tabConfig is nil")
+		return frames
+	end
+
+	-- Create frames for main menu items
+	for i, tab in ipairs(tabConfig) do
+		local frame = CreateFrame("Frame", nil, parent)
+		frame:SetSize(parent:GetWidth(), parent:GetHeight())
+		frame:SetPoint("TOP", parent, "TOP", 0, -40)
+		frame:Hide()
+		frames[i] = frame
+	end
+
+	-- Create a single frame for item categories with ID 50
+	frames[TAB_TYPES.ITEM.CATEGORY] = CreateFrame("Frame", nil, parent)
+	frames[TAB_TYPES.ITEM.CATEGORY]:SetSize(parent:GetWidth(), parent:GetHeight())
+	frames[TAB_TYPES.ITEM.CATEGORY]:SetPoint("TOP", parent, "TOP", 0, -40)
+	frames[TAB_TYPES.ITEM.CATEGORY]:Hide()
+
+	-- Create frames for main category sections
+	for categoryName, category in pairs(CardTypes.Item.categories) do
+		frames[category.tabIndex] = CreateFrame("Frame", nil, parent)
+		frames[category.tabIndex]:SetSize(parent:GetWidth(), parent:GetHeight())
+		frames[category.tabIndex]:SetPoint("TOP", parent, "TOP", 0, -40)
+		frames[category.tabIndex]:Hide()
+
+		-- Create frames for subcategories
+		for subName, subCategory in pairs(category.subCategories) do
+			frames[subCategory.tabIndex] = CreateFrame("Frame", nil, parent)
+			frames[subCategory.tabIndex]:SetSize(parent:GetWidth(), parent:GetHeight())
+			frames[subCategory.tabIndex]:SetPoint("TOP", parent, "TOP", 0, -40)
+			frames[subCategory.tabIndex]:Hide()
+		end
+	end
+
+	return frames
+end
+
+-- Function to show the tab
+function config.showTab(frames, index, options)
+	options = options or {}
+
+	-- Store previous tab for cleanup
+	local previousTab = activeTab
+	activeTab = index
+
+	-- Clear previous tab content
+	if previousTab and frames[previousTab] then
+		local prevFrame = frames[previousTab]
+		if prevFrame.cards then
+			for _, card in ipairs(prevFrame.cards) do
+				if card then
+					card:Hide()
+					card:SetParent(nil)
+					card:ClearAllPoints()
+				end
+			end
+			wipe(prevFrame.cards)
+		end
+		prevFrame:Hide()
+	end
+
+	-- Reset pagination if requested
+	if options.resetOffset then
+		currentOffset = 0
+	end
+
+	-- Update tab visibility with forced cleanup
+	for i, frame in ipairs(frames) do
+		if i == index then
+			frame:Show()
+			frame.cards = frame.cards or {}
+		else
+			frame:Hide()
+			collectgarbage("collect")
+		end
+	end
+
+	-- Handle search and pagination if configured
+	if options.handleSearch then
+		config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+	end
+
+	-- Execute callback if provided
+	if options.onSwitch then
+		options.onSwitch(index)
+	end
+end
+
+-- Constants for search functionality
+local SEARCH_LOGIC_CONFIG = {
+	DEFAULT_THRESHOLD = 3,
+	SEARCH_FIELDS = {
+		NPC = { "entry", "name", "subname", "modelid" },
+		GameObject = { "entry", "name", "displayid" },
+		Item = { "entry", "name", "displayid" },
+		Spell = { "entry", "name", "description" },
+	},
+}
+
+-- Improved fuzzy match with caching
+local matchCache = setmetatable({}, { __mode = "kv" })
+local function fuzzyMatch(str1, str2, threshold)
+	local cacheKey = str1 .. "|" .. str2 .. "|" .. threshold
+	if matchCache[cacheKey] ~= nil then
+		return matchCache[cacheKey]
+	end
+
+	local distance = Levenshtein(str1:lower(), str2:lower())
+	local result = distance <= threshold
+	matchCache[cacheKey] = result
+	return result
+end
+
+-- Generic value matcher
+local function matchValue(value, query, threshold)
+	if type(value) == "table" then
+		for _, v in ipairs(value) do
+			if fuzzyMatch(tostring(v), query, threshold) then
+				return true
+			end
+		end
+		return false
+	end
+	return fuzzyMatch(tostring(value), query, threshold)
+end
+
+-- Unified entity filter
+local function filterEntities(cardType, query)
+	local searchFields = SEARCH_LOGIC_CONFIG.SEARCH_FIELDS[cardType]
+	local data = DataStore[CardTypes[cardType].dataKey]
+
+	if not data then
+		GMUtils.debug(cardType .. " data is nil")
+		return {}
+	end
+
+	local threshold = SEARCH_LOGIC_CONFIG.DEFAULT_THRESHOLD
+	local filteredData = {}
+
+	for _, entity in ipairs(data) do
+		for _, field in ipairs(searchFields) do
+			if entity[field] and matchValue(entity[field], query, threshold) then
+				table.insert(filteredData, entity)
+				break
+			end
+		end
+	end
+
+	return filteredData
+end
+
+-- Setup filter functions for each card type
+for cardType in pairs(CardTypes) do
+	config["filter" .. cardType .. "Cards"] = function(query)
+		local filteredData = filterEntities(cardType, query)
+		config["update" .. cardType .. "Cards"](filteredData)
+	end
+end
+-- Copy the icon path to the clipboard
+local function copyIcon(entity)
+	local entry = tostring(entity.spellID):match("^%s*(.-)%s*$") -- Trim spaces
+	local name, rank, icon = GetSpellInfo(entry)
+	if icon then
+		local editBox = CreateFrame("EditBox")
+		editBox:SetText(tostring(icon))
+		editBox:HighlightText()
+		editBox:SetScript("OnEscapePressed", function(self)
+			self:ClearFocus()
+			self:Hide()
+		end)
+		editBox:SetScript("OnEnterPressed", function(self)
+			self:ClearFocus()
+			self:Hide()
+		end)
+		editBox:SetScript("OnEditFocusLost", function(self)
+			self:Hide()
+		end)
+		editBox:Show()
+		editBox:SetFocus()
+		print("Ctrl+C to copy the path")
+	else
+		print("|cffff0000Icon not found for spell ID:|r", entry)
+	end
+end
+-- Add tooltip to the pagination buttons
+local function addSimpleTooltip(button, text)
+	button:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(text, nil, nil, nil, nil, true)
+		GameTooltip:Show()
+	end)
+	button:SetScript("OnLeave", function(self)
+		GameTooltip:Hide()
+	end)
+end
+
+-- hasMoreData is now declared with other legacy variables at the top
+
+-- Function to update pagination buttons based on data availability
+local function updatePaginationButtons(hasMoreDataFlag)
+	hasMoreData = hasMoreDataFlag -- Update the global variable
+
+	if hasMoreData then
+		nextButton:Enable()
+	else
+		nextButton:Disable()
+	end
+
+	if currentOffset > 0 then
+		prevButton:Enable()
+	else
+		prevButton:Disable()
+	end
+end
+
+-- Constants for scroll configuration
+local SCROLL_CONFIG = {
+	NORMAL_JUMP = 1,
+	FAST_JUMP = 100,
+	MIN_OFFSET = 0,
+}
+
+-- Function to calculate new scroll offset with improved boundary handling
+local function calculateNewOffset(currentOffset, delta, hasMore, isShiftDown)
+	-- Determine the appropriate scroll amount based on modifier keys
+	local jumpSize = isShiftDown and SCROLL_CONFIG.FAST_JUMP or SCROLL_CONFIG.NORMAL_JUMP
+
+	if delta > 0 then
+		-- Scrolling up - decrease offset with minimum boundary check
+		return math.max(SCROLL_CONFIG.MIN_OFFSET, currentOffset - jumpSize)
+	elseif delta < 0 and hasMore then
+		-- Scrolling down - only increase if more data exists
+		return currentOffset + jumpSize
+	end
+
+	-- Return unchanged if no valid scroll action
+	return currentOffset
+end
+
+-- Function to enable mouse wheel scrolling for page navigation
+local function enableMouseWheelScrolling(frame)
+	if not frame then
+		error("Frame is required for mouse wheel scrolling")
+	end
+
+	frame:EnableMouseWheel(true)
+	frame:SetScript("OnMouseWheel", function(self, delta)
+		-- Check if shift is held for fast scrolling
+		local isShiftDown = IsShiftKeyDown()
+
+		-- Calculate new offset based on scroll direction and modifiers
+		local newOffset = calculateNewOffset(currentOffset, delta, hasMoreData, isShiftDown)
+
+		-- Only update if the offset actually changed
+		if newOffset ~= currentOffset then
+			currentOffset = newOffset
+			config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+		end
+	end)
+end
+
+-- Helper function to create pagination button
+local function createPaginationButton(parent, text, anchor, offset, tooltip)
+	local button = CreateFrame("Button", nil, parent, "GameMenuButtonTemplate")
+	button:SetSize(100, 30)
+	button:SetPoint(anchor, parent, anchor, offset, 10)
+	button:SetText(text)
+	button:SetNormalFontObject("GameFontNormal")
+	button:SetHighlightFontObject("GameFontHighlight")
+	addSimpleTooltip(button, tooltip .. "\nYou can also use the scroll wheel to move pages")
+	return button
+end
+
+-- Function to handle pagination
+local function createPaginationButtons(parent)
+	nextButton = createPaginationButton(parent, "Next", "BOTTOMRIGHT", -10, "Click to go to the next page")
+
+	prevButton = createPaginationButton(parent, "Previous", "BOTTOMLEFT", 10, "Click to go to the previous page")
+
+	nextButton:SetScript("OnClick", function()
+		if nextButton:IsEnabled() then
+			currentOffset = currentOffset + 1
+			config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+		end
+	end)
+
+	prevButton:SetScript("OnClick", function()
+		if currentOffset > 0 then
+			currentOffset = currentOffset - 1
+			config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+		end
+	end)
+end
+
+-- Generic card generator factory
+local function createCardGenerator(cardType)
+	return function(parent, data)
+		return config.generateCards(parent, data, cardType)
+	end
+end
+
+-- Create generator functions for each card type
+local CardGenerators = {}
+for cardType in pairs(CardTypes) do
+	CardGenerators[cardType] = createCardGenerator(cardType)
+end
+
+-- Define updateCards function after CardTypes
+function updateCards(cardType, data)
+	if config.debug then
+		print("Updating cards for type:", cardType)
+		print("Data count:", #data)
+	end
+
+	if not contentFrames then
+		GMUtils.debug("contentFrames not initialized")
+		return
+	end
+
+	-- Special handling for item subcategories
+	local frameIndex = activeTab
+	if not frameIndex then
+		GMUtils.debug("No active tab index")
+		return
+	end
+
+	local contentFrame = contentFrames[frameIndex]
+	if not contentFrame then
+		print("Content frame not found for frame index:", frameIndex)
+		return
+	end
+
+	-- Clear and hide existing cards
+	if contentFrame.cards then
+		for _, card in ipairs(contentFrame.cards) do
+			if card and card.Hide then
+				card:Hide()
+				card:SetParent(nil) -- Detach from parent
+			end
+		end
+		wipe(contentFrame.cards) -- Clear the table
+	else
+		contentFrame.cards = {} -- Initialize if nil
+	end
+
+	if config.debug then
+		print("Creating new cards for:", cardType)
+	end
+
+	-- Generate new cards using config.generateCards
+	contentFrame.cards = config.generateCards(contentFrame, data, cardType)
+
+	-- Add a delay before showing cards to allow models to load
+	-- GMUtils.customTimer(0.1, function()
+	-- 	for _, card in ipairs(contentFrame.cards) do
+	-- 		card:Show()
+	-- 	end
+	-- end)
+end
+
+-- Generic data receiver
+function GameMasterSystem.receiveData(player, cardType, data, offset, pageSize, hasMoreData)
+	GMUtils.debug("Received data for", cardType, "- Count:", #data, "Offset:", offset, "HasMore:", hasMoreData)
+	local config = CardTypes[cardType]
+	DataStore[config.dataKey] = data
+	updateCards(cardType, data)
+	currentOffset = offset
+	updatePaginationButtons(hasMoreData)
+end
+
+-- Setup receivers for each card type
+for cardType in pairs(CardTypes) do
+	GameMasterSystem["receive" .. cardType .. "Data"] = function(player, data, offset, pageSize, hasMoreData)
+		GameMasterSystem.receiveData(player, cardType, data, offset, pageSize, hasMoreData)
+	end
+
+	-- Setup update functions in config
+	config["update" .. cardType .. "Cards"] = function(filteredData)
+		updateCards(cardType, filteredData)
+	end
+end
+
+-- Function to create the dropdown menu for sorting order
+local function createSortOrderDropdown(parent)
+	GMUtils.debug("Creating sort order dropdown")
+	local dropdown = CreateFrame("Frame", "SortOrderDropdown", parent, "UIDropDownMenuTemplate")
+	dropdown:SetPoint("TOPLEFT", parent, "TOPLEFT", 200, -10) -- Move it a bit to the right to avoid overlap
+	local maxTextLength = 0
+	for _, option in ipairs(sortOptions) do
+		local textLength = string.len(option.text)
+		if textLength > maxTextLength then
+			maxTextLength = textLength
+		end
+	end
+
+	local width = math.max(maxTextLength * 8, 100) -- Minimum width of 100
+	UIDropDownMenu_SetWidth(dropdown, width)
+	UIDropDownMenu_SetText(dropdown, "Sort Order")
+	GMUtils.debug("Sort dropdown width set to", width)
+
+	local function OnClick(self)
+		sortOrder = self.value
+		UIDropDownMenu_SetSelectedValue(dropdown, self.value)
+		currentOffset = 0 -- Reset offset when sort order changes
+		config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+	end
+
+	local function initialize(self, level)
+		local info = UIDropDownMenu_CreateInfo()
+		for _, option in ipairs(sortOptions) do
+			info.text = option.text
+			info.value = option.value
+			info.func = OnClick
+			info.checked = (sortOrder == option.value)
+			UIDropDownMenu_AddButton(info, level)
+		end
+	end
+
+	UIDropDownMenu_Initialize(dropdown, initialize)
+	
+	-- Make sure dropdown is visible
+	dropdown:Show()
+	GMUtils.debug("Sort order dropdown created and shown")
+	
+	return dropdown
+end
+
+--  Create the main frame
+local function createMainFrame()
+	local frame = CreateFrame("Frame", "MainFrame", UIParent)
+	frame:SetSize(config.BG_WIDTH, config.BG_HEIGHT)
+
+	frame:SetPoint("CENTER")
+	frame:SetMovable(true)
+	frame:EnableMouse(true)
+	frame:RegisterForDrag("LeftButton")
+	frame:SetScript("OnDragStart", frame.StartMoving)
+	frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+	-- frame:SetClampedToScreen(true)
+	frame:Hide()
+
+	local backdrop = {
+		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true,
+		tileSize = 16,
+		edgeSize = 16,
+		insets = {
+			left = 4,
+			right = 4,
+			top = 4,
+			bottom = 4,
+		},
+	}
+	frame:SetBackdrop(backdrop)
+	frame:SetBackdropColor(0, 0.5, 0.5, 1)
+
+	-- Close button
+	local closeButton = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+	closeButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -3, -3)
+	closeButton:SetScript("OnClick", function()
+		frame:Hide()
+	end)
+
+	frame.title = frame:CreateFontString(nil, "OVERLAY")
+	frame.title:SetFontObject("GameFontHighlight")
+	frame.title:SetPoint("TOP", frame, "TOP", 0, -10)
+	frame.title:SetText("Game Master UI")
+
+	-- Create the dropdown menu frame
+	local dropdownMenu = CreateFrame("Frame", "DropdownMenu", frame, "UIDropDownMenuTemplate")
+	dropdownMenu:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -10)
+	UIDropDownMenu_Initialize(dropdownMenu, initializeDropdownMenu)
+	UIDropDownMenu_SetText(dropdownMenu, "Select Category")
+
+	return frame
+end
+
+-- Define the function to create the Kofi frame
+local function createKofiFrame()
+	-- Define Kofi variables
+	local kofiName = "https://ko-fi.com/clotic"
+	local kofiQR = "Interface\\GameMasterUI\\qrcode_cropped.blp"
+
+	-- Create the Kofi Frame (initially hidden)
+	local kofiFrame = CreateFrame("Frame", "KofiFrame", UIParent)
+	kofiFrame:SetSize(300, 400)
+	kofiFrame:SetPoint("RIGHT", mainFrame, "RIGHT", mainFrame:GetWidth() / 2.6, 0)
+	kofiFrame:SetFrameStrata("DIALOG")
+	kofiFrame:SetBackdrop({
+		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+		tile = true,
+		tileSize = 32,
+		edgeSize = 32,
+		insets = { left = 8, right = 8, top = 8, bottom = 8 },
+	})
+	kofiFrame:Hide()
+
+	-- Create the Close Button
+	local kofiCloseButton = CreateFrame("Button", nil, kofiFrame, "UIPanelCloseButton")
+	kofiCloseButton:SetPoint("TOPRIGHT", kofiFrame, "TOPRIGHT", -5, -5)
+	kofiCloseButton:SetScript("OnClick", function()
+		kofiFrame:Hide()
+	end)
+
+	-- Add the QR code texture
+	local qrTexture = kofiFrame:CreateTexture(nil, "BACKGROUND")
+	qrTexture:SetTexture(kofiQR)
+	qrTexture:SetSize(200, 200)
+	qrTexture:SetPoint("TOP", 0, -50)
+	-- qrTexture:SetFrameLevel(kofiFrame:GetFrameLevel() + 1)
+	qrTexture:SetDrawLayer("ARTWORK", 1)
+
+	-- Add the Kofi link text
+	local kofiText = kofiFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	kofiText:SetPoint("TOP", qrTexture, "BOTTOM", 0, -20)
+	kofiText:SetText("Support me on Ko-fi!")
+
+	-- Add the Kofi link edit box
+	local kofiEditBox = CreateFrame("EditBox", nil, kofiFrame, "InputBoxTemplate")
+	kofiEditBox:SetSize(250, 30)
+	kofiEditBox:SetPoint("TOP", kofiText, "BOTTOM", 0, -10)
+	kofiEditBox:SetAutoFocus(false)
+	kofiEditBox:SetText(kofiName)
+	kofiEditBox:HighlightText()
+	kofiEditBox:SetScript("OnEscapePressed", function(self)
+		self:ClearFocus()
+	end)
+	kofiEditBox:SetScript("OnEnterPressed", function(self)
+		self:ClearFocus()
+	end)
+	kofiEditBox:SetScript("OnEditFocusGained", function(self)
+		self:HighlightText()
+	end)
+
+	return kofiFrame
+end
+
+-- Example usage of MENU_CONFIG.TYPES
+local function getEntityType(type)
+	return MENU_CONFIG.TYPES[type:upper()] or type
+end
+
+-- Register static popup dialog
+StaticPopupDialogs["CONFIRM_DELETE_ENTITY"] = {
+	text = "Are you sure you want to delete this %s with ID: %s?\nHold CTRL to skip this dialog next time.",
+	button1 = "Yes",
+	button2 = "No",
+	timeout = 0,
+	whileDead = 1,
+	hideOnEscape = true,
+	preferredIndex = 3,
+	OnAccept = function(self, data)
+		if not data or not data.type or not data.entry then
+			return
+		end
+
+		local handlers = {
+			npc = function(entry)
+				AIO.Handle("GameMasterSystem", "deleteNpcEntity", entry)
+			end,
+			gameobject = function(entry)
+				AIO.Handle("GameMasterSystem", "deleteGameObjectEntity", entry)
+			end,
+			spell = function(entry)
+				AIO.Handle("GameMasterSystem", "deleteSpellEntity", entry)
+			end,
+			spellvisual = function(entry)
+				AIO.Handle("GameMasterSystem", "deleteSpellVisualEntity", entry)
+			end,
+		}
+
+		if handlers[data.type] then
+			handlers[data.type](data.entry)
+			-- Refresh data after deletion
+			config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.pageSize, sortOrder)
+		end
+	end,
+}
+local function copyToClipboard(value, label)
+	local trimmedValue = GMUtils.trimSpaces(value)
+	if trimmedValue and trimmedValue ~= "" then
+		local editBox = CreateFrame("EditBox")
+		editBox:SetText(trimmedValue)
+		editBox:HighlightText()
+		editBox:SetScript("OnEscapePressed", function(self)
+			self:ClearFocus()
+			self:Hide()
+		end)
+		editBox:SetScript("OnEnterPressed", function(self)
+			self:ClearFocus()
+			self:Hide()
+		end)
+		editBox:SetScript("OnEditFocusLost", function(self)
+			self:Hide()
+		end)
+		editBox:Show()
+		editBox:SetFocus()
+		print("Ctrl+C to copy " .. (label or "the value"))
+	else
+		print("Invalid value")
+	end
+end
+-- Helper function to show delete confirmation
+local function showDeleteConfirmation(type, entry)
+	if not type or not entry then
+		return
+	end
+
+	local displayType = getEntityType(type):gsub("^%l", string.upper)
+	StaticPopup_Show("CONFIRM_DELETE_ENTITY", displayType, entry, {
+		type = type,
+		entry = entry,
+	})
+end
+
+-- Common menu item templates
+local MenuItems = {
+	CANCEL = {
+		text = "Cancel",
+		func = function() end,
+		notCheckable = true,
+	},
+	createTitle = function(text)
+		return {
+			text = text,
+			isTitle = true,
+			notCheckable = true,
+		}
+	end,
+	createDelete = function(type, entry, handler)
+		return {
+			text = "Delete",
+			func = function()
+				if IsControlKeyDown() then
+					handler(entry)
+				else
+					showDeleteConfirmation(type, entry)
+				end
+			end,
+			notCheckable = true,
+		}
+	end,
+
+	createCopyMenu = function(entity)
+		local entry = entity.entry or entity.spellID or entity.spellVisualID
+		local name = entity.name
+		local subMenu = {}
+
+		if entry then
+			table.insert(subMenu, {
+				text = "Copy ID",
+				func = function()
+					copyToClipboard(entry, "ID")
+				end,
+				notCheckable = true,
+			})
+		end
+
+		if name then
+			table.insert(subMenu, {
+				text = "Copy Name",
+				func = function()
+					copyToClipboard(name, "Name")
+				end,
+				notCheckable = true,
+			})
+		end
+
+		-- For spell visuals, they might have a file path
+		if entity.FilePath then
+			table.insert(subMenu, {
+				text = "Copy FilePath",
+				func = function()
+					copyToClipboard(entity.FilePath, "FilePath")
+				end,
+				notCheckable = true,
+			})
+		end
+
+		if #subMenu > 0 then
+			return {
+				text = "Copy",
+				hasArrow = true,
+				menuList = subMenu,
+				notCheckable = true,
+			}
+		end
+	end,
+}
+
+MenuFactory = {
+	createContextMenu = function()
+		local menu = CreateFrame("Frame", "ContextMenu", UIParent, "UIDropDownMenuTemplate")
+		menu:SetSize(MENU_CONFIG.SIZE.WIDTH, MENU_CONFIG.SIZE.HEIGHT)
+		menu:SetPoint("CENTER")
+		menu:Hide()
+		return menu
+	end,
+
+	createNpcMenu = function(entity)
+		local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+		return {
+			MenuItems.createTitle("Creature ID: " .. trimmedEntry),
+			{
+				text = "Spawn",
+				func = function()
+					local trimmedEntry = tonumber(GMUtils.trimSpaces(entity.entry))
+					if trimmedEntry then
+						print("Spawning NPC with ID: " .. trimmedEntry)
+						AIO.Handle("GameMasterSystem", "spawnNpcEntity", trimmedEntry)
+					else
+						print("Invalid NPC ID")
+					end
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createDelete(MENU_CONFIG.TYPES.NPC, trimmedEntry, function(entry)
+				AIO.Handle("GameMasterSystem", "deleteNpcEntity", entry)
+			end),
+			MenuItems.createCopyMenu(entity),
+			{
+				text = "Morphing",
+				hasArrow = true,
+				menuList = MenuFactory.createMorphingSubmenu(entity),
+				notCheckable = true,
+			},
+			{
+				text = "Duplicate to Database",
+				func = function()
+					print("Duplicating NPC with ID: " .. trimmedEntry)
+					AIO.Handle("GameMasterSystem", "duplicateNpcEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+
+				tooltipTitle = "Duplicate to Database",
+				tooltipText = "Duplicate this NPC to the database.\n\n"
+					.. "This will create a new entry in the database with the same data as this NPC.\n\n"
+					.. "You can then modify the new entry as needed.",
+				tooltipOnButton = true,
+			},
+			MenuItems.CANCEL,
+		}
+	end,
+
+	createMorphingSubmenu = function(entity)
+		local submenu = {
+			{
+				text = "Demorph",
+				func = function()
+					AIO.Handle("GameMasterSystem", "demorphNpcEntity")
+				end,
+				notCheckable = true,
+			},
+		}
+
+		-- Add model IDs
+		for i, modelId in ipairs(entity.modelid) do
+			table.insert(submenu, 1, {
+				text = "Model ID " .. i .. ": " .. modelId,
+				func = function()
+					AIO.Handle("GameMasterSystem", "morphNpcEntity", GMUtils.trimSpaces(modelId))
+				end,
+				notCheckable = true,
+			})
+		end
+
+		return submenu
+	end,
+
+	createGameObjectMenu = function(entity)
+		local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+		return {
+			MenuItems.createTitle("GameObject ID: " .. trimmedEntry),
+			{
+				text = "Spawn",
+				func = function()
+					local trimmedEntry = tonumber(GMUtils.trimSpaces(entity.entry))
+					if trimmedEntry then
+						print("Spawning GameObject with ID: " .. trimmedEntry)
+						AIO.Handle("GameMasterSystem", "spawnGameObject", trimmedEntry)
+					else
+						print("Invalid GameObject ID")
+					end
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createDelete(MENU_CONFIG.TYPES.GAMEOBJECT, trimmedEntry, function(entry)
+				AIO.Handle("GameMasterSystem", "deleteGameObjectEntity", entry)
+			end),
+			MenuItems.createCopyMenu(entity),
+			{
+				text = "Duplicate to Database",
+				func = function()
+					print("Duplicating GameObject with ID: " .. trimmedEntry)
+					AIO.Handle("GameMasterSystem", "duplicateGameObjectEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+
+				tooltipTitle = "Duplicate to Database",
+				tooltipText = "Duplicate this GameObject to the database.\n\n"
+					.. "This will create a new entry in the database with the same data as this GameObject.\n\n"
+					.. "You can then modify the new entry as needed.",
+				tooltipOnButton = true,
+			},
+
+			MenuItems.CANCEL,
+		}
+	end,
+
+	createSpellMenu = function(entity)
+		local trimmedEntry = GMUtils.trimSpaces(entity.spellID)
+		return {
+			MenuItems.createTitle("Spell ID: " .. trimmedEntry),
+			{
+				text = "Learn",
+				func = function()
+					AIO.Handle("GameMasterSystem", "learnSpellEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createDelete(MENU_CONFIG.TYPES.SPELL, trimmedEntry, function(entry)
+				AIO.Handle("GameMasterSystem", "deleteSpellEntity", entry)
+			end),
+			{
+				text = "Cast on Self",
+				func = function()
+					AIO.Handle("GameMasterSystem", "castSelfSpellEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Cast from Target",
+				func = function()
+					AIO.Handle("GameMasterSystem", "castTargetSpellEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Copy Icon",
+				func = function()
+					copyIcon(entity)
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createCopyMenu(entity),
+			MenuItems.CANCEL,
+		}
+	end,
+
+	createSpellVisualMenu = function(entity)
+		local trimmedEntry = GMUtils.trimSpaces(entity.spellVisualID)
+
+		return {
+			MenuItems.createTitle("SpellVisual ID: " .. trimmedEntry),
+			{
+				text = "Copy spellVisual",
+				func = function()
+					print(entity.FilePath)
+					local editBox = CreateFrame("EditBox")
+					editBox:SetText(entity.FilePath)
+					editBox:HighlightText()
+					print("Ctrl+C to copy the path")
+					editBox:SetScript("OnEscapePressed", function(self)
+						self:ClearFocus()
+						self:Hide()
+					end)
+					editBox:SetScript("OnEnterPressed", function(self)
+						self:ClearFocus()
+						self:Hide()
+					end)
+				end,
+				notCheckable = true,
+			},
+			MenuItems.createCopyMenu(entity),
+			MenuItems.CANCEL,
+		}
+	end,
+	-- createItemMenu = function(entity)
+	-- 	local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+
+	-- 	return {
+	-- 		MenuItems.createTitle("Item ID: " .. trimmedEntry),
+	-- 		{
+	-- 			text = "Add",
+	-- 			func = function()
+	-- 				if coreName == "TrinityCore" then
+	-- 					AIO.Handle("GameMasterSystem", "addItemEntity", trimmedEntry)
+	-- 				elseif coreName == "AzerothCore" then
+	-- 					-- SendChatMessage(".additem " .. trimmedEntry, "SAY")
+	-- 					AIO.Handle("GameMasterSystem", "addItemEntity", trimmedEntry)
+	-- 				end
+	-- 			end,
+	-- 			notCheckable = true,
+	-- 		},
+
+	-- 		MenuItems.CANCEL,
+	-- 	}
+	-- end,
+	createItemMenu = function(entity)
+		local trimmedEntry = GMUtils.trimSpaces(entity.entry)
+
+		return {
+			MenuItems.createTitle("Item ID: " .. trimmedEntry),
+			{
+				text = "Add Item to Player",
+				func = function()
+					AIO.Handle("GameMasterSystem", "addItemEntity", trimmedEntry, 1)
+				end,
+				notCheckable = true,
+				tooltipTitle = "Add Item",
+				tooltipText = "Adds this item to yourself or your target",
+			},
+			{
+				text = "Add Item (5)",
+				func = function()
+					AIO.Handle("GameMasterSystem", "addItemEntity", trimmedEntry, 5)
+				end,
+				notCheckable = true,
+			},
+			{
+				text = "Add Item (Max Stack)",
+				func = function()
+					AIO.Handle("GameMasterSystem", "addItemEntityMax", trimmedEntry)
+				end,
+				notCheckable = true,
+				tooltipTitle = "Add Maximum Stack",
+				tooltipText = "Adds maximum possible stack of this item",
+			},
+			{
+				text = "Duplicate to Database",
+				func = function()
+					print("Duplicating Item with ID: " .. trimmedEntry)
+					AIO.Handle("GameMasterSystem", "duplicateItemEntity", trimmedEntry)
+				end,
+				notCheckable = true,
+
+				tooltipTitle = "Duplicate to Database",
+				tooltipText = "Duplicate this Item to the database.\n\n"
+					.. "This will create a new entry in the database with the same data as this Item.\n\n"
+					.. "You can then modify the new entry as needed.",
+				tooltipOnButton = true,
+			},
+			MenuItems.createCopyMenu(entity),
+			MenuItems.CANCEL,
+		}
+	end,
+}
+
+-- Create single context menu instance
+local contextMenu = MenuFactory.createContextMenu()
+
+-- Show menu functions
+local function showContextMenu(menuType, card, entity)
+	local menuCreators = {
+		npc = MenuFactory.createNpcMenu,
+		gameobject = MenuFactory.createGameObjectMenu,
+		spell = MenuFactory.createSpellMenu,
+		spellvisual = MenuFactory.createSpellVisualMenu,
+		item = MenuFactory.createItemMenu,
+	}
+
+	local menuCreator = menuCreators[menuType]
+	if menuCreator then
+		EasyMenu(menuCreator(entity), contextMenu, "cursor", 0, 0, "MENU")
+	end
+end
+
+-- Constants for search UI
+local SEARCH_UI_CONFIG = {
+	TEXTURES = {
+		SEARCH = "Interface\\Common\\UI-Searchbox-Icon",
+		CLEAR = "Interface\\Buttons\\UI-Panel-MinimizeButton-Up",
+	},
+	SIZE = {
+		WIDTH = 200,
+		HEIGHT = 20,
+		ICON = 14,
+	},
+	INSETS = 5,
+}
+
+-- Function to create search input field
+local function createSearchInput(parent)
+	-- Create main editbox using 3.3.5 template
+	local searchBox = CreateFrame("EditBox", nil, parent)
+	searchBox:SetBackdrop({
+		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true,
+		tileSize = 16,
+		edgeSize = 16,
+		insets = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+	searchBox:SetBackdropColor(0, 0, 0, 0.5)
+	searchBox:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+
+	-- Basic setup
+	searchBox:SetSize(SEARCH_UI_CONFIG.SIZE.WIDTH, SEARCH_UI_CONFIG.SIZE.HEIGHT)
+	searchBox:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -50, -10)
+	searchBox:SetFontObject("GameFontHighlight")
+	searchBox:SetTextInsets(SEARCH_UI_CONFIG.INSETS, SEARCH_UI_CONFIG.INSETS, 0, 0)
+	searchBox:SetAutoFocus(false)
+	searchBox:EnableMouse(true)
+
+	-- Placeholder text
+	local placeholder = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+	placeholder:SetPoint("LEFT", searchBox, "LEFT", 5, 0)
+	placeholder:SetText("Search...")
+
+	-- Search icon (left side)
+	-- local searchIcon = searchBox:CreateTexture(nil, "ARTWORK")
+	-- searchIcon:SetTexture(SEARCH_CONFIG.TEXTURES.SEARCH)
+	-- searchIcon:SetSize(SEARCH_CONFIG.SIZE.ICON, SEARCH_CONFIG.SIZE.ICON)
+	-- searchIcon:SetPoint("LEFT", searchBox, "LEFT", -18, 0)
+
+	-- Clear button (right side)
+	local clearButton = CreateFrame("Button", nil, searchBox)
+	clearButton:SetSize(14, 14)
+	clearButton:SetPoint("RIGHT", searchBox, "RIGHT", -5, 0)
+	clearButton:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+	clearButton:Hide()
+
+	-- Reset function
+	local function resetSearch()
+		searchBox:SetText("")
+		searchBox:ClearFocus()
+		placeholder:Show()
+		clearButton:Hide()
+		currentSearchQuery = ""
+		currentOffset = 0
+		
+		config.handleAIO(activeTab, "", currentOffset, config.PAGE_SIZE, sortOrder)
+	end
+	-- This function creates an overlay frame that covers the entire screen and then clears the search box focus when clicked
+	local function createOverlay()
+		local overlay = CreateFrame("Frame", nil, UIParent)
+		overlay:SetFrameStrata("FULLSCREEN_DIALOG")
+		overlay:SetAllPoints(UIParent)
+		overlay:EnableMouse(true)
+		overlay:Hide()
+
+		overlay:SetScript("OnMouseDown", function(self)
+			searchBox:ClearFocus()
+			self:Hide()
+		end)
+
+		return overlay
+	end
+
+	local clickOutOverlay = createOverlay()
+
+	-- Event handlers
+
+	searchBox:SetScript("OnEditFocusGained", function(self)
+		clickOutOverlay:Show()
+	end)
+
+	searchBox:SetScript("OnEditFocusLost", function(self)
+		clickOutOverlay:Hide()
+	end)
+
+	searchBox:SetScript("OnEscapePressed", function(self)
+		self:ClearFocus()
+		clickOutOverlay:Hide()
+		-- resetSearch()
+	end)
+	searchBox:SetScript("OnEnterPressed", function(self)
+		self:ClearFocus()
+		clickOutOverlay:Hide()
+	end)
+	-- Throttled search handler
+	local throttledSearch = GMUtils.throttle(function(text)
+		currentSearchQuery = text
+		currentOffset = 0
+		
+		GMUtils.debug("Throttled search called with text:", text)
+		config.handleAIO(activeTab, text, currentOffset, config.PAGE_SIZE, sortOrder)
+	end, 0.3)
+	
+	searchBox:SetScript("OnTextChanged", function(self)
+		local text = self:GetText()
+		GMUtils.debug("Search text changed:", text)
+		
+		if text and text ~= "" then
+			placeholder:Hide()
+			clearButton:Show()
+			throttledSearch(text)
+		else
+			placeholder:Show()
+			clearButton:Hide()
+			throttledSearch("")
+		end
+	end)
+
+	-- Right-click clear
+	searchBox:SetScript("OnMouseDown", function(self, button)
+		if button == "RightButton" then
+			resetSearch()
+		end
+	end)
+
+	-- Clear button functionality
+	clearButton:SetScript("OnClick", resetSearch)
+
+	return searchBox
+end
+
+-- Constants for model interaction
+local MODEL_CONFIG = {
+	POSITION = {
+		SPEED = {
+			X = 0.005,
+			Y = 0,
+			Z = 0.005,
+		},
+		DEFAULT = {
+			X = 0,
+			Y = 0,
+			Z = 0,
+		}
+	},
+	ROTATION = {
+		SPEED = 0.010
+	},
+	SCALE = {
+		MIN = 0.5,
+		MAX = 2.0,
+		STEP = 0.05
+	}
+}
+
+-- Utility: Clamp helper (WoW 3.3.5 doesn't have math.clamp)
+local function Clamp(value, min, max)
+	return math.max(min, math.min(max, value))
+end
+
+-- Handle model rotation
+local function handleModelRotation(model, mouseX, dragStartX, initialFacing)
+	local deltaX = (mouseX - dragStartX) * (MODEL_CONFIG.ROTATION.SPEED or 1)
+	local newFacing = initialFacing + deltaX
+	model:SetFacing(newFacing)
+	return newFacing
+end
+
+-- Handle model position (X, Y, Z movement)
+local function handleModelPosition(model, mouseX, mouseY, dragStartX, dragStartY, initialPosition)
+	if not model or not initialPosition then return end
+
+	local speed = MODEL_CONFIG.POSITION.SPEED or {}
+	local speedX = speed.X or 1
+	local speedY = speed.Y or 1
+	local speedZ = speed.Z or 1
+
+	local deltaX = (mouseX - dragStartX) * speedX
+	local deltaY = 0 -- update if you want horizontal drag to affect Y
+	local deltaZ = (mouseY - dragStartY) * speedZ
+
+	local newX = initialPosition.x + deltaX
+	local newY = initialPosition.y + deltaY
+	local newZ = initialPosition.z + deltaZ
+
+	-- Optional clamping
+	-- newX = Clamp(newX, -10, 10)
+	-- newY = Clamp(newY, -10, 10)
+	-- newZ = Clamp(newZ, -5, 5)
+
+	model:SetPosition(newX, newY, newZ)
+
+	return { x = newX, y = newY, z = newZ }
+end
+
+-- Handle model scale (zoom)
+local function handleModelScale(model, delta, currentScale)
+	local minScale = MODEL_CONFIG.SCALE.MIN or 0.5
+	local maxScale = MODEL_CONFIG.SCALE.MAX or 2.0
+	local step = MODEL_CONFIG.SCALE.STEP or 0.05
+
+	local newScale = currentScale
+	if delta > 0 and currentScale < maxScale then
+		newScale = Clamp(currentScale + step, minScale, maxScale)
+	elseif delta < 0 and currentScale > minScale then
+		newScale = Clamp(currentScale - step, minScale, maxScale)
+	end
+
+	model:SetModelScale(newScale)
+	return newScale
+end
+
+-- Setup model mouse interaction
+local function setupModelInteraction(model)
+	if not model then return end
+
+	local state = {
+		facing = model:GetFacing(),
+		position = {
+			x = MODEL_CONFIG.POSITION.DEFAULT.X or 0,
+			y = MODEL_CONFIG.POSITION.DEFAULT.Y or 0,
+			z = MODEL_CONFIG.POSITION.DEFAULT.Z or 0,
+		},
+		isDragging = false,
+		dragStart = { x = 0, y = 0 },
+	}
+
+	-- Set initial position
+	model:SetPosition(state.position.x, state.position.y, state.position.z)
+
+	model:EnableMouse(true)
+	model:SetMovable(false)
+
+	-- Middle mouse drag
+	model:SetScript("OnMouseDown", function(_, button)
+		if button == "MiddleButton" then
+			state.isDragging = true
+			state.dragStart.x, state.dragStart.y = GetCursorPosition()
+		end
+	end)
+
+	model:SetScript("OnMouseUp", function(_, button)
+		if button == "MiddleButton" then
+			state.isDragging = false
+		end
+	end)
+
+	model:SetScript("OnUpdate", function(self)
+		if state.isDragging then
+			local mouseX, mouseY = GetCursorPosition()
+
+			-- Update rotation
+			state.facing = handleModelRotation(self, mouseX, state.dragStart.x, state.facing)
+
+			-- Update position
+			state.position = handleModelPosition(self, mouseX, mouseY, state.dragStart.x, state.dragStart.y, state.position)
+
+			-- Update drag start
+			state.dragStart.x, state.dragStart.y = mouseX, mouseY
+		end
+	end)
+
+	-- Mouse wheel zoom
+	model:EnableMouseWheel(true)
+	model:SetScript("OnMouseWheel", function(self, delta)
+		local currentScale = self:GetModelScale()
+		handleModelScale(self, delta, currentScale)
+	end)
+end
+
+
+-- Constants
+local VIEW_CONFIG = {
+	ICONS = {
+		MAGNIFIER = "Interface\\Icons\\INV_Misc_Spyglass_03",
+		INFO = "Interface\\Icons\\INV_Misc_Book_09",
+	},
+	TEXTURES = {
+		BACKDROP = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		BORDER = "Interface\\Tooltips\\UI-Tooltip-Border",
+	},
+	SIZES = {
+		ICON = 16,
+		FULL_VIEW = 400,
+		TILE = 16,
+		INSETS = 5,
+	},
+}
+
+-- Create full view frame
+local function createFullViewFrame(index)
+	local frame = CreateFrame("Frame", "FullViewFrame" .. index, UIParent)
+	frame:SetPoint("CENTER")
+	frame:SetSize(VIEW_CONFIG.SIZES.FULL_VIEW, VIEW_CONFIG.SIZES.FULL_VIEW)
+	frame:SetFrameStrata("DIALOG")
+	frame:EnableMouse(true)
+	frame:SetMovable(true)
+
+	frame:SetBackdrop({
+		bgFile = VIEW_CONFIG.TEXTURES.BACKDROP,
+		edgeFile = VIEW_CONFIG.TEXTURES.BORDER,
+		tile = true,
+		tileSize = VIEW_CONFIG.SIZES.TILE,
+		edgeSize = VIEW_CONFIG.SIZES.TILE,
+		insets = {
+			left = VIEW_CONFIG.SIZES.INSETS,
+			right = VIEW_CONFIG.SIZES.INSETS,
+			top = VIEW_CONFIG.SIZES.INSETS,
+			bottom = VIEW_CONFIG.SIZES.INSETS,
+		},
+	})
+
+	return frame
+end
+
+-- Constants for menu types
+local BUTTON_CONFIG = {
+	TOOLTIP = {
+		TEXT = "Right-click to open context menu\nYou can hold middle mouse to move and scroll",
+	},
+}
+
+-- Create info button
+local function createInfoButton(parent, entity, type)
+	if not parent or not entity or not type then
+		return nil
+	end
+
+	local button = CreateFrame("Button", nil, parent)
+	button:SetSize(VIEW_CONFIG.SIZES.ICON, VIEW_CONFIG.SIZES.ICON)
+	button:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -5)
+	button:SetNormalTexture(VIEW_CONFIG.ICONS.INFO)
+	button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+	button:GetHighlightTexture():SetBlendMode("ADD")
+
+	button:SetScript("OnMouseUp", function(self, mouseButton)
+		if mouseButton == "RightButton" then
+			showContextMenu(MENU_CONFIG.TYPES[type:upper()], parent, entity)
+		end
+	end)
+
+	addSimpleTooltip(button, BUTTON_CONFIG.TOOLTIP.TEXT)
+	return button
+end
+
+-- Create model view
+local function createModelView(parent, entity, type, index)
+	local model = CreateFrame("DressUpModel", "FullModel" .. index, parent)
+	model:SetAllPoints(parent)
+	model:SetFrameStrata("DIALOG")
+	model:SetFrameLevel(parent:GetFrameLevel() + 1)
+	model:EnableMouse(true)
+	model:SetMovable(true)
+	model:ClearModel()
+
+	-- Set up drag functionality
+	model:RegisterForDrag("LeftButton")
+	model:SetScript("OnDragStart", function()
+		parent:StartMoving()
+	end)
+	model:SetScript("OnDragStop", function()
+		parent:StopMovingOrSizing()
+	end)
+
+	-- Set model based on type
+	local modelSetters = {
+		NPC = function()
+			model:SetCreature(entity.entry)
+		end,
+		GameObject = function()
+			model:SetModel(entity.modelName)
+		end,
+		Spell = function()
+			model:SetSpellVisualKit(entity.spellID)
+		end,
+		SpellVisual = function()
+			model:SetModel(entity.FilePath)
+		end,
+		Item = function()
+			model:Undress() -- Ensure clean state
+			model:TryOn(entity.entry)
+		end,
+	}
+
+	if modelSetters[type] then
+		modelSetters[type]()
+	end
+
+	model:SetRotation(math.rad(30))
+	setupModelInteraction(model)
+
+	return model
+end
+
+-- Main function to add magnifier icon
+local function addMagnifierIcon(card, entity, index, type)
+	local button = CreateFrame("Button", "MagnifierButton" .. index, card)
+	button:SetSize(VIEW_CONFIG.SIZES.ICON, VIEW_CONFIG.SIZES.ICON)
+	button:SetPoint("TOPRIGHT", card, "TOPRIGHT", -5, -5)
+	button:SetNormalTexture(VIEW_CONFIG.ICONS.MAGNIFIER)
+	button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+	button:GetHighlightTexture():SetBlendMode("ADD")
+
+	button:SetScript("OnClick", function()
+		local fullViewFrame = createFullViewFrame(index)
+		local closeButton = CreateFrame("Button", nil, fullViewFrame, "UIPanelCloseButton")
+		closeButton:SetPoint("TOPRIGHT", fullViewFrame, "TOPRIGHT")
+		closeButton:SetFrameLevel(fullViewFrame:GetFrameLevel() + 2)
+
+		local infoButton = createInfoButton(fullViewFrame, entity, type)
+		local modelView = createModelView(fullViewFrame, entity, type, index)
+	end)
+
+	return button
+end
+
+-- Helper function to set up common card properties
+local function setupCard(card, parent, i, cardWidth, cardHeight)
+	card:SetSize(cardWidth, cardHeight)
+	card:EnableMouse(true)
+	card:SetPoint(
+		"TOPLEFT",
+		parent,
+		"TOPLEFT",
+		10 + ((i - 1) % config.NUM_COLUMNS) * (cardWidth + 10),
+		-10 - math.floor((i - 1) / config.NUM_COLUMNS) * (cardHeight + 10)
+	)
+	card:SetBackdrop({
+		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true,
+		tileSize = 16,
+		edgeSize = 16,
+		insets = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+	-- card:SetBackdropColor(0, 0, 0, 0.5)
+
+	-- Add highlight texture
+	local highlight = card:CreateTexture(nil, "HIGHLIGHT")
+	highlight:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
+	highlight:SetBlendMode("ADD")
+	highlight:SetAllPoints()
+end
+
+local modelFrameCache = {}
+local initializedPool = false
+
+local ITEM_MODEL_CONFIG = {
+	DELAY = 0.01,
+	POOL_SIZE = 15,
+	ROTATION = 0.4,
+	ZOOM = {
+		MIN = 0.5,
+		MAX = 2.0,
+		STEP = 0.1,
+		DEFAULT = 1.0,
+	},
+	POSITION = { X = 0, Y = 0, Z = 0 },
+	SIZE = {
+		WIDTH_OFFSET = 20,
+		HEIGHT_FACTOR = 0.6,
+	},
+}
+
+local function initializeModelPool()
+	if not initializedPool then
+		for i = 1, ITEM_MODEL_CONFIG.POOL_SIZE do
+			local model = CreateFrame("DressUpModel")
+			model:SetUnit("player")
+			model:Undress()
+			model:Hide()
+			model.initialized = true
+			table.insert(modelFrameCache, model)
+		end
+		initializedPool = true
+	end
+end
+
+-- Model management functions
+ModelManager.releaseModel = function(model)
+	if model then
+		model:ClearModel()
+		model:SetUnit("player")
+		model:Undress()
+		model:Hide()
+		model:ClearAllPoints()
+		model:SetParent(nil)
+		table.insert(modelFrameCache, model)
+	end
+end
+
+ModelManager.acquireModel = function()
+	initializeModelPool()
+	local model = table.remove(modelFrameCache)
+	if not model then
+		model = CreateFrame("DressUpModel")
+		model.initialized = true
+	end
+
+	-- Reset model state completely
+	model:ClearModel()
+	model:SetUnit("player")
+	model:Undress()
+	model:SetRotation(ITEM_MODEL_CONFIG.ROTATION)
+	model:Show()
+
+	return model
+end
+
+-- Keep the old local functions for backward compatibility
+local releaseModel = ModelManager.releaseModel
+local acquireModel = function(card, i)
+	local model = ModelManager.acquireModel()
+	if model and card then
+		model:SetParent(card)
+		model:ClearAllPoints()
+		model:SetSize(
+			card:GetWidth() - ITEM_MODEL_CONFIG.SIZE.WIDTH_OFFSET,
+			card:GetHeight() * ITEM_MODEL_CONFIG.SIZE.HEIGHT_FACTOR
+		)
+		model:SetPoint("CENTER", card, "CENTER", 0, 10)
+	end
+	return model
+end
+
+-- More reliable quality color retrieval
+local function getQualityColor(quality)
+	if not quality or type(quality) ~= "number" then
+		quality = 1 -- Default to common quality
+	end
+
+	-- Ensure quality is in valid range (0-7)
+	quality = math.max(0, math.min(quality, 7))
+
+	-- GetItemQualityColor sometimes returns nil, so add fallbacks
+	local r, g, b = GetItemQualityColor(quality)
+	if not r or not g or not b then
+		-- Fallback quality colors if GetItemQualityColor fails
+		local fallbackColors = {
+			[0] = { r = 0.5, g = 0.5, b = 0.5 }, -- Poor (gray)
+			[1] = { r = 1.0, g = 1.0, b = 1.0 }, -- Common (white)
+			[2] = { r = 0.3, g = 0.8, b = 0.3 }, -- Uncommon (green)
+			[3] = { r = 0.0, g = 0.4, b = 0.8 }, -- Rare (blue)
+			[4] = { r = 0.7, g = 0.3, b = 1.0 }, -- Epic (purple)
+			[5] = { r = 1.0, g = 0.5, b = 0.0 }, -- Legendary (orange)
+			[6] = { r = 1.0, g = 0.0, b = 0.0 }, -- Artifact (red)
+			[7] = { r = 1.0, g = 0.8, b = 0.0 }, -- Heirloom (gold)
+		}
+		return fallbackColors[quality]
+	end
+
+	return { r = r, g = g, b = b }
+end
+
+-- Improved item card creation with better icon and quality color handling
+local function createItemCard(card, entity, index)
+	if not entity or not entity.entry then
+		GMUtils.debug("Invalid entity data for item card")
+		return card
+	end
+
+	-- Pre-fetch item info
+	local itemID = tonumber(entity.entry)
+	local itemName, itemLink, itemQuality, itemLevel, _, _, _, _, itemEquipLoc, itemTexture = GetItemInfo(itemID)
+
+	-- Determine item quality (with fallbacks)
+	local quality = itemQuality
+	if not quality then
+		-- If GetItemInfo failed to return quality, try to get it from entity
+		quality = tonumber(entity.quality)
+		if not quality then
+			-- Default to common quality if all attempts fail
+			quality = 1
+		end
+	end
+
+	-- Ensure quality is in valid range (0-7)
+	quality = math.max(0, math.min(quality, 7))
+
+	-- Get quality colors with improved reliability
+	local colors = getQualityColor(quality)
+
+	-- Apply card styling based on quality with appropriate transparency
+	card:SetBackdropColor(colors.r * 0.2, colors.g * 0.2, colors.b * 0.2, 0.7) -- Darker background
+	card:SetBackdropBorderColor(colors.r, colors.g, colors.b, 0.8) -- Brighter border
+	card.quality = quality
+
+	-- Create or update icon texture
+	if not card.iconTexture then
+		card.iconTexture = card:CreateTexture(nil, "ARTWORK")
+		card.iconTexture:SetSize(40, 40)
+		card.iconTexture:SetPoint("TOP", card, "TOP", 0, -5)
+	end
+
+	-- Attempt to fetch the item icon using alternative methods
+	local iconTexture = itemTexture or select(10, GetItemInfo(itemID)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+	card.iconTexture:SetTexture(iconTexture)
+
+	-- Update text fields with proper positioning
+	card.nameText:ClearAllPoints()
+	card.nameText:SetPoint("TOP", card.iconTexture, "BOTTOM", 0, -5)
+	card.nameText:SetText(itemName or ("Item #" .. itemID))
+	card.nameText:SetTextColor(colors.r, colors.g, colors.b)
+
+	card.entityText:ClearAllPoints()
+	card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+	card.entityText:SetText("ID: " .. itemID)
+
+	card.additionalText:ClearAllPoints()
+	card.additionalText:SetPoint("BOTTOM", card.entityText, "TOP", 0, 2)
+	card.additionalText:SetText(string.format("iLvl: %d | Quality: %d", itemLevel or 0, quality))
+
+	-- Handle equippable items with model preview
+	if entity.inventoryType and entity.inventoryType > 0 then
+		-- Use small delay to prevent UI freeze
+		GMUtils.delayedExecution(0.01 * math.min(index, 5), function()
+			if not card:IsShown() or not entity or not entity.entry then
+				return
+			end
+
+			-- Check if item is equippable
+			local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(entity.entry)
+			if equipLoc and equipLoc ~= "" and equipLoc ~= "INVTYPE_BAG" then
+				-- Acquire model from pool
+				local model = ModelManager.acquireModel()
+				if model then
+					model:SetParent(card)
+					model:SetSize(
+						card:GetWidth() - 20,
+						card:GetHeight() * 0.6
+					)
+					model:SetPoint("CENTER", card, "CENTER", 0, 10)
+					
+					-- Try to apply item
+					local success = pcall(function()
+						model:TryOn(entity.entry)
+					end)
+					
+					if success then
+						card.modelFrame = model
+					else
+						ModelManager.releaseModel(model)
+					end
+				end
+			end
+		end)
+	end
+
+	-- Clean up handler
+	card:SetScript("OnHide", function(self)
+		if self.modelFrame then
+			ModelManager.releaseModel(self.modelFrame)
+			self.modelFrame = nil
+		end
+	end)
+
+	-- Tooltip handlers with quality-based highlighting
+	card:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		if itemLink then
+			GameTooltip:SetHyperlink(itemLink)
+		else
+			GameTooltip:SetText(entity.name or ("Item #" .. itemID))
+		end
+		GameTooltip:Show()
+		-- Highlight effect on hover (slightly brighter than normal)
+		self:SetBackdropColor(colors.r * 0.3, colors.g * 0.3, colors.b * 0.3, 0.8)
+	end)
+
+	card:SetScript("OnLeave", function(self)
+		GameTooltip:Hide()
+		-- Return to normal color
+		self:SetBackdropColor(colors.r * 0.2, colors.g * 0.2, colors.b * 0.2, 0.7)
+	end)
+
+	-- Right-click menu
+	card:SetScript("OnMouseUp", function(self, button)
+		if button == "RightButton" then
+			showContextMenu(MENU_CONFIG.TYPES.ITEM, self, entity)
+		end
+	end)
+
+	-- Add magnifier icon for preview
+	addMagnifierIcon(card, entity, i, "Item")
+
+	return card
+end
+-- Function to create NPC card
+local function createNPCCard(card, entity, i)
+	local model = CreateFrame("DressUpModel", "modelNpc" .. i, card)
+	model:SetSize(card:GetWidth() - 30, card:GetHeight() - 40)
+	model:SetPoint("CENTER", card, "CENTER", 0, 15)
+	model:SetFrameStrata("DIALOG")
+	model:ClearModel()
+	model:SetCreature(entity.entry)
+	model:SetRotation(math.rad(30))
+
+	local name = entity.name .. "\n" .. (entity.subname or "")
+	card.nameText:SetText(name)
+	card.entityText:SetText("Creature ID: " .. entity.entry)
+	card.additionalText:SetText("Model ID: " .. (entity.modelid[1] or entity.modelid))
+
+	card:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(entity.name)
+		GameTooltip:AddLine("Creature ID: " .. entity.entry, 1, 1, 1)
+		GameTooltip:AddLine("Model ID: " .. (entity.modelid[1] or entity.modelid), 1, 1, 1)
+		GameTooltip:AddLine("Name: " .. entity.name, 1, 1, 1)
+		GameTooltip:AddLine("Subname: " .. (entity.subname or ""), 1, 1, 1)
+		GameTooltip:Show()
+	end)
+
+	card:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	card:SetScript("OnMouseUp", function(self, button)
+		if button == "RightButton" then
+			showContextMenu(MENU_CONFIG.TYPES.NPC, card, entity)
+		end
+	end)
+	addMagnifierIcon(card, entity, i, "NPC")
+end
+
+-- Function to create GameObject card
+local function createGameObjectCard(card, entity, i)
+	local model = CreateFrame("DressUpModel", "modelGob" .. i, card)
+	model:SetSize(card:GetWidth() - 30, card:GetHeight() - 40)
+	model:SetPoint("CENTER", card, "CENTER", 0, 25)
+	model:SetFrameStrata("DIALOG")
+	model:ClearModel()
+
+	local modelPath = entity.modelName or "World\\Generic\\ActiveDoodads\\Chest02\\Chest02.mdx"
+	local success, err = pcall(function()
+		model:SetModel(modelPath)
+	end)
+	if not success then
+		model:SetModel("World\\Generic\\ActiveDoodads\\Chest02\\Chest02.mdx")
+		local errorMsg = model:CreateFontString(nil, "OVERLAY")
+		errorMsg:SetFontObject("GameFontNormalLarge")
+		errorMsg:SetPoint("CENTER")
+		errorMsg:SetText("ERROR")
+		errorMsg:SetTextColor(1, 0, 0, 1)
+	end
+
+	model:SetRotation(math.rad(30))
+	card.nameText:SetText(entity.name)
+	card.entityText:SetText("GameObject ID: " .. entity.entry)
+	card.additionalText:SetText("Display ID: " .. entity.displayid)
+
+	card:SetScript("OnMouseUp", function(self, button)
+		if button == "RightButton" then
+			showContextMenu(MENU_CONFIG.TYPES.GAMEOBJECT, card, entity)
+		end
+	end)
+	addMagnifierIcon(card, entity, i, "GameObject")
+end
+
+-- Function to create Spell card
+local function createSpellCard(card, entity)
+	local name, rank, icon = GetSpellInfo(entity.spellID)
+
+	-- Set defaults for nil values
+	name = name or "Unknown Spell"
+	rank = rank or ""
+
+	card.iconTexture = card:CreateTexture(nil, "ARTWORK")
+	card.iconTexture:SetSize(32, 32)
+	card.iconTexture:SetPoint("CENTER")
+	card.iconTexture:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+	card.nameText:SetText(name .. "\n" .. (rank or ""))
+	card.entityText:SetText("Spell ID: " .. entity.spellID)
+	card.additionalText:SetText("Icon: " .. (icon or "N/A"))
+
+	card:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetSpellByID(entity.spellID)
+		if GameTooltip:NumLines() == 0 then
+			GameTooltip:SetText(
+				"|cffffff00Description:|r "
+					.. (entity.spellDescription or "N/A")
+					.. "\n\n|cffffff00Tooltip:|r "
+					.. (entity.spellToolTip or "N/A"),
+				nil,
+				nil,
+				nil,
+				nil,
+				true
+			)
+		end
+		GameTooltip:Show()
+	end)
+
+	card:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	card:SetScript("OnMouseUp", function(self, button)
+		if button == "RightButton" then
+			showContextMenu(MENU_CONFIG.TYPES.SPELL, card, entity)
+		end
+	end)
+end
+
+-- Function to create SpellVisual card
+local function createSpellVisualCard(card, entity, i)
+	-- Set up the spell visual model
+	local model = CreateFrame("DressUpModel", "modelSpellVisual" .. i, card)
+	model:SetSize(card:GetWidth() - 30, card:GetHeight() - 40)
+	model:SetPoint("CENTER", card, "CENTER", 0, 15)
+	model:SetFrameStrata("DIALOG")
+	model:ClearModel()
+	model:SetModel(entity.FilePath)
+
+	card.nameText:SetText(entity.Name or "N/A")
+	card.entityText:SetText("Visual ID: " .. entity.ID)
+	card.additionalText:SetText("FilePath: " .. entity.FilePath)
+
+	card:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText(entity.tooltip or "No additional information.")
+		GameTooltip:Show()
+	end)
+
+	card:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	-- Right-click context menu
+	card:SetScript("OnMouseUp", function(self, button)
+		if button == "RightButton" then
+			showContextMenu(MENU_CONFIG.TYPES.SPELLVISUAL, card, entity)
+		end
+	end)
+end
+
+-- Main function to generate cards for the given data
+function config.generateCards(parent, data, type)
+	-- Reduce debug spam
+	-- if config.debug then
+	-- 	print("Generating cards for type:", type)
+	-- 	print("Data count:", #data)
+	-- 	print("Parent frame:", parent:GetName() or "unnamed")
+	-- end
+
+	local cards = {}
+	local cardWidth, cardHeight = UIManager.calculateCardDimensions(parent)
+	local maxVisible = config.NUM_COLUMNS * config.NUM_ROWS
+
+	for i = 1, math.min(#data, maxVisible) do
+		local entity = data[i]
+		if config.debug then
+			print("Creating card", i, "for entity:", entity.entry)
+		end
+
+		local card = CreateFrame("Frame", "card" .. i, parent)
+		setupCard(card, parent, i, cardWidth, cardHeight)
+
+		card.nameText = card:CreateFontString(nil, "OVERLAY")
+		card.nameText:SetFontObject("GameFontNormal")
+		card.nameText:SetPoint("TOP", card, "TOP", 0, -10)
+		card.nameText:SetWidth(cardWidth - 10)
+		card.nameText:SetWordWrap(true)
+		card.nameText:SetTextColor(1, 1, 1, 1)
+
+		card.entityText = card:CreateFontString(nil, "OVERLAY")
+		card.entityText:SetFontObject("GameFontNormal")
+		card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 10)
+		card.entityText:SetWidth(cardWidth - 10)
+		card.entityText:SetWordWrap(true)
+		card.entityText:SetTextColor(0.5, 0.5, 0.5, 1)
+
+		card.additionalText = card:CreateFontString(nil, "OVERLAY")
+		card.additionalText:SetFontObject("GameFontHighlight")
+		card.additionalText:SetPoint("BOTTOM", card.entityText, "TOP", 0, 5)
+		card.additionalText:SetWidth(cardWidth - 10)
+		-- card.additionalText:SetWordWrap(true)
+		-- set so text is smaller
+		card.additionalText:SetFont("Fonts\\ARIALN.TTF", 10)
+
+		card.additionalText:SetTextColor(0.5, 0.5, 0.5, 1)
+
+		if type == "NPC" then
+			createNPCCard(card, entity, i)
+		elseif type == "GameObject" then
+			createGameObjectCard(card, entity, i)
+		elseif type == "Spell" then
+			createSpellCard(card, entity)
+		elseif type == "SpellVisual" then
+			createSpellVisualCard(card, entity, i)
+		elseif type == "Item" then
+			createItemCard(card, entity, i)
+		else
+			print("Unknown card type:", type)
+		end
+
+		-- Make sure the card is shown after creation
+		if card then
+			card:Show()
+		end
+
+		cards[i] = card
+	end
+
+	-- Make sure parent frame is shown
+	if parent then
+		parent:Show()
+	end
+
+	return cards
+end
+
+-- Initialize the UI
+local function initializeUI()
+	mainFrame = createMainFrame()
+	contentFrames = createContentFrames(mainFrame, menuItems)
+
+	config.showTab(contentFrames, 1)
+	currentOffset = 0
+	config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+
+	createPaginationButtons(mainFrame)
+	enableMouseWheelScrolling(mainFrame)
+	createSearchInput(mainFrame)
+	createSortOrderDropdown(mainFrame)
+	initializeModelPool()
+	-- Create the Kofi frame using the function
+	local kofiFrame = createKofiFrame()
+	-- Create the "Support Me" button
+	local kofiButton = CreateFrame("Button", nil, mainFrame)
+	kofiButton:SetSize(100, 30)
+	kofiButton:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, 5)
+
+	-- Create a font string with a glow effect
+	local kofiButtonText = kofiButton:CreateFontString(nil, "OVERLAY")
+	kofiButtonText:SetFontObject("GameFontNormal")
+	kofiButtonText:SetPoint("CENTER", kofiButton, "CENTER", 0, 0)
+	kofiButtonText:SetText("Support Me")
+	kofiButtonText:SetTextColor(1, 1, 1, 1) -- White color
+	kofiButtonText:SetShadowOffset(1, -1)
+	kofiButtonText:SetShadowColor(0, 0, 0, 1) -- Black shadow
+
+	-- Add glow effect and color cycling
+	local totalElapsed = 0
+	kofiButton:SetScript("OnUpdate", function(self, elapsed)
+		totalElapsed = totalElapsed + elapsed
+		if kofiFrame:IsShown() then
+			kofiButton:LockHighlight()
+			kofiButtonText:SetTextColor(1, 1, 0, 1)
+		else
+			kofiButton:UnlockHighlight()
+			local r = (math.sin(totalElapsed * 2) + 1) / 2
+			local g = (math.sin(totalElapsed * 2 + 2) + 1) / 2
+			local b = (math.sin(totalElapsed * 2 + 4) + 1) / 2
+			kofiButtonText:SetTextColor(r, g, b, 1)
+		end
+	end)
+
+	kofiButton:SetNormalFontObject("GameFontNormal")
+	kofiButton:SetHighlightFontObject("GameFontHighlight")
+	kofiButton:SetScript("OnClick", function()
+		if kofiFrame:IsShown() then
+			kofiFrame:Hide()
+		else
+			kofiFrame:Show()
+		end
+	end)
+
+	mainFrame:SetScript("OnShow", function()
+		if kofiFrame.wasShown then
+			kofiFrame:Show()
+		end
+	end)
+
+	mainFrame:SetScript("OnHide", function()
+		kofiFrame.wasShown = kofiFrame:IsShown()
+		kofiFrame:Hide()
+	end)
+
+	kofiButton:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText("Support me by donating on my Ko-fi!")
+		GameTooltip:Show()
+	end)
+
+	kofiButton:SetScript("OnLeave", function(self)
+		GameTooltip:Hide()
+	end)
+
+	-- tinsert closes the frame with the escape key
+	tinsert(UISpecialFrames, "MainFrame")
+end
+
+-- Open the UI with a slash command
+SLASH_GAMEMASTERUI1 = "/gmui"
+SlashCmdList["GAMEMASTERUI"] = function(msg)
+	if mainFrame then
+		if mainFrame:IsShown() then
+			mainFrame:Hide()
+		else
+			-- debugMessage("Opening Game Master UI")
+			if not isGmLevelFetched then
+				-- debugMessage("Fetching GM Level")
+				AIO.Handle("GameMasterSystem", "handleGMLevel")
+			end
+			if not isCoreNameFetched then
+				-- debugMessage("Fetching Core Name")
+				AIO.Handle("GameMasterSystem", "getCoreName")
+			end
+
+			-- Delay to ensure gmLevel is updated before checking
+			GMUtils.customTimer(0.5, function()
+				if gmLevel >= config.REQUIRED_GM_LEVEL then
+					-- debugMessage("Opening Game Master UI with GM Level: ", gmLevel)
+					mainFrame:ClearAllPoints()
+					mainFrame:SetPoint("CENTER")
+					mainFrame:Show()
+
+					config.handleAIO(activeTab, currentSearchQuery, currentOffset, config.PAGE_SIZE, sortOrder)
+				else
+					print("You do not have the required GM rank to use this command.")
+				end
+			end)
+		end
+	else
+		print("Game Master UI is not initialized.")
+	end
+end
+
+print("|cff00ff00Game Master UI can be toggled with /gmui|r")
+
+initializeUI()
+
+-- -- Example of how to call server-side entity handlers from client
+-- local function handleSpawnNpc(entry)
+--     AIO.Handle("GameMasterSystem", "spawnNpcEntity", entry)
+-- end
+
+-- local function handleDeleteNpc(entry)
+--     AIO.Handle("GameMasterSystem", "deleteNpcEntity", entry)
+-- end
+
+-- local function handleMorphNpc(entry)
+--     AIO.Handle("GameMasterSystem", "morphNpcEntity", entry)
+-- end
+
+-- -- ... create similar handlers for other entity actions ...
+
+-- -- Bind these handlers to your UI elements
+-- local function bindEntityHandlers(frame)
+--     frame.spawnButton:SetScript("OnClick", function()
+--         local entry = frame.entryEditBox:GetText()
+--         handleSpawnNpc(entry)
+--     end)
+
+--     frame.deleteButton:SetScript("OnClick", function()
+--         local entry = frame.entryEditBox:GetText()
+--         handleDeleteNpc(entry)
+--     end)
+
+--     -- ... bind other handlers to UI elements ...
+-- end
+
+-- Missing receiver functions
+GameMasterSystem.receiveGMLevel = function(player, level)
+	gmLevel = level
+	isGmLevelFetched = true
+	GMUtils.debug("Received GM Level:", level)
+end
+
+GameMasterSystem.receiveCoreName = function(player, name)
+	coreName = name
+	isCoreNameFetched = true
+	GMUtils.debug("Received Core Name:", name)
+end

@@ -1,0 +1,7 @@
+You never know. Just Backup these 3 files
+Before placing these .dbc into your servers
+data/dbc folder.
+
+-CharBaseInfo.dbc
+-CharTitles.dbc
+-SkillRaceClassInfo.dbc

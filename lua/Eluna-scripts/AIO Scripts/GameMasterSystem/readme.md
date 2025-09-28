@@ -1,124 +1,146 @@
-# Game master UI
+# GameMasterUI - Quick Setup Guide (TLDR)
 
-## Requirements
+## What is GameMasterUI?
 
-Require Eluna and AIO.
-Require that you have dbc file gameobjectdisplayinfo, spellvisualeffectname inside the db. I HIGHLY RECOMMEND TO ADD EVERY DBC TO YOUR DB.
+Just need the `GameMasterUI`
 
-## Installation
+A comprehensive in-game admin panel for TrinityCore 3.3.5 that provides:
+- NPC/Item/Spell management and spawning
+- Player inventory editor with enchantment support
+- Ban/kick/teleport player controls
+- 3D model previewer
+- Context menus for quick actions
+- Mail sending system
+- GM power management
 
-if you have issue adding dbc to db try use [stoneharry spell editor](https://github.com/stoneharry/WoW-Spell-Editor) worked for me.
+## Quick Setup (5 minutes)
 
-## Visual aGuide
-
-1. Navigate to your server's `lua_scripts/AIO_Server` directory.
-2. Place the `gameMasterClient.lua` and `gameMasterServer.lua` files in this directory.
-
-Here's a visual representation:
-
-```plaintext
+### 1. File Placement
+```
 lua_scripts/
 └── AIO_Server/
-  ├── GameMasterSystem/
-  │   ├── gameMasterClient.lua
-  │   └── gameMasterServer.lua
+    ├── 00_UIStyleLibrary/      ← REQUIRED: Get from [PLACEHOLDER_LINK]
+    ├── AIO.lua                 ← REQUIRED: Core AIO framework
+    └── GameMasterUI/           ← This addon (both Client/ and Server/ folders)
 ```
 
-<div style="display: flex; gap: 10px;">
-  <img src="src/assets/2024-10-20-16-04-05.png" alt="Game Master UI" style="width: 25%;">
-  <img src="src/assets/2024-10-20-16-00-51.png" alt="Game Master UI1" style="width: 25%;">
-  <img src="src/assets/2024-10-20-16-03-08.png" alt="Game Master UI2" style="width: 25%;">
-</div>
+**IMPORTANT:** Both `Client/` and `Server/` folders MUST be inside `AIO_Server/GameMasterUI/`
 
-[video new version](https://streamable.com/8qgjde)
+### 2. Database Configuration
 
-[video old version](https://streamable.com/e76v5t)
+Edit `Server/Core/GameMasterUI_Config.lua` (lines 39-73) to match your database setup:
 
-# Search Guide for Game Objects and NPC Types
+```lua
+-- IMPORTANT: Include the dot (.) at the end of the prefix!
+prefixes = {
+    world = "",  -- World database prefix
+    char = "",   -- Character database prefix
+    auth = "",   -- Auth database prefix
+},
 
-To perform a search for game object types or NPC types, you need to specify the type in parentheses (e.g., `(beast)`). Below are the available types you can use in your searches.
+-- Optional tables that won't cause errors if missing
+optionalTables = {
+    "gameobjectdisplayinfo",
+    "spellvisualeffectname",
+    "creature_template_model",
+    "creature_equip_template",
+    "creature_template_addon",
+    "gameobject_template_addon",
+    "item_enchantment_template",
+    "item_loot_template"
+},
 
-<div style="display: flex; gap: 20px;">
+-- Required tables that will show warnings if missing
+requiredTables = {
+    "creature_template",
+    "gameobject_template",
+    "item_template",
+    "spell"
+},
+```
 
-<div style="flex: 1;">
+**Common Prefix Configurations:**
+- **TrinityCore (default):** Leave all as `""`
+- **AzerothCore:** Use `"acore_world."`, `"acore_characters."`, `"acore_auth."`
+- **Custom:** Use your database names like `"myserver_world."`
 
-### Game Object Types
+**Note:** Always include the dot (.) at the end of prefixes!
 
-To search for game object types, use the syntax `(type)`. Here’s a list of the available types:
+### 3. Database Tables
 
-| **Game Object Type**    | **Value** |
-| ----------------------- | --------- |
-| `door`                  | 0         |
-| `button`                | 1         |
-| `questgiver`            | 2         |
-| `chest`                 | 3         |
-| `binder`                | 4         |
-| `generic`               | 5         |
-| `trap`                  | 6         |
-| `chair`                 | 7         |
-| `spell focus`           | 8         |
-| `text`                  | 9         |
-| `goober`                | 10        |
-| `transport`             | 11        |
-| `areadamage`            | 12        |
-| `camera`                | 13        |
-| `map object`            | 14        |
-| `mo transport`          | 15        |
-| `duel arbiter`          | 16        |
-| `fishingnode`           | 17        |
-| `summoning ritual`      | 18        |
-| `mailbox`               | 19        |
-| `do not use`            | 20        |
-| `guardpost`             | 21        |
-| `spellcaster`           | 22        |
-| `meetingstone`          | 23        |
-| `flagstand`             | 24        |
-| `fishinghole`           | 25        |
-| `flagdrop`              | 26        |
-| `mini game`             | 27        |
-| `do not use 2`          | 28        |
-| `capture point`         | 29        |
-| `aura generator`        | 30        |
-| `dungeon difficulty`    | 31        |
-| `barber chair`          | 32        |
-| `destructible_building` | 33        |
-| `guild bank`            | 34        |
-| `trapdoor`              | 35        |
+The required and optional tables are already defined in the configuration above. The addon will:
+- **Show warnings** if required tables are missing but continue working
+- **Gracefully fallback** if optional tables don't exist
+- **Check tables on startup** (configurable with `checkTablesOnStartup = true`)
 
-</div>
+### 4. GM Level Requirements
 
-<div style="flex: 1;">
+Default GM level required: **2** (configurable in Config file, line 6)
 
-### NPC Types
+```lua
+REQUIRED_GM_LEVEL = 2,  -- Change this to your desired GM level
+```
 
-To search for NPC types, use the syntax `(type)`. Here’s a list of the available NPC types:
+### 5. Optional Settings
 
-| **NPC Type**     | **Value** |
-| ---------------- | --------- |
-| `none`           | 0         |
-| `beast`          | 1         |
-| `dragonkin`      | 2         |
-| `demon`          | 3         |
-| `elemental`      | 4         |
-| `giant`          | 5         |
-| `undead`         | 6         |
-| `humanoid`       | 7         |
-| `critter`        | 8         |
-| `mechanical`     | 9         |
-| `not specified`  | 10        |
-| `totem`          | 11        |
-| `non-combat pet` | 12        |
-| `gas cloud`      | 13        |
-| `wild pet`       | 14        |
-| `aberration`     | 15        |
+In `Server/Core/GameMasterUI_Config.lua`:
 
-</div>
+```lua
+debug = false,              -- Set to true for troubleshooting
+defaultPageSize = 100,      -- Items per page in searches
+removeFromWorld = true,     -- Remove entities from world on delete
+```
 
-</div>
+## Usage
 
-## Example Search Queries
+### Opening the Interface
+- Command: `/gm` or `/gamemaster`
+- Requires GM level 2+ (configurable)
 
-- To search for NPCs of type **beast**, use: `(beast)`
-- To search for a **trapdoor** game object, use: `(trapdoor)`
+### Key Features
+- **Right-click** anything for context menus
+- **Search** NPCs, items, spells by name/ID
+- **Model Preview** with 3D rotation
+- **Player Inventory** editor with all slots
+- **Ban System** with duration and reason
 
-You can copy and paste these examples directly into your search to get the desired results. Make sure you always enclose the type in parentheses.
+## Troubleshooting
+
+### "You don't have permission"
+- Check your GM level: `.account`
+- Verify `REQUIRED_GM_LEVEL` in Config
+
+### UI doesn't appear
+1. Check AIO is working: `.aio`
+2. Verify `00_UIStyleLibrary` folder exists
+3. Check server console for Lua errors
+4. Clear WoW cache: Delete `Cache` folder
+
+### Database errors
+- Verify your database prefixes in Config match your setup
+- Check required tables exist: `creature_template`, `gameobject_template`, `item_template`, `spell`
+- The `spell` table must be imported from DBC files for spell features
+- Optional tables will fallback gracefully if missing (configured in Config lines 46-63)
+
+### Missing UI elements
+- Ensure `00_UIStyleLibrary` loads first (00_ prefix is critical)
+- All files must be in `AIO_Server/` directory
+
+## Required Dependencies
+
+1. **UIStyleLibrary** - [GitHub Repository](https://github.com/Isidorsson/Eluna-scripts/tree/master/AIO%20Scripts/00_UIStyleLibrary)
+   - Must be in `AIO_Server/00_UIStyleLibrary/`
+   - Provides all UI components and styling
+
+2. **AIO Framework** (usually included with Eluna)
+   - `AIO.lua` in `AIO_Server/`
+
+3. **Spell Database Table**
+   - Required for spell management features
+   - Usually imported from DBC files stoneharrys tool can sovle this
+
+## Support
+
+- Server console shows all Lua errors
+- Enable debug mode in Config for detailed logging
+- Contact Eluna Discord for framework issues

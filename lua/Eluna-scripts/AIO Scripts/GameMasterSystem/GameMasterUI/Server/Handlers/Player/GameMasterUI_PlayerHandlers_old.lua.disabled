@@ -1,0 +1,2818 @@
+--[[
+    GameMaster UI - Player Management Handlers Module
+    
+    This module handles all player management functionality:
+    - Player data queries and search
+    - Gold management
+    - Teleportation
+    - Mail sending
+    - Buff/Aura management
+    - Healing and restoration
+]]--
+
+local PlayerHandlers = {}
+
+-- Module dependencies (will be injected)
+local GameMasterSystem, Config, Utils, Database, EntityHandlers, DatabaseHelper
+
+function PlayerHandlers.RegisterHandlers(gms, config, utils, database, entityHandlers, dbHelper)
+    GameMasterSystem = gms
+    Config = config
+    Utils = utils
+    Database = database
+    EntityHandlers = entityHandlers
+    DatabaseHelper = dbHelper
+    
+    -- Register all player-related handlers
+    GameMasterSystem.getPlayerData = PlayerHandlers.getPlayerData
+    GameMasterSystem.getOfflinePlayerData = PlayerHandlers.getOfflinePlayerData
+    GameMasterSystem.getAllPlayerData = PlayerHandlers.getAllPlayerData
+    GameMasterSystem.refreshPlayerData = PlayerHandlers.refreshPlayerData
+    GameMasterSystem.searchPlayerData = PlayerHandlers.searchPlayerData
+    GameMasterSystem.givePlayerGold = PlayerHandlers.givePlayerGold
+    GameMasterSystem.teleportToPlayer = PlayerHandlers.teleportToPlayer
+    GameMasterSystem.summonPlayer = PlayerHandlers.summonPlayer
+    GameMasterSystem.kickPlayer = PlayerHandlers.kickPlayer
+    GameMasterSystem.sendPlayerMail = PlayerHandlers.sendPlayerMail
+    GameMasterSystem.sendPlayerMailWithItems = PlayerHandlers.sendPlayerMailWithItems
+    
+    -- Batch action handlers
+    GameMasterSystem.batchKick = PlayerHandlers.batchKick
+    GameMasterSystem.batchSummon = PlayerHandlers.batchSummon
+    GameMasterSystem.applyBuffToPlayer = PlayerHandlers.applyBuffToPlayer
+    GameMasterSystem.removePlayerAuras = PlayerHandlers.removePlayerAuras
+    GameMasterSystem.healAndRestorePlayer = PlayerHandlers.healAndRestorePlayer
+    GameMasterSystem.makePlayerCastOnSelf = PlayerHandlers.makePlayerCastOnSelf
+    GameMasterSystem.makePlayerCastOnTarget = PlayerHandlers.makePlayerCastOnTarget
+    GameMasterSystem.castSpellOnPlayer = PlayerHandlers.castSpellOnPlayer
+    
+    -- Player spell management handlers
+    GameMasterSystem.getPlayerSpells = PlayerHandlers.getPlayerSpells
+    GameMasterSystem.submitPlayerSpellbook = PlayerHandlers.submitPlayerSpellbook
+    GameMasterSystem.playerSpellCastOnSelf = PlayerHandlers.playerSpellCastOnSelf
+    GameMasterSystem.playerSpellCastOnTarget = PlayerHandlers.playerSpellCastOnTarget
+    GameMasterSystem.playerSpellCastFromPlayer = PlayerHandlers.playerSpellCastFromPlayer
+    GameMasterSystem.playerSpellApplyAura = PlayerHandlers.playerSpellApplyAura
+    GameMasterSystem.playerSpellRemoveAura = PlayerHandlers.playerSpellRemoveAura
+    GameMasterSystem.playerSpellResetCooldown = PlayerHandlers.playerSpellResetCooldown
+    GameMasterSystem.playerSpellCheckCooldown = PlayerHandlers.playerSpellCheckCooldown
+    GameMasterSystem.playerSpellUnlearn = PlayerHandlers.playerSpellUnlearn
+    GameMasterSystem.playerResetAllCooldowns = PlayerHandlers.playerResetAllCooldowns
+    GameMasterSystem.playerApplyAuraWithDuration = PlayerHandlers.playerApplyAuraWithDuration
+    GameMasterSystem.playerGetAuraInfo = PlayerHandlers.playerGetAuraInfo
+    GameMasterSystem.playerSpellLearn = PlayerHandlers.playerSpellLearn
+    
+    -- Player inventory management handlers
+    GameMasterSystem.getPlayerInventory = PlayerHandlers.getPlayerInventory
+    GameMasterSystem.refreshPlayerInventory = PlayerHandlers.refreshPlayerInventory
+    GameMasterSystem.unequipPlayerItem = PlayerHandlers.unequipPlayerItem
+    GameMasterSystem.equipPlayerItem = PlayerHandlers.equipPlayerItem
+end
+
+-- Player Management Functions
+function PlayerHandlers.getPlayerData(player, offset, pageSize, sortOrder, includeOffline)
+    offset = offset or 0
+    pageSize = Utils.validatePageSize(pageSize or Config.defaultPageSize)
+    sortOrder = Utils.validateSortOrder(sortOrder or "ASC")
+    includeOffline = includeOffline or false
+    
+    print(string.format("[GameMasterSystem] getPlayerData called - includeOffline: %s", tostring(includeOffline)))
+    
+    local playerData = {}
+    local onlinePlayers = GetPlayersInWorld()
+    
+    -- Ensure we have a valid table
+    if not onlinePlayers then
+        print("[GameMasterSystem] ERROR: GetPlayersInWorld() returned nil")
+        onlinePlayers = {}
+    end
+    
+    local totalCount = #onlinePlayers
+    
+    -- Calculate pagination info
+    local paginationInfo = Utils.calculatePaginationInfo(totalCount, offset, pageSize)
+    
+    -- Sort players by name
+    table.sort(onlinePlayers, function(a, b)
+        if sortOrder == "ASC" then
+            return a:GetName() < b:GetName()
+        else
+            return a:GetName() > b:GetName()
+        end
+    end)
+    
+    -- Apply pagination
+    local startIdx = offset + 1
+    local endIdx = math.min(offset + pageSize, #onlinePlayers)
+    
+    for i = startIdx, endIdx do
+        local targetPlayer = onlinePlayers[i]
+        
+        if targetPlayer then
+            -- Wrap player data collection in pcall for error handling
+            local success, err = pcall(function()
+                local classInfo = {
+                    [1] = {name = "Warrior", color = "C79C6E"},
+                    [2] = {name = "Paladin", color = "F58CBA"},
+                    [3] = {name = "Hunter", color = "ABD473"},
+                    [4] = {name = "Rogue", color = "FFF569"},
+                    [5] = {name = "Priest", color = "FFFFFF"},
+                    [6] = {name = "Death Knight", color = "C41F3B"},
+                    [7] = {name = "Shaman", color = "0070DE"},
+                    [8] = {name = "Mage", color = "69CCF0"},
+                    [9] = {name = "Warlock", color = "9482C9"},
+                    [11] = {name = "Druid", color = "FF7D0A"}
+                }
+                
+                local raceInfo = {
+                    [1] = "Human",
+                    [2] = "Orc",
+                    [3] = "Dwarf",
+                    [4] = "Night Elf",
+                    [5] = "Undead",
+                    [6] = "Tauren",
+                    [7] = "Gnome",
+                    [8] = "Troll",
+                    [10] = "Blood Elf",
+                    [11] = "Draenei"
+                }
+                
+                -- Safely get player properties with nil checks
+                local name = targetPlayer:GetName() or "Unknown"
+                
+                local class = targetPlayer:GetClass() or 1
+                local race = targetPlayer:GetRace() or 1
+                local level = targetPlayer:GetLevel() or 1
+                local guild = targetPlayer:GetGuild()
+                local totalMoney = targetPlayer:GetCoinage() or 0
+                local gold = math.floor(totalMoney / 10000)
+                
+                -- Try to get display ID, with fallback
+                local displayId = 0
+                local displaySuccess = pcall(function()
+                    displayId = targetPlayer:GetDisplayId() or 0
+                end)
+                if not displaySuccess then
+                    displayId = 0 -- Use 0 as fallback
+                end
+                
+                -- Get zone name using correct Eluna API
+                local zoneName = "Unknown"
+                local areaId = targetPlayer:GetAreaId()
+                if areaId and areaId > 0 then
+                    -- Try to get area name using global function
+                    local success, areaName = pcall(function()
+                        return GetAreaName(areaId)
+                    end)
+                    if success and areaName then
+                        zoneName = areaName
+                    else
+                        -- Fallback: Query database if GetAreaName fails
+                        local zoneQuery = WorldDBQuery(string.format(
+                            "SELECT name FROM area_template WHERE entry = %d",
+                            areaId
+                        ))
+                        if zoneQuery then
+                            zoneName = zoneQuery:GetString(0) or "Unknown"
+                        end
+                    end
+                end
+                
+                -- Check ban status
+                local accountId = targetPlayer:GetAccountId()
+                local isBanned = false
+                local banType = nil
+                
+                -- Check account ban
+                local accountBan = AuthDBQuery(string.format(
+                    "SELECT 1 FROM account_banned WHERE id = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                    accountId
+                ))
+                if accountBan then
+                    isBanned = true
+                    banType = "Account"
+                else
+                    -- Check character ban (try both databases)
+                    local charBan = CharDBQuery(string.format(
+                        "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                        targetPlayer:GetGUIDLow()
+                    ))
+                    if not charBan then
+                        charBan = AuthDBQuery(string.format(
+                            "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                            targetPlayer:GetGUIDLow()
+                        ))
+                    end
+                    if charBan then
+                        isBanned = true
+                        banType = "Character"
+                    end
+                end
+                
+                local playerInfo = {
+                    name = name,
+                    level = level,
+                    class = classInfo[class] and classInfo[class].name or "Unknown",
+                    classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+                    race = raceInfo[race] or "Unknown",
+                    zone = zoneName,
+                    gold = gold,
+                    guildName = guild and guild:GetName() or nil,
+                    online = true,
+                    displayId = displayId,
+                    isBanned = isBanned,
+                    banType = banType
+                }
+                
+                table.insert(playerData, playerInfo)
+            end)
+            
+            if not success then
+                print("[GameMasterSystem] ERROR collecting player data:", err)
+            end
+        end
+    end
+    
+    -- Send message if no players found
+    if #playerData == 0 and totalCount == 0 then
+        player:SendBroadcastMessage("No players online.")
+    end
+    
+    print(string.format("[GameMasterSystem] Sending %d players to client (online only)", #playerData))
+    AIO.Handle(player, "GameMasterSystem", "receivePlayerData", playerData, offset, pageSize, paginationInfo.hasNextPage, paginationInfo)
+end
+
+-- Get offline player data from database
+function PlayerHandlers.getOfflinePlayerData(player, offset, pageSize, sortOrder)
+    offset = offset or 0
+    pageSize = Utils.validatePageSize(pageSize or Config.defaultPageSize)
+    sortOrder = Utils.validateSortOrder(sortOrder or "ASC")
+    
+    local playerData = {}
+    
+    -- Get online player GUIDs to exclude them from offline query
+    local onlinePlayers = GetPlayersInWorld()
+    local onlineGuids = {}
+    if onlinePlayers then
+        for _, p in ipairs(onlinePlayers) do
+            onlineGuids[p:GetGUIDLow()] = true
+        end
+    end
+    
+    -- Query for offline characters
+    local countQuery = CharDBQuery("SELECT COUNT(*) FROM characters WHERE deleteDate IS NULL")
+    local totalCount = 0
+    if countQuery then
+        totalCount = countQuery:GetUInt32(0)
+    end
+    
+    -- Subtract online players from total
+    totalCount = totalCount - #onlinePlayers
+    
+    -- Calculate pagination
+    local paginationInfo = Utils.calculatePaginationInfo(totalCount, offset, pageSize)
+    
+    -- Main query for offline characters with all needed data
+    local query = string.format([[
+        SELECT 
+            c.guid,
+            c.name,
+            c.race,
+            c.class,
+            c.gender,
+            c.level,
+            c.zone,
+            c.map,
+            c.logout_time,
+            c.account,
+            c.totaltime,
+            c.money,
+            gm.guildid,
+            g.name as guild_name
+        FROM characters c
+        LEFT JOIN guild_member gm ON c.guid = gm.guid
+        LEFT JOIN guild g ON gm.guildid = g.guildid
+        WHERE c.deleteDate IS NULL
+        ORDER BY c.name %s
+        LIMIT %d OFFSET %d
+    ]], sortOrder, pageSize, offset)
+    
+    local result = CharDBQuery(query)
+    
+    if result then
+        -- Class and race info tables
+        local classInfo = {
+            [1] = {name = "Warrior", color = "C79C6E"},
+            [2] = {name = "Paladin", color = "F58CBA"},
+            [3] = {name = "Hunter", color = "ABD473"},
+            [4] = {name = "Rogue", color = "FFF569"},
+            [5] = {name = "Priest", color = "FFFFFF"},
+            [6] = {name = "Death Knight", color = "C41F3B"},
+            [7] = {name = "Shaman", color = "0070DE"},
+            [8] = {name = "Mage", color = "69CCF0"},
+            [9] = {name = "Warlock", color = "9482C9"},
+            [11] = {name = "Druid", color = "FF7D0A"}
+        }
+        
+        local raceInfo = {
+            [1] = "Human",
+            [2] = "Orc",
+            [3] = "Dwarf",
+            [4] = "Night Elf",
+            [5] = "Undead",
+            [6] = "Tauren",
+            [7] = "Gnome",
+            [8] = "Troll",
+            [10] = "Blood Elf",
+            [11] = "Draenei"
+        }
+        
+        repeat
+            local guid = result:GetUInt32(0)
+            
+            -- Skip if player is online
+            if not onlineGuids[guid] then
+                local name = result:GetString(1)
+                local race = result:GetUInt32(2)
+                local class = result:GetUInt32(3)
+                local gender = result:GetUInt32(4)
+                local level = result:GetUInt32(5)
+                local zone = result:GetUInt32(6)
+                local map = result:GetUInt32(7)
+                local logoutTime = result:GetUInt32(8)
+                local accountId = result:GetUInt32(9)
+                local totalTime = result:GetUInt32(10)
+                local money = result:GetUInt32(11)
+                local guildId = result:GetUInt32(12)
+                local guildName = result:GetString(13)
+                
+                -- Get zone name from world database
+                local zoneName = "Unknown"
+                local zoneQuery = WorldDBQuery(string.format(
+                    "SELECT name FROM area_template WHERE entry = %d",
+                    zone
+                ))
+                if zoneQuery then
+                    zoneName = zoneQuery:GetString(0) or "Unknown"
+                end
+                
+                -- Check ban status
+                local isBanned = false
+                local banType = nil
+                
+                -- Check account ban
+                local accountBan = AuthDBQuery(string.format(
+                    "SELECT 1 FROM account_banned WHERE id = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                    accountId
+                ))
+                if accountBan then
+                    isBanned = true
+                    banType = "Account"
+                else
+                    -- Check character ban
+                    local charBan = CharDBQuery(string.format(
+                        "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                        guid
+                    ))
+                    if not charBan then
+                        charBan = AuthDBQuery(string.format(
+                            "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                            guid
+                        ))
+                    end
+                    if charBan then
+                        isBanned = true
+                        banType = "Character"
+                    end
+                end
+                
+                -- Calculate time since logout
+                local currentTime = os.time()
+                local timeSinceLogout = currentTime - logoutTime
+                local lastSeen = "Unknown"
+                
+                if timeSinceLogout < 3600 then
+                    lastSeen = string.format("%d minutes ago", math.floor(timeSinceLogout / 60))
+                elseif timeSinceLogout < 86400 then
+                    lastSeen = string.format("%d hours ago", math.floor(timeSinceLogout / 3600))
+                elseif timeSinceLogout < 604800 then
+                    lastSeen = string.format("%d days ago", math.floor(timeSinceLogout / 86400))
+                else
+                    lastSeen = string.format("%d weeks ago", math.floor(timeSinceLogout / 604800))
+                end
+                
+                local gold = math.floor(money / 10000)
+                
+                local playerInfo = {
+                    name = name,
+                    level = level,
+                    class = classInfo[class] and classInfo[class].name or "Unknown",
+                    classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+                    race = raceInfo[race] or "Unknown",
+                    zone = zoneName,
+                    gold = gold,
+                    guildName = guildName,
+                    online = false,
+                    displayId = 0,  -- Offline players don't have display ID
+                    isBanned = isBanned,
+                    banType = banType,
+                    lastSeen = lastSeen,
+                    guid = guid,
+                    accountId = accountId
+                }
+                
+                table.insert(playerData, playerInfo)
+            end
+        until not result:NextRow()
+    end
+    
+    AIO.Handle(player, "GameMasterSystem", "receivePlayerData", playerData, offset, pageSize, paginationInfo.hasNextPage, paginationInfo)
+end
+
+-- Get all players (online and offline)
+function PlayerHandlers.getAllPlayerData(player, offset, pageSize, sortOrder)
+    offset = offset or 0
+    pageSize = Utils.validatePageSize(pageSize or Config.defaultPageSize)
+    sortOrder = Utils.validateSortOrder(sortOrder or "ASC")
+    
+    print("[GameMasterSystem] getAllPlayerData called - will return online AND offline players")
+    
+    local allPlayers = {}
+    
+    -- First get online players
+    local onlinePlayers = GetPlayersInWorld()
+    local onlineGuids = {}
+    
+    if onlinePlayers then
+        -- Class and race info tables
+        local classInfo = {
+            [1] = {name = "Warrior", color = "C79C6E"},
+            [2] = {name = "Paladin", color = "F58CBA"},
+            [3] = {name = "Hunter", color = "ABD473"},
+            [4] = {name = "Rogue", color = "FFF569"},
+            [5] = {name = "Priest", color = "FFFFFF"},
+            [6] = {name = "Death Knight", color = "C41F3B"},
+            [7] = {name = "Shaman", color = "0070DE"},
+            [8] = {name = "Mage", color = "69CCF0"},
+            [9] = {name = "Warlock", color = "9482C9"},
+            [11] = {name = "Druid", color = "FF7D0A"}
+        }
+        
+        local raceInfo = {
+            [1] = "Human",
+            [2] = "Orc",
+            [3] = "Dwarf",
+            [4] = "Night Elf",
+            [5] = "Undead",
+            [6] = "Tauren",
+            [7] = "Gnome",
+            [8] = "Troll",
+            [10] = "Blood Elf",
+            [11] = "Draenei"
+        }
+        
+        for _, targetPlayer in ipairs(onlinePlayers) do
+            local guid = targetPlayer:GetGUIDLow()
+            onlineGuids[guid] = true
+            
+            local success, playerInfo = pcall(function()
+                local class = targetPlayer:GetClass() or 1
+                local race = targetPlayer:GetRace() or 1
+                local guild = targetPlayer:GetGuild()
+                local totalMoney = targetPlayer:GetCoinage() or 0
+                local gold = math.floor(totalMoney / 10000)
+                local accountId = targetPlayer:GetAccountId()
+                
+                -- Check ban status
+                local isBanned = false
+                local banType = nil
+                
+                local accountBan = AuthDBQuery(string.format(
+                    "SELECT 1 FROM account_banned WHERE id = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                    accountId
+                ))
+                if accountBan then
+                    isBanned = true
+                    banType = "Account"
+                else
+                    local charBan = CharDBQuery(string.format(
+                        "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                        guid
+                    ))
+                    if not charBan then
+                        charBan = AuthDBQuery(string.format(
+                            "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                            guid
+                        ))
+                    end
+                    if charBan then
+                        isBanned = true
+                        banType = "Character"
+                    end
+                end
+                
+                -- Get zone name using correct Eluna API
+                local zoneName = "Unknown"
+                local areaId = targetPlayer:GetAreaId()
+                if areaId and areaId > 0 then
+                    -- Try to get area name using global function
+                    local success, areaName = pcall(function()
+                        return GetAreaName(areaId)
+                    end)
+                    if success and areaName then
+                        zoneName = areaName
+                    else
+                        -- Fallback: Query database if GetAreaName fails
+                        local zoneQuery = WorldDBQuery(string.format(
+                            "SELECT name FROM area_template WHERE entry = %d",
+                            areaId
+                        ))
+                        if zoneQuery then
+                            zoneName = zoneQuery:GetString(0) or "Unknown"
+                        end
+                    end
+                end
+                
+                return {
+                    name = targetPlayer:GetName() or "Unknown",
+                    level = targetPlayer:GetLevel() or 1,
+                    class = classInfo[class] and classInfo[class].name or "Unknown",
+                    classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+                    race = raceInfo[race] or "Unknown",
+                    zone = zoneName,
+                    gold = gold,
+                    guildName = guild and guild:GetName() or nil,
+                    online = true,
+                    displayId = targetPlayer:GetDisplayId() or 0,
+                    isBanned = isBanned,
+                    banType = banType,
+                    lastSeen = "Online",
+                    guid = guid,
+                    accountId = accountId
+                }
+            end)
+            
+            if success and playerInfo then
+                table.insert(allPlayers, playerInfo)
+            end
+        end
+    end
+    
+    -- Then add offline players from database
+    local offlineQuery = CharDBQuery([[
+        SELECT 
+            c.guid,
+            c.name,
+            c.race,
+            c.class,
+            c.gender,
+            c.level,
+            c.zone,
+            c.map,
+            c.logout_time,
+            c.account,
+            c.totaltime,
+            c.money,
+            gm.guildid,
+            g.name as guild_name
+        FROM characters c
+        LEFT JOIN guild_member gm ON c.guid = gm.guid
+        LEFT JOIN guild g ON gm.guildid = g.guildid
+        WHERE c.deleteDate IS NULL
+    ]])
+    
+    if offlineQuery then
+        local classInfo = {
+            [1] = {name = "Warrior", color = "C79C6E"},
+            [2] = {name = "Paladin", color = "F58CBA"},
+            [3] = {name = "Hunter", color = "ABD473"},
+            [4] = {name = "Rogue", color = "FFF569"},
+            [5] = {name = "Priest", color = "FFFFFF"},
+            [6] = {name = "Death Knight", color = "C41F3B"},
+            [7] = {name = "Shaman", color = "0070DE"},
+            [8] = {name = "Mage", color = "69CCF0"},
+            [9] = {name = "Warlock", color = "9482C9"},
+            [11] = {name = "Druid", color = "FF7D0A"}
+        }
+        
+        local raceInfo = {
+            [1] = "Human",
+            [2] = "Orc",
+            [3] = "Dwarf",
+            [4] = "Night Elf",
+            [5] = "Undead",
+            [6] = "Tauren",
+            [7] = "Gnome",
+            [8] = "Troll",
+            [10] = "Blood Elf",
+            [11] = "Draenei"
+        }
+        
+        repeat
+            local guid = offlineQuery:GetUInt32(0)
+            
+            -- Only add if not online
+            if not onlineGuids[guid] then
+                local logoutTime = offlineQuery:GetUInt32(8)
+                local currentTime = os.time()
+                local timeSinceLogout = currentTime - logoutTime
+                local lastSeen = "Unknown"
+                
+                if timeSinceLogout < 3600 then
+                    lastSeen = string.format("%d min ago", math.floor(timeSinceLogout / 60))
+                elseif timeSinceLogout < 86400 then
+                    lastSeen = string.format("%d hrs ago", math.floor(timeSinceLogout / 3600))
+                elseif timeSinceLogout < 604800 then
+                    lastSeen = string.format("%d days ago", math.floor(timeSinceLogout / 86400))
+                else
+                    lastSeen = string.format("%d wks ago", math.floor(timeSinceLogout / 604800))
+                end
+                
+                local class = offlineQuery:GetUInt32(3)
+                local race = offlineQuery:GetUInt32(2)
+                local money = offlineQuery:GetUInt32(11)
+                local accountId = offlineQuery:GetUInt32(9)
+                
+                -- Check ban status
+                local isBanned = false
+                local banType = nil
+                
+                local accountBan = AuthDBQuery(string.format(
+                    "SELECT 1 FROM account_banned WHERE id = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                    accountId
+                ))
+                if accountBan then
+                    isBanned = true
+                    banType = "Account"
+                else
+                    local charBan = CharDBQuery(string.format(
+                        "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                        guid
+                    ))
+                    if not charBan then
+                        charBan = AuthDBQuery(string.format(
+                            "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                            guid
+                        ))
+                    end
+                    if charBan then
+                        isBanned = true
+                        banType = "Character"
+                    end
+                end
+                
+                local playerInfo = {
+                    name = offlineQuery:GetString(1),
+                    level = offlineQuery:GetUInt32(5),
+                    class = classInfo[class] and classInfo[class].name or "Unknown",
+                    classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+                    race = raceInfo[race] or "Unknown",
+                    zone = "Offline",
+                    gold = math.floor(money / 10000),
+                    guildName = offlineQuery:GetString(13),
+                    online = false,
+                    displayId = 0,
+                    isBanned = isBanned,
+                    banType = banType,
+                    lastSeen = lastSeen,
+                    guid = guid,
+                    accountId = accountId
+                }
+                
+                table.insert(allPlayers, playerInfo)
+            end
+        until not offlineQuery:NextRow()
+    end
+    
+    -- Sort all players
+    table.sort(allPlayers, function(a, b)
+        -- First sort by online status (online first)
+        if a.online ~= b.online then
+            return a.online
+        end
+        -- Then by name
+        if sortOrder == "ASC" then
+            return a.name < b.name
+        else
+            return a.name > b.name
+        end
+    end)
+    
+    -- Apply pagination
+    local totalCount = #allPlayers
+    local paginationInfo = Utils.calculatePaginationInfo(totalCount, offset, pageSize)
+    
+    local paginatedData = {}
+    local startIdx = offset + 1
+    local endIdx = math.min(offset + pageSize, totalCount)
+    
+    for i = startIdx, endIdx do
+        if allPlayers[i] then
+            table.insert(paginatedData, allPlayers[i])
+        end
+    end
+    
+    print(string.format("[GameMasterSystem] Sending %d players to client (online + offline)", #paginatedData))
+    AIO.Handle(player, "GameMasterSystem", "receivePlayerData", paginatedData, offset, pageSize, paginationInfo.hasNextPage, paginationInfo)
+end
+
+function PlayerHandlers.searchPlayerData(player, query, offset, pageSize, sortOrder)
+    if not query or query == "" then
+        return PlayerHandlers.getPlayerData(player, offset, pageSize, sortOrder)
+    end
+    
+    offset = offset or 0
+    pageSize = Utils.validatePageSize(pageSize or Config.defaultPageSize)
+    sortOrder = Utils.validateSortOrder(sortOrder or "ASC")
+    
+    local playerData = {}
+    local onlinePlayers = GetPlayersInWorld()
+    local matchingPlayers = {}
+    
+    -- Filter players by search query
+    query = query:lower()
+    for _, targetPlayer in ipairs(onlinePlayers) do
+        if targetPlayer:GetName():lower():find(query, 1, true) then
+            table.insert(matchingPlayers, targetPlayer)
+        end
+    end
+    
+    local totalCount = #matchingPlayers
+    
+    -- For search, we use limited pagination info since we're working with in-memory data
+    local paginationInfo = {
+        totalCount = totalCount,
+        hasNextPage = (offset + pageSize) < totalCount,
+        currentOffset = offset,
+        pageSize = pageSize,
+        isEmpty = totalCount == 0
+    }
+    
+    -- If no matching players, send empty response
+    if paginationInfo.isEmpty then
+        AIO.Handle(player, "GameMasterSystem", "receivePlayerData", {}, offset, pageSize, false, paginationInfo)
+        return
+    end
+    
+    -- Sort matching players
+    table.sort(matchingPlayers, function(a, b)
+        if sortOrder == "ASC" then
+            return a:GetName() < b:GetName()
+        else
+            return a:GetName() > b:GetName()
+        end
+    end)
+    
+    -- Apply pagination to matching players
+    local startIdx = offset + 1
+    local endIdx = math.min(offset + pageSize, #matchingPlayers)
+    
+    for i = startIdx, endIdx do
+        local targetPlayer = matchingPlayers[i]
+        if targetPlayer then
+            -- Same player data collection as above
+            local classInfo = {
+                [1] = {name = "Warrior", color = "C79C6E"},
+                [2] = {name = "Paladin", color = "F58CBA"},
+                [3] = {name = "Hunter", color = "ABD473"},
+                [4] = {name = "Rogue", color = "FFF569"},
+                [5] = {name = "Priest", color = "FFFFFF"},
+                [6] = {name = "Death Knight", color = "C41F3B"},
+                [7] = {name = "Shaman", color = "0070DE"},
+                [8] = {name = "Mage", color = "69CCF0"},
+                [9] = {name = "Warlock", color = "9482C9"},
+                [11] = {name = "Druid", color = "FF7D0A"}
+            }
+            
+            local raceInfo = {
+                [1] = "Human",
+                [2] = "Orc",
+                [3] = "Dwarf",
+                [4] = "Night Elf",
+                [5] = "Undead",
+                [6] = "Tauren",
+                [7] = "Gnome",
+                [8] = "Troll",
+                [10] = "Blood Elf",
+                [11] = "Draenei"
+            }
+            
+            local class = targetPlayer:GetClass()
+            local race = targetPlayer:GetRace()
+            local guild = targetPlayer:GetGuild()
+            local totalMoney = targetPlayer:GetCoinage()
+            local gold = math.floor(totalMoney / 10000)
+            
+            -- Check ban status
+            local accountId = targetPlayer:GetAccountId()
+            local isBanned = false
+            local banType = nil
+            
+            -- Check account ban
+            local accountBan = AuthDBQuery(string.format(
+                "SELECT 1 FROM account_banned WHERE id = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                accountId
+            ))
+            if accountBan then
+                isBanned = true
+                banType = "Account"
+            else
+                -- Check character ban
+                local charBan = CharDBQuery(string.format(
+                    "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                    targetPlayer:GetGUIDLow()
+                ))
+                if not charBan then
+                    charBan = AuthDBQuery(string.format(
+                        "SELECT 1 FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
+                        targetPlayer:GetGUIDLow()
+                    ))
+                end
+                if charBan then
+                    isBanned = true
+                    banType = "Character"
+                end
+            end
+            
+            -- Get zone name using correct Eluna API
+            local zoneName = "Unknown"
+            local areaId = targetPlayer:GetAreaId()
+            if areaId and areaId > 0 then
+                -- Try to get area name using global function
+                local success, areaName = pcall(function()
+                    return GetAreaName(areaId)
+                end)
+                if success and areaName then
+                    zoneName = areaName
+                else
+                    -- Fallback: Query database if GetAreaName fails
+                    local zoneQuery = WorldDBQuery(string.format(
+                        "SELECT name FROM area_template WHERE entry = %d",
+                        areaId
+                    ))
+                    if zoneQuery then
+                        zoneName = zoneQuery:GetString(0) or "Unknown"
+                    end
+                end
+            end
+            
+            local playerInfo = {
+                name = targetPlayer:GetName(),
+                level = targetPlayer:GetLevel(),
+                class = classInfo[class] and classInfo[class].name or "Unknown",
+                classColor = classInfo[class] and classInfo[class].color or "FFFFFF",
+                race = raceInfo[race] or "Unknown",
+                zone = zoneName,
+                gold = gold,
+                guildName = guild and guild:GetName() or nil,
+                online = true,
+                displayId = targetPlayer:GetDisplayId(),
+                isBanned = isBanned,
+                banType = banType
+            }
+            
+            table.insert(playerData, playerInfo)
+        end
+    end
+    
+    AIO.Handle(player, "GameMasterSystem", "receivePlayerData", playerData, offset, pageSize, paginationInfo.hasNextPage, paginationInfo)
+end
+
+-- Refresh player data (forces a fresh fetch)
+function PlayerHandlers.refreshPlayerData(player)
+    -- Force a complete refresh by clearing any cached data first
+    -- Note: Since we're fetching live data from GetPlayersInWorld(), 
+    -- this will always get the current online players
+    
+    -- Simply call getPlayerData with default parameters
+    PlayerHandlers.getPlayerData(player, 0, Config.defaultPageSize, "ASC")
+end
+
+-- Player management action handlers
+function PlayerHandlers.givePlayerGold(player, targetName, amount)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then
+        Utils.sendMessage(player, "error", "Invalid gold amount.")
+        return
+    end
+    
+    -- Convert gold to copper (1 gold = 10000 copper)
+    local copper = amount * 10000
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Give gold
+    targetPlayer:ModifyMoney(copper)
+    
+    -- Notify both players
+    Utils.sendMessage(player, "success", string.format("Gave %d gold to %s.", amount, targetName))
+    targetPlayer:SendBroadcastMessage(string.format("You received %d gold from Staff %s.", amount, player:GetName()))
+end
+
+function PlayerHandlers.teleportToPlayer(player, targetName)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Teleport GM to player
+    player:Teleport(
+        targetPlayer:GetMapId(),
+        targetPlayer:GetX(),
+        targetPlayer:GetY(),
+        targetPlayer:GetZ(),
+        targetPlayer:GetO()
+    )
+    
+    Utils.sendMessage(player, "success", "Teleported to " .. targetName .. ".")
+end
+
+function PlayerHandlers.summonPlayer(player, targetName)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Summon player to GM
+    targetPlayer:Teleport(
+        player:GetMapId(),
+        player:GetX(),
+        player:GetY(),
+        player:GetZ(),
+        player:GetO()
+    )
+    
+    Utils.sendMessage(player, "success", "Summoned " .. targetName .. " to your location.")
+    targetPlayer:SendBroadcastMessage("You have been summoned by Staff " .. player:GetName() .. ".")
+end
+
+function PlayerHandlers.kickPlayer(player, targetName, reason)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    reason = reason or "Kicked by GM"
+    
+    -- Kick the player
+    targetPlayer:KickPlayer()
+    
+    Utils.sendMessage(player, "success", string.format("Kicked %s. Reason: %s", targetName, reason))
+end
+
+function PlayerHandlers.sendPlayerMail(player, targetName, subject, body, gold)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Validate inputs
+    if not subject or subject == "" then
+        Utils.sendMessage(player, "error", "Mail subject cannot be empty.")
+        return
+    end
+    
+    if not body or body == "" then
+        Utils.sendMessage(player, "error", "Mail body cannot be empty.")
+        return
+    end
+    
+    gold = tonumber(gold) or 0
+    if gold < 0 then
+        gold = 0
+    end
+    
+    -- Convert gold to copper
+    local copper = gold * 10000
+    
+    -- Find target player (can be offline for mail)
+    local targetGuid = nil
+    local targetPlayer = GetPlayerByName(targetName)
+    
+    if targetPlayer then
+        targetGuid = targetPlayer:GetGUIDLow()
+    else
+        -- Try to find offline player
+        local result = CharDBQuery(string.format("SELECT guid FROM characters WHERE name = '%s'", targetName))
+        if result then
+            targetGuid = result:GetUInt32(0)
+        else
+            Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found.")
+            return
+        end
+    end
+    
+    -- Send mail using Eluna's SendMail function
+    -- SendMail(subject, body, receiverGuid, senderGuid, stationary, delay, money, cod, entry, amount)
+    -- Using GM stationery (61) instead of default (41)
+    SendMail(subject, body, targetGuid, 0, 61, 0, copper, 0, 0, 0)
+    
+    Utils.sendMessage(player, "success", string.format("Mail sent to %s with subject: %s", targetName, subject))
+    
+    -- Notify online player
+    if targetPlayer then
+        targetPlayer:SendBroadcastMessage(string.format("You have received mail from Staff %s.", player:GetName()))
+    end
+end
+
+function PlayerHandlers.sendPlayerMailWithItems(player, data)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Extract data from table
+    local targetName = data.recipient
+    local subject = data.subject
+    local body = data.message
+    local money = data.money or 0
+    local cod = data.cod or 0
+    local items = data.items or {}
+    local stationery = data.stationery or 61  -- GM stationery (61) by default
+    local delay = data.delay or 0
+    
+    -- Validate inputs
+    if not targetName or targetName == "" then
+        Utils.sendMessage(player, "error", "Recipient name cannot be empty.")
+        return
+    end
+    
+    if not subject or subject == "" then
+        Utils.sendMessage(player, "error", "Mail subject cannot be empty.")
+        return
+    end
+    
+    if not body or body == "" then
+        Utils.sendMessage(player, "error", "Mail body cannot be empty.")
+        return
+    end
+    
+    -- Validate money and cod
+    money = tonumber(money) or 0
+    cod = tonumber(cod) or 0
+    
+    if money < 0 then money = 0 end
+    if cod < 0 then cod = 0 end
+    
+    -- Find target player (can be offline for mail)
+    local targetGuid = nil
+    local targetPlayer = GetPlayerByName(targetName)
+    
+    if targetPlayer then
+        targetGuid = targetPlayer:GetGUIDLow()
+    else
+        -- Try to find offline player
+        local result = CharDBQuery(string.format("SELECT guid FROM characters WHERE name = '%s'", targetName))
+        if result then
+            targetGuid = result:GetUInt32(0)
+        else
+            Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found.")
+            return
+        end
+    end
+    
+    -- Build SendMail parameters
+    -- SendMail(subject, text, receiverGUIDLow, senderGUIDLow, stationary, delay, money, cod, entry1, amount1, entry2, amount2, ...)
+    -- Using senderGUIDLow = 0 to make it appear from "Game Master" system
+    local params = {
+        subject,
+        body,
+        targetGuid,
+        0,  -- Sender GUID 0 = system/GM mail
+        stationery,
+        delay,
+        money,
+        cod
+    }
+    
+    -- Add items (up to 12)
+    local itemCount = 0
+    for i = 1, math.min(#items, 12) do
+        local item = items[i]
+        if item and item.entry then
+            local entry = tonumber(item.entry) or 0
+            local amount = tonumber(item.amount) or 1
+            
+            if entry > 0 and amount > 0 then
+                table.insert(params, entry)
+                table.insert(params, amount)
+                itemCount = itemCount + 1
+            end
+        end
+    end
+    
+    -- Send the mail using unpacked parameters
+    SendMail(unpack(params))
+    
+    -- Send success message
+    if itemCount > 0 then
+        Utils.sendMessage(player, "success", string.format("Mail sent to %s with %d item(s). Subject: %s", targetName, itemCount, subject))
+    else
+        Utils.sendMessage(player, "success", string.format("Mail sent to %s. Subject: %s", targetName, subject))
+    end
+    
+    -- Notify online player
+    if targetPlayer then
+        if itemCount > 0 then
+            targetPlayer:SendBroadcastMessage(string.format("You have received mail with %d item(s) from Staff %s.", itemCount, player:GetName()))
+        else
+            targetPlayer:SendBroadcastMessage(string.format("You have received mail from Staff %s.", player:GetName()))
+        end
+    end
+end
+
+-- Batch Action Functions
+function PlayerHandlers.batchKick(player, playerNames, reason)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    if not playerNames or type(playerNames) ~= "table" or #playerNames == 0 then
+        Utils.sendMessage(player, "error", "No players selected for batch kick.")
+        return
+    end
+    
+    reason = reason or "Kicked by GM (Batch Action)"
+    local successCount = 0
+    local failedPlayers = {}
+    
+    for _, targetName in ipairs(playerNames) do
+        local targetPlayer = GetPlayerByName(targetName)
+        if targetPlayer then
+            targetPlayer:KickPlayer()
+            successCount = successCount + 1
+        else
+            table.insert(failedPlayers, targetName)
+        end
+    end
+    
+    -- Send feedback
+    if successCount > 0 then
+        Utils.sendMessage(player, "success", string.format("Successfully kicked %d player(s). Reason: %s", successCount, reason))
+    end
+    
+    if #failedPlayers > 0 then
+        Utils.sendMessage(player, "warning", string.format("Failed to kick %d player(s) (offline or not found): %s", 
+            #failedPlayers, table.concat(failedPlayers, ", ")))
+    end
+end
+
+function PlayerHandlers.batchSummon(player, playerNames)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    if not playerNames or type(playerNames) ~= "table" or #playerNames == 0 then
+        Utils.sendMessage(player, "error", "No players selected for batch summon.")
+        return
+    end
+    
+    local onlineCount = 0
+    local offlineCount = 0
+    local notFoundPlayers = {}
+    
+    -- Get GM's location
+    local mapId = player:GetMapId()
+    local x, y, z, o = player:GetX(), player:GetY(), player:GetZ(), player:GetO()
+    
+    for _, targetName in ipairs(playerNames) do
+        -- Try to find online player first
+        local targetPlayer = GetPlayerByName(targetName)
+        if targetPlayer then
+            -- Player is online, teleport immediately
+            targetPlayer:Teleport(mapId, x, y, z, o)
+            targetPlayer:SendBroadcastMessage(string.format("You have been summoned by Staff %s.", player:GetName()))
+            onlineCount = onlineCount + 1
+        else
+            -- Player not online, check if they exist in database and update position
+            local escapedName = targetName:gsub("'", "''")  -- Escape single quotes for SQL
+            
+            -- Check if player exists
+            local checkQuery = string.format("SELECT guid FROM characters WHERE name = '%s'", escapedName)
+            local result = CharDBQuery(checkQuery)
+            
+            if result then
+                -- Player exists, update their position for next login
+                local updateQuery = string.format(
+                    "UPDATE characters SET position_x = %f, position_y = %f, position_z = %f, map = %d, orientation = %f WHERE name = '%s'",
+                    x, y, z, mapId, o, escapedName
+                )
+                CharDBExecute(updateQuery)
+                offlineCount = offlineCount + 1
+            else
+                -- Player doesn't exist
+                table.insert(notFoundPlayers, targetName)
+            end
+        end
+    end
+    
+    -- Send detailed feedback
+    local messages = {}
+    
+    if onlineCount > 0 then
+        table.insert(messages, string.format("%d player(s) summoned immediately", onlineCount))
+    end
+    
+    if offlineCount > 0 then
+        table.insert(messages, string.format("%d offline player(s) will be summoned on next login", offlineCount))
+    end
+    
+    if #notFoundPlayers > 0 then
+        table.insert(messages, string.format("%d player(s) not found: %s", 
+            #notFoundPlayers, table.concat(notFoundPlayers, ", ")))
+    end
+    
+    if #messages > 0 then
+        Utils.sendMessage(player, "success", "Summon results: " .. table.concat(messages, ", "))
+    end
+end
+
+-- Buff/Aura Management Functions
+function PlayerHandlers.applyBuffToPlayer(player, targetName, spellId)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    spellId = tonumber(spellId)
+    if not spellId or spellId <= 0 then
+        Utils.sendMessage(player, "error", "Invalid spell ID.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Apply the buff/aura using the correct Eluna API
+    -- The caster (GM) adds the aura to the target
+    player:AddAura(spellId, targetPlayer)
+    
+    Utils.sendMessage(player, "success", string.format("Applied buff (ID: %d) to %s.", spellId, targetName))
+    targetPlayer:SendBroadcastMessage(string.format("You received a buff from Staff %s.", player:GetName()))
+end
+
+function PlayerHandlers.removePlayerAuras(player, targetName)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Remove all auras
+    targetPlayer:RemoveAllAuras()
+    
+    Utils.sendMessage(player, "success", string.format("Removed all auras from %s.", targetName))
+    targetPlayer:SendBroadcastMessage(string.format("All your auras have been removed by Staff %s.", player:GetName()))
+end
+
+function PlayerHandlers.healAndRestorePlayer(player, targetName)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Full heal
+    targetPlayer:SetHealth(targetPlayer:GetMaxHealth())
+    
+    -- Restore mana/energy/rage
+    local powerType = targetPlayer:GetPowerType()
+    targetPlayer:SetPower(targetPlayer:GetMaxPower(powerType), powerType)
+    
+    -- Remove common debuffs by spell ID
+    -- Common debuff IDs in 3.3.5
+    local commonDebuffs = {
+        15007, -- Resurrection Sickness
+        25771, -- Forbearance
+        57723, -- Exhaustion (heroism/bloodlust debuff)
+        57724, -- Sated (heroism/bloodlust debuff)
+        26013, -- Deserter
+        -- Add more common debuffs as needed
+    }
+    
+    for _, debuffId in ipairs(commonDebuffs) do
+        if targetPlayer:HasAura(debuffId) then
+            targetPlayer:RemoveAura(debuffId)
+        end
+    end
+    
+    -- Alternative: Remove ALL auras (both positive and negative)
+    -- This is more thorough but also removes buffs
+    -- targetPlayer:RemoveAllAuras()
+    
+    Utils.sendMessage(player, "success", string.format("Fully healed and restored %s.", targetName))
+    targetPlayer:SendBroadcastMessage(string.format("You have been fully restored by Staff %s.", player:GetName()))
+end
+
+function PlayerHandlers.makePlayerCastOnSelf(player, targetName, spellId)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    spellId = tonumber(spellId)
+    if not spellId or spellId <= 0 then
+        Utils.sendMessage(player, "error", "Invalid spell ID.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Make player cast spell on themselves
+    targetPlayer:CastSpell(targetPlayer, spellId, true)
+    
+    Utils.sendMessage(player, "success", string.format("Made %s cast spell (ID: %d) on themselves.", targetName, spellId))
+end
+
+function PlayerHandlers.makePlayerCastOnTarget(player, targetName, spellId)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    spellId = tonumber(spellId)
+    if not spellId or spellId <= 0 then
+        Utils.sendMessage(player, "error", "Invalid spell ID.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Get player's target
+    local playersTarget = targetPlayer:GetSelection()
+    if not playersTarget then
+        Utils.sendMessage(player, "error", targetName .. " has no target selected.")
+        return
+    end
+    
+    -- Make player cast spell on their target
+    targetPlayer:CastSpell(playersTarget, spellId, true)
+    
+    Utils.sendMessage(player, "success", string.format("Made %s cast spell (ID: %d) on their target.", targetName, spellId))
+end
+
+function PlayerHandlers.castSpellOnPlayer(player, targetName, spellId)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    spellId = tonumber(spellId)
+    if not spellId or spellId <= 0 then
+        Utils.sendMessage(player, "error", "Invalid spell ID.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- GM casts spell on target player
+    player:CastSpell(targetPlayer, spellId, true)
+    
+    Utils.sendMessage(player, "success", string.format("Cast spell (ID: %d) on %s.", spellId, targetName))
+    targetPlayer:SendBroadcastMessage(string.format("Staff %s cast a spell on you.", player:GetName()))
+end
+
+-- Player Spell Management Functions
+function PlayerHandlers.getPlayerSpells(player, targetName)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    -- print(string.format("[GameMasterSystem] Fetching spells for player: %s", targetName))
+    
+    -- Always use database approach for consistency
+    -- First, get the character GUID
+    local guidQuery = CharDBQuery(string.format(
+        "SELECT guid FROM characters WHERE name = '%s'",
+        targetName
+    ))
+    
+    if not guidQuery then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found in database.")
+        AIO.Handle(player, "GameMasterSystem", "receiveSpellString", "")
+        return
+    end
+    
+    local characterGuid = guidQuery:GetUInt32(0)
+    -- print(string.format("[GameMasterSystem] Found character GUID: %d for %s", characterGuid, targetName))
+    
+    -- Query both character_spell and character_talent tables
+    local spellQuery = string.format([[
+        SELECT 
+            cs.spell as spell_id,
+            cs.active,
+            cs.disabled,
+            'spell' as spell_type
+        FROM character_spell cs
+        WHERE cs.guid = %d
+        
+        UNION ALL
+        
+        SELECT 
+            ct.spell as spell_id,
+            1 as active,
+            0 as disabled,
+            'talent' as spell_type
+        FROM character_talent ct
+        WHERE ct.guid = %d
+        
+        ORDER BY spell_id ASC
+    ]], characterGuid, characterGuid)
+    
+    local result = CharDBQuery(spellQuery)
+    local spellStrings = {}
+    local spellCount = 0
+    local spellIds = {} -- Track spell IDs to avoid duplicates
+    
+    if result then
+        repeat
+            local spellId = result:GetUInt32(0)
+            local active = result:GetUInt32(1)
+            local disabled = result:GetUInt32(2)
+            local spellType = result:GetString(3)
+            
+            -- Skip if we've already processed this spell ID (avoid duplicates)
+            if not spellIds[spellId] then
+                spellIds[spellId] = true
+                
+                -- Get spell name and rank from world database
+                -- Note: Some databases might have 'rank' instead of 'rank0'
+                local spellInfoQuery = WorldDBQuery(string.format(
+                    "SELECT spellName0 FROM spell WHERE id = %d",
+                    spellId
+                ))
+                
+                local spellName = "Unknown"
+                local spellRank = ""
+                
+                if spellInfoQuery then
+                    spellName = spellInfoQuery:GetString(0) or "Unknown"
+                    -- Try to get rank if column exists (may vary by database)
+                    -- We'll just leave rank empty for now as it's not critical
+                    spellRank = ""
+                    -- Clean up the strings to avoid delimiter issues
+                    spellName = spellName:gsub("[|;]", " ")
+                    spellRank = spellRank:gsub("[|;]", " ")
+                end
+                
+                -- Format: id|name|rank|type|active|disabled
+                local spellString = string.format("%d|%s|%s|%s|%d|%d", 
+                    spellId,
+                    spellName,
+                    spellRank,
+                    spellType,
+                    active,
+                    disabled
+                )
+                
+                table.insert(spellStrings, spellString)
+                spellCount = spellCount + 1
+                
+                -- Debug output for first few spells (disabled)
+                -- if spellCount <= 3 then
+                --     print(string.format("[GameMasterSystem] Spell %d: ID=%d, Name=%s, Type=%s", 
+                --         spellCount, spellId, spellName, spellType))
+                -- end
+            end
+            
+        until not result:NextRow()
+    else
+        -- print(string.format("[GameMasterSystem] No spell data returned from query for GUID %d", characterGuid))
+    end
+    
+    -- print(string.format("[GameMasterSystem] Found %d spells for %s", spellCount, targetName))
+    
+    -- Check if player is online to get additional runtime spell information
+    local targetPlayer = GetPlayerByName(targetName)
+    if targetPlayer then
+        -- Player is online, we can get additional spells they may have learned during this session
+        -- that haven't been saved to database yet
+        
+        -- Note: HasSpell checks runtime spell knowledge
+        -- We could iterate through common spell IDs if needed, but this would be expensive
+        -- For now, database spells should be sufficient
+        
+        -- print(string.format("[GameMasterSystem] Player %s is online, using database spells", targetName))
+    else
+        -- print(string.format("[GameMasterSystem] Player %s is offline, using database spells only", targetName))
+    end
+    
+    -- Send spell data to client
+    if #spellStrings > 0 then
+        local spellDataString = table.concat(spellStrings, ";")
+        -- Debug output (disabled)
+        -- print(string.format("[GameMasterSystem] Sending %d spells, string length: %d", #spellStrings, #spellDataString))
+        -- print(string.format("[GameMasterSystem] First 200 chars: %s", spellDataString:sub(1, 200)))
+        
+        AIO.Handle(player, "GameMasterSystem", "receiveSpellString", spellDataString)
+        Utils.sendMessage(player, "success", string.format("Loaded %d spells for %s", spellCount, targetName))
+    else
+        AIO.Handle(player, "GameMasterSystem", "receiveSpellString", "")
+        Utils.sendMessage(player, "info", string.format("No spells found for %s", targetName))
+    end
+end
+
+-- Handler for receiving spellbook data from client
+function PlayerHandlers.submitPlayerSpellbook(player, playerName, spellData)
+    -- Validate that the player is submitting their own spellbook
+    if player:GetName() ~= playerName then
+        Utils.sendMessage(player, "error", "You can only submit your own spellbook.")
+        return
+    end
+    
+    -- Process and send the spellbook data
+    if type(spellData) == "table" and #spellData > 0 then
+        -- Build a simple string with spell IDs and names separated by delimiters
+        local spellStrings = {}
+        for i, spell in ipairs(spellData) do
+            if type(spell) == "table" and spell.id then
+                -- Format: id|name|rank
+                local spellString = string.format("%d|%s|%s", 
+                    tonumber(spell.id) or 0,
+                    (spell.name or "Unknown"):gsub("|", "-"),  -- Replace pipes in names
+                    (spell.rank or ""):gsub("|", "-"))
+                table.insert(spellStrings, spellString)
+            end
+        end
+        
+        Utils.sendMessage(player, "success", string.format("Received %d spells from your spellbook.", #spellStrings))
+        
+        -- Send as a single delimited string
+        if #spellStrings > 0 then
+            local combinedString = table.concat(spellStrings, ";")
+            AIO.Handle(player, "GameMasterSystem", "receiveSpellString", combinedString)
+        else
+            Utils.sendMessage(player, "error", "Failed to process spell data.")
+        end
+    else
+        Utils.sendMessage(player, "error", "Failed to read spellbook data.")
+    end
+end
+
+-- Cast spell on player (makes player cast on themselves)
+function PlayerHandlers.playerSpellCastOnSelf(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    targetPlayer:CastSpell(targetPlayer, spellId, true)
+    Utils.sendMessage(player, "success", string.format("Made %s cast spell %d on themselves.", targetName, spellId))
+end
+
+-- Cast spell on target (makes player cast on their target)
+function PlayerHandlers.playerSpellCastOnTarget(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    local target = targetPlayer:GetSelection()
+    if target then
+        targetPlayer:CastSpell(target, spellId, true)
+        Utils.sendMessage(player, "success", string.format("Made %s cast spell %d on their target.", targetName, spellId))
+    else
+        Utils.sendMessage(player, "warning", string.format("%s has no target selected.", targetName))
+    end
+end
+
+-- Cast from player (player casts on GM)
+function PlayerHandlers.playerSpellCastFromPlayer(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    targetPlayer:CastSpell(player, spellId, true)
+    Utils.sendMessage(player, "success", string.format("Made %s cast spell %d on you.", targetName, spellId))
+end
+
+-- Apply aura to player
+function PlayerHandlers.playerSpellApplyAura(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    targetPlayer:AddAura(spellId, targetPlayer)
+    Utils.sendMessage(player, "success", string.format("Applied aura %d to %s.", spellId, targetName))
+end
+
+-- Remove specific aura from player
+function PlayerHandlers.playerSpellRemoveAura(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    if targetPlayer:HasAura(spellId) then
+        targetPlayer:RemoveAura(spellId)
+        Utils.sendMessage(player, "success", string.format("Removed aura %d from %s.", spellId, targetName))
+    else
+        Utils.sendMessage(player, "info", string.format("%s doesn't have aura %d.", targetName, spellId))
+    end
+end
+
+-- Reset spell cooldown for player
+function PlayerHandlers.playerSpellResetCooldown(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    if targetPlayer:HasSpell(spellId) then
+        targetPlayer:ResetSpellCooldown(spellId)
+        Utils.sendMessage(player, "success", string.format("Reset cooldown for spell %d for %s.", spellId, targetName))
+    else
+        Utils.sendMessage(player, "warning", string.format("%s doesn't know spell %d.", targetName, spellId))
+    end
+end
+
+-- Check spell cooldown for player
+function PlayerHandlers.playerSpellCheckCooldown(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    if targetPlayer:HasSpellCooldown(spellId) then
+        local remaining = targetPlayer:GetSpellCooldownDelay(spellId)
+        if remaining then
+            local seconds = math.floor(remaining / 1000)
+            Utils.sendMessage(player, "info", string.format("%s's spell %d cooldown: %d seconds", targetName, spellId, seconds))
+        else
+            Utils.sendMessage(player, "info", string.format("%s's spell %d is on cooldown.", targetName, spellId))
+        end
+    else
+        Utils.sendMessage(player, "info", string.format("%s's spell %d is not on cooldown.", targetName, spellId))
+    end
+end
+
+-- Unlearn spell from player
+function PlayerHandlers.playerSpellUnlearn(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    if targetPlayer:HasSpell(spellId) then
+        targetPlayer:RemoveSpell(spellId)
+        Utils.sendMessage(player, "success", string.format("Removed spell %d from %s.", spellId, targetName))
+        targetPlayer:SendBroadcastMessage(string.format("Staff %s removed a spell from you.", player:GetName()))
+        
+        -- Force save to database and send updated spell list
+        targetPlayer:SaveToDB()
+        
+        -- Add a small delay to ensure database is updated, then send refreshed spell list
+        local function sendUpdatedSpells()
+            PlayerHandlers.getPlayerSpells(player, targetName)
+        end
+        
+        -- Create a delayed call (0.1 seconds should be enough for DB update)
+        CreateLuaEvent(sendUpdatedSpells, 100, 1)
+    else
+        Utils.sendMessage(player, "warning", string.format("%s doesn't know spell %d.", targetName, spellId))
+    end
+end
+
+-- Reset all cooldowns for player
+function PlayerHandlers.playerResetAllCooldowns(player, targetName)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    targetPlayer:ResetAllCooldowns()
+    Utils.sendMessage(player, "success", string.format("Reset all cooldowns for %s.", targetName))
+    targetPlayer:SendBroadcastMessage(string.format("Staff %s reset all your spell cooldowns.", player:GetName()))
+end
+
+-- Apply aura with custom duration to player
+function PlayerHandlers.playerApplyAuraWithDuration(player, targetName, spellId, duration)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Apply the aura
+    local aura = targetPlayer:AddAura(spellId, targetPlayer)
+    
+    if aura then
+        -- Set custom duration if specified (duration in milliseconds)
+        if duration and duration > 0 then
+            aura:SetDuration(duration)
+            aura:SetMaxDuration(duration)
+            local seconds = math.floor(duration / 1000)
+            local timeStr = seconds >= 3600 and string.format("%.1f hours", seconds / 3600) or 
+                           seconds >= 60 and string.format("%.1f minutes", seconds / 60) or 
+                           string.format("%d seconds", seconds)
+            Utils.sendMessage(player, "success", string.format("Applied aura %d to %s for %s.", spellId, targetName, timeStr))
+            targetPlayer:SendBroadcastMessage(string.format("Staff %s applied a buff to you for %s.", player:GetName(), timeStr))
+        elseif duration and duration < 0 then
+            -- Permanent aura (until death/removal)
+            aura:SetDuration(-1)
+            aura:SetMaxDuration(-1)
+            Utils.sendMessage(player, "success", string.format("Applied permanent aura %d to %s.", spellId, targetName))
+            targetPlayer:SendBroadcastMessage(string.format("Staff %s applied a permanent buff to you.", player:GetName()))
+        else
+            -- Default duration from spell data
+            Utils.sendMessage(player, "success", string.format("Applied aura %d to %s.", spellId, targetName))
+            targetPlayer:SendBroadcastMessage(string.format("Staff %s applied a buff to you.", player:GetName()))
+        end
+    else
+        Utils.sendMessage(player, "error", string.format("Failed to apply aura %d to %s.", spellId, targetName))
+    end
+end
+
+-- Get aura info for a player
+function PlayerHandlers.playerGetAuraInfo(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    if targetPlayer:HasAura(spellId) then
+        -- Get all auras to find our specific one
+        local auras = targetPlayer:GetAuras()
+        for _, aura in pairs(auras) do
+            if aura:GetSpellId() == spellId then
+                local duration = aura:GetDuration()
+                local maxDuration = aura:GetMaxDuration()
+                local stacks = aura:GetStackAmount()
+                local caster = aura:GetCaster()
+                
+                local info = string.format("Aura %d on %s:", spellId, targetName)
+                
+                -- Duration info
+                if duration > 0 then
+                    local seconds = math.floor(duration / 1000)
+                    info = info .. string.format("\n  Duration: %d seconds remaining", seconds)
+                else
+                    info = info .. "\n  Duration: Permanent"
+                end
+                
+                -- Stack info
+                if stacks > 0 then
+                    info = info .. string.format("\n  Stacks: %d", stacks)
+                end
+                
+                -- Caster info
+                if caster then
+                    local casterName = caster:GetName()
+                    info = info .. string.format("\n  Caster: %s", casterName or "Unknown")
+                end
+                
+                Utils.sendMessage(player, "info", info)
+                return
+            end
+        end
+        
+        -- Shouldn't reach here if HasAura is true
+        Utils.sendMessage(player, "info", string.format("%s has aura %d but couldn't get detailed info.", targetName, spellId))
+    else
+        Utils.sendMessage(player, "info", string.format("%s doesn't have aura %d.", targetName, spellId))
+    end
+end
+
+-- Make player learn a spell
+function PlayerHandlers.playerSpellLearn(player, targetName, spellId)
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    if targetPlayer:HasSpell(spellId) then
+        Utils.sendMessage(player, "warning", string.format("%s already knows spell %d.", targetName, spellId))
+    else
+        targetPlayer:LearnSpell(spellId)
+        Utils.sendMessage(player, "success", string.format("Taught spell %d to %s.", spellId, targetName))
+        targetPlayer:SendBroadcastMessage(string.format("Staff %s taught you a new spell.", player:GetName()))
+        
+        -- Force save to database and send updated spell list
+        targetPlayer:SaveToDB()
+        
+        -- Add a small delay to ensure database is updated, then send refreshed spell list
+        local function sendUpdatedSpells()
+            PlayerHandlers.getPlayerSpells(player, targetName)
+        end
+        
+        -- Create a delayed call (0.1 seconds should be enough for DB update)
+        CreateLuaEvent(sendUpdatedSpells, 100, 1)
+    end
+end
+
+-- Utility function to save online player data before querying
+-- This ensures we get the most up-to-date information
+function PlayerHandlers.saveOnlinePlayerData(targetName, callback, ...)
+    local targetPlayer = GetPlayerByName(targetName)
+    
+    if targetPlayer then
+        -- Player is online, save their data to database
+        print(string.format("[PlayerHandlers] Player %s is online, saving data to database...", targetName))
+        targetPlayer:SaveToDB()
+        
+        -- Add a small delay to ensure database write completes
+        -- Then execute the callback with the provided arguments
+        local args = {...}
+        local function executeCallback()
+            if callback then
+                callback(unpack(args))
+            end
+        end
+        
+        -- Create a delayed call (200ms should be enough for DB update)
+        CreateLuaEvent(executeCallback, 200, 1)
+        return true  -- Indicates save was performed
+    else
+        -- Player is offline, execute callback immediately
+        print(string.format("[PlayerHandlers] Player %s is offline, using existing database data", targetName))
+        if callback then
+            callback(...)
+        end
+        return false  -- Indicates no save was needed
+    end
+end
+
+-- Public function to refresh player inventory (can be called from anywhere)
+-- This is useful for forcing a refresh after any inventory-modifying operation
+function PlayerHandlers.refreshPlayerInventory(player, targetName)
+    print(string.format("[PlayerHandlers] Manual inventory refresh requested for: %s", targetName))
+    
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to refresh inventory.")
+        return
+    end
+    
+    -- Use the save and query pattern
+    PlayerHandlers.saveOnlinePlayerData(targetName, PlayerHandlers._queryAndSendInventory, player, targetName)
+    
+    Utils.sendMessage(player, "info", "Refreshing inventory for " .. targetName .. "...")
+end
+
+-- Internal function to query and send inventory data
+function PlayerHandlers._queryAndSendInventory(player, targetName)
+    print(string.format("[PlayerHandlers] Querying inventory data for: %s", targetName))
+    
+    -- Get character GUID
+    local guidQuery = CharDBQuery(string.format(
+        "SELECT guid FROM characters WHERE name = '%s'",
+        targetName
+    ))
+    
+    if not guidQuery then
+        print("[PlayerHandlers] Character not found in database:", targetName)
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found in database.")
+        AIO.Handle(player, "GameMasterSystem", "receiveInventoryData", {}, {}, targetName)
+        return
+    end
+    
+    local characterGuid = guidQuery:GetUInt32(0)
+    print("[PlayerHandlers] Found character GUID:", characterGuid)
+    
+    -- First, get all equipped bags from the backpack (bag 0) to understand the bag structure
+    -- Bags are equipped in slots 19-22 of bag 0 (backpack), not bag 255 (equipment)
+    local bagMappingQuery = string.format([[
+        SELECT 
+            ci.slot,
+            ci.item,
+            ii.itemEntry,
+            it.ContainerSlots,
+            it.name
+        FROM character_inventory ci
+        JOIN item_instance ii ON ci.item = ii.guid
+        JOIN world.item_template it ON ii.itemEntry = it.entry
+        WHERE ci.guid = %d 
+        AND ci.bag = 0 
+        AND ci.slot >= 19 AND ci.slot <= 22
+        AND it.class = 1
+    ]], characterGuid)
+    
+    local bagMapping = {}  -- Maps bag item GUID to bag info
+    local bagItemToSlot = {}  -- Maps bag item GUID to equipment slot
+    local bagMappingResult = CharDBQuery(bagMappingQuery)
+    
+    if bagMappingResult then
+        repeat
+            local slot = bagMappingResult:GetUInt32(0)
+            local itemGuid = bagMappingResult:GetUInt32(1)
+            local itemEntry = bagMappingResult:GetUInt32(2)
+            local containerSlots = bagMappingResult:GetUInt32(3)
+            local bagName = bagMappingResult:GetString(4)
+            
+            bagMapping[itemGuid] = {
+                slot = slot,
+                itemEntry = itemEntry,
+                size = containerSlots,
+                name = bagName,
+                type = "regular"  -- Will be "bank" for bank bags
+            }
+            bagItemToSlot[itemGuid] = slot
+            
+            print(string.format("[PlayerHandlers] Found equipped bag: %s (GUID: %d) at slot %d with %d slots", 
+                bagName, itemGuid, slot, containerSlots))
+        until not bagMappingResult:NextRow()
+    end
+    
+    -- Check for bank bags (slots 67-73 in bag 0) - WoW 3.3.5 has 7 bank bag slots
+    local bankBagQuery = string.format([[
+        SELECT 
+            ci.slot,
+            ci.item,
+            ii.itemEntry,
+            it.ContainerSlots,
+            it.name
+        FROM character_inventory ci
+        JOIN item_instance ii ON ci.item = ii.guid
+        JOIN world.item_template it ON ii.itemEntry = it.entry
+        WHERE ci.guid = %d 
+        AND ci.bag = 0 
+        AND ci.slot >= 67 AND ci.slot <= 73
+        AND it.class = 1
+    ]], characterGuid)
+    
+    local bankBagResult = CharDBQuery(bankBagQuery)
+    if bankBagResult then
+        repeat
+            local slot = bankBagResult:GetUInt32(0)
+            local itemGuid = bankBagResult:GetUInt32(1)
+            local itemEntry = bankBagResult:GetUInt32(2)
+            local containerSlots = bankBagResult:GetUInt32(3)
+            local bagName = bankBagResult:GetString(4)
+            
+            bagMapping[itemGuid] = {
+                slot = slot,
+                itemEntry = itemEntry,
+                size = containerSlots,
+                name = bagName,
+                type = "bank"
+            }
+            bagItemToSlot[itemGuid] = slot
+            
+            print(string.format("[PlayerHandlers] Found bank bag: %s (GUID: %d) at slot %d with %d slots", 
+                bagName, itemGuid, slot, containerSlots))
+        until not bankBagResult:NextRow()
+    end
+    
+    -- Get inventory data from character_inventory joined with item_instance
+    local inventoryQuery = string.format([[
+        SELECT 
+            ci.bag,
+            ci.slot,
+            ci.item,
+            ii.itemEntry,
+            ii.count,
+            ii.owner_guid,
+            ii.enchantments
+        FROM character_inventory ci
+        JOIN item_instance ii ON ci.item = ii.guid
+        WHERE ci.guid = %d
+        ORDER BY ci.bag ASC, ci.slot ASC
+    ]], characterGuid)
+    
+    local inventoryResult = CharDBQuery(inventoryQuery)
+    local inventoryData = {}
+    local foundBagIds = {}  -- Track all unique bag IDs found
+    local bagIdToInfo = {}  -- Map actual bag IDs to their info
+    
+    if inventoryResult then
+        repeat
+            local bagId = inventoryResult:GetUInt32(0)
+            local slotId = inventoryResult:GetUInt32(1)
+            
+            -- Track all unique bag IDs and map them to bag info
+            if not foundBagIds[bagId] then
+                foundBagIds[bagId] = 0
+                
+                -- Map this bag ID to its actual bag info
+                if bagId > 0 and bagId ~= 255 then
+                    -- Check if this bagId matches any equipped bag GUID
+                    if bagMapping[bagId] then
+                        bagIdToInfo[bagId] = bagMapping[bagId]
+                        print(string.format("[PlayerHandlers] Bag ID %d is bag item: %s", 
+                            bagId, bagMapping[bagId].name))
+                    else
+                        -- This might be a non-standard bag ID, try to determine what it is
+                        print(string.format("[PlayerHandlers] Unknown bag ID %d found", bagId))
+                    end
+                end
+            end
+            foundBagIds[bagId] = foundBagIds[bagId] + 1
+            local itemGuid = inventoryResult:GetUInt32(2)
+            local itemEntry = inventoryResult:GetUInt32(3)
+            local itemCount = inventoryResult:GetUInt32(4)
+            local ownerGuid = inventoryResult:GetUInt32(5)
+            local enchantmentsStr = inventoryResult:GetString(6)
+            
+            -- Get item info from world database
+            local itemName = "Unknown Item"
+            local itemQuality = 0
+            local displayId = 0
+            local itemClass = 0
+            local inventoryType = 0
+            
+            if itemEntry > 0 then
+                local itemInfoQuery = WorldDBQuery(string.format(
+                    "SELECT name, Quality, displayid, class, InventoryType FROM item_template WHERE entry = %d",
+                    itemEntry
+                ))
+                
+                if itemInfoQuery then
+                    itemName = itemInfoQuery:GetString(0) or "Unknown Item"
+                    itemQuality = itemInfoQuery:GetUInt32(1) or 0
+                    displayId = itemInfoQuery:GetUInt32(2) or 0
+                    itemClass = itemInfoQuery:GetUInt32(3) or 0
+                    inventoryType = itemInfoQuery:GetUInt32(4) or 0
+                end
+            end
+            
+            -- Determine if item is equipable
+            local equipable = inventoryType > 0 and inventoryType ~= 18  -- Not a bag
+            
+            -- Parse enchantments (stored as space-separated values)
+            -- Format: perm_enchant temp_enchant socket1 socket2 socket3 bonus1 bonus2 prismatic reforge
+            local enchantId = 0
+            if enchantmentsStr and enchantmentsStr ~= "" then
+                local enchants = {}
+                for value in string.gmatch(enchantmentsStr, "%S+") do
+                    table.insert(enchants, tonumber(value) or 0)
+                end
+                -- First value is permanent enchantment
+                enchantId = enchants[1] or 0
+            end
+            
+            -- Debug print for inventory data
+            if Config.debug then
+                if bagId >= 19 and bagId <= 22 then
+                    print(string.format("[PlayerHandlers] Equipped bag item: %s at bag %d, slot %d", 
+                        itemName, bagId, slotId))
+                elseif bagId >= 67 and bagId <= 73 then
+                    print(string.format("[PlayerHandlers] Bank bag item: %s at bag %d, slot %d", 
+                        itemName, bagId, slotId))
+                elseif bagId == 35 or bagId == 23 then
+                    print(string.format("[PlayerHandlers] WARNING: Unusual bag ID %d for item: %s at slot %d", 
+                        bagId, itemName, slotId))
+                    print("[PlayerHandlers] This might be a server-specific bag ID mapping")
+                end
+            end
+            
+            -- Debug print for enchantment data
+            if enchantId and enchantId > 0 then
+                print(string.format("[PlayerHandlers] Found enchanted inventory item: %s (ID: %d) at bag %d, slot %d with enchantId: %d", 
+                    itemName, itemEntry, bagId, slotId, enchantId))
+            end
+            
+            -- Debug print for custom bags
+            if bagId >= 1500 and Config.debug then
+                print(string.format("[PlayerHandlers] Custom bag item: %s at bag %d, slot %d, itemGuid: %d", 
+                    itemName, bagId, slotId, itemGuid))
+            end
+            
+            table.insert(inventoryData, {
+                bag = bagId,
+                slot = slotId,
+                entry = itemEntry,
+                count = itemCount,
+                name = itemName,
+                quality = itemQuality,
+                displayId = displayId,
+                itemGuid = itemGuid,
+                ownerGuid = ownerGuid,
+                class = itemClass,
+                inventoryType = inventoryType,
+                equipable = equipable,
+                enchantId = enchantId
+            })
+        until not inventoryResult:NextRow()
+    end
+    
+    -- Get bag sizes data
+    local bagSizes = {}
+    bagSizes[0] = 16  -- Backpack is always 16 slots
+    
+    -- Get equipment data - try direct approach first if player is online
+    local equipmentData = {}
+    local targetPlayer = GetPlayerByName(targetName)
+    
+    if targetPlayer then
+        -- Player is online, use direct API
+        print(string.format("[PlayerHandlers] Player %s is online, using GetEquippedItemBySlot", targetName))
+        
+        -- Get actual bag sizes for equipped bags (slots 19-22 in bag 0)
+        for bagSlot = 19, 22 do
+            local bag = targetPlayer:GetItemByPos(0, bagSlot)  -- 0 = backpack, where bags are stored
+            if bag then
+                -- Get the item GUID to use as bag ID
+                local bagGuid = bag:GetGUIDLow()
+                local bagEntry = bag:GetEntry()
+                local bagName = bag:GetName()
+                
+                -- Check if this is actually a bag item
+                local bagInfoQuery = WorldDBQuery(string.format(
+                    "SELECT ContainerSlots FROM item_template WHERE entry = %d AND class = 1",
+                    bagEntry
+                ))
+                
+                if bagInfoQuery then
+                    local containerSlots = bagInfoQuery:GetUInt32(0)
+                    bagSizes[bagSlot] = containerSlots
+                    
+                    -- Map the bag GUID to its info
+                    bagMapping[bagGuid] = {
+                        slot = bagSlot,
+                        itemEntry = bagEntry,
+                        size = containerSlots,
+                        name = bagName,
+                        type = "regular",
+                        entry = bagEntry  -- Add item entry for icon lookup
+                    }
+                    bagItemToSlot[bagGuid] = bagSlot
+                    bagIdToInfo[bagGuid] = bagMapping[bagGuid]
+                    
+                    print(string.format("[PlayerHandlers] Online player bag: %s (GUID: %d) at slot %d with %d slots", 
+                        bagName, bagGuid, bagSlot, containerSlots))
+                else
+                    bagSizes[bagSlot] = 0  -- Not a bag
+                end
+            else
+                bagSizes[bagSlot] = 0  -- No bag equipped
+            end
+        end
+        
+        -- Get bank bags for online player (slots 67-73 in bag 0) - WoW 3.3.5 has 7 bank bag slots
+        for bankSlot = 67, 73 do
+            local bankBag = targetPlayer:GetItemByPos(0, bankSlot)  -- 0 = backpack/bank slots
+            if bankBag then
+                -- Get the item GUID to use as bag ID
+                local bagGuid = bankBag:GetGUIDLow()
+                local bagEntry = bankBag:GetEntry()
+                local bagName = bankBag:GetName()
+                
+                -- Check if this is actually a bag item
+                local bagInfoQuery = WorldDBQuery(string.format(
+                    "SELECT ContainerSlots FROM item_template WHERE entry = %d AND class = 1",
+                    bagEntry
+                ))
+                
+                if bagInfoQuery then
+                    local containerSlots = bagInfoQuery:GetUInt32(0)
+                    
+                    -- Map the bag GUID to its info
+                    bagMapping[bagGuid] = {
+                        slot = bankSlot,
+                        itemEntry = bagEntry,
+                        size = containerSlots,
+                        name = bagName,
+                        type = "bank",
+                        entry = bagEntry  -- Add item entry for icon lookup
+                    }
+                    bagItemToSlot[bagGuid] = bankSlot
+                    bagIdToInfo[bagGuid] = bagMapping[bagGuid]
+                    
+                    print(string.format("[PlayerHandlers] Online player bank bag: %s (GUID: %d) at slot %d with %d slots", 
+                        bagName, bagGuid, bankSlot, containerSlots))
+                end
+            end
+        end
+        
+        for slot = 0, 18 do
+            local item = targetPlayer:GetEquippedItemBySlot(slot)
+            if item then
+                local itemEntry = item:GetEntry()
+                local itemName = item:GetName()
+                local itemQuality = item:GetQuality()
+                local displayId = item:GetDisplayId()
+                
+                -- Get item class from database
+                local itemClass = 0
+                local itemClassQuery = WorldDBQuery(string.format(
+                    "SELECT class FROM item_template WHERE entry = %d",
+                    itemEntry
+                ))
+                if itemClassQuery then
+                    itemClass = itemClassQuery:GetUInt32(0) or 0
+                end
+                
+                -- Get enchantment data from database using item GUID
+                local enchantId = 0
+                local itemGuid = item:GetGUIDLow()
+                if itemGuid then
+                    local enchantQuery = CharDBQuery(string.format(
+                        "SELECT enchantments FROM item_instance WHERE guid = %d",
+                        itemGuid
+                    ))
+                    if enchantQuery then
+                        local enchantmentsStr = enchantQuery:GetString(0)
+                        if enchantmentsStr and enchantmentsStr ~= "" then
+                            -- Parse first value (permanent enchantment)
+                            local firstSpace = string.find(enchantmentsStr, " ")
+                            if firstSpace then
+                                enchantId = tonumber(string.sub(enchantmentsStr, 1, firstSpace - 1)) or 0
+                            else
+                                enchantId = tonumber(enchantmentsStr) or 0
+                            end
+                        end
+                    end
+                end
+                
+                equipmentData[slot] = {
+                    entry = itemEntry,
+                    count = 1,
+                    name = itemName,
+                    quality = itemQuality,
+                    displayId = displayId,
+                    class = itemClass,
+                    enchantId = enchantId
+                }
+                
+                local slotNames = {
+                    [0] = "Head", [1] = "Neck", [2] = "Shoulders", [3] = "Shirt",
+                    [4] = "Chest", [5] = "Belt", [6] = "Legs", [7] = "Feet",
+                    [8] = "Wrists", [9] = "Hands", [10] = "Ring1", [11] = "Ring2",
+                    [12] = "Trinket1", [13] = "Trinket2", [14] = "Back", [15] = "MainHand",
+                    [16] = "OffHand", [17] = "Ranged", [18] = "Tabard"
+                }
+                print(string.format("[PlayerHandlers] Slot %d (%s): %s (ID: %d)", 
+                    slot, slotNames[slot] or "Unknown", itemName, itemEntry))
+            end
+        end
+    else
+        -- Player is offline, query database for equipped items
+        print(string.format("[PlayerHandlers] Player %s is offline, using database query", targetName))
+        
+        -- Query character_inventory for equipped items (bag = 255 means equipped)
+        local equippedQuery = string.format([[
+            SELECT 
+                ci.slot,
+                ii.itemEntry,
+                ii.count,
+                ii.enchantments
+            FROM character_inventory ci
+            JOIN item_instance ii ON ci.item = ii.guid
+            WHERE ci.guid = %d AND ci.bag = 255
+        ]], characterGuid)
+        
+        local equippedResult = CharDBQuery(equippedQuery)
+        
+        if equippedResult then
+            repeat
+                local slot = equippedResult:GetUInt32(0)
+                local itemEntry = equippedResult:GetUInt32(1)
+                local itemCount = equippedResult:GetUInt32(2)
+                local enchantmentsStr = equippedResult:GetString(3)
+                
+                -- Parse enchantments
+                local enchantId = 0
+                if enchantmentsStr and enchantmentsStr ~= "" then
+                    -- Parse first value (permanent enchantment)
+                    local firstSpace = string.find(enchantmentsStr, " ")
+                    if firstSpace then
+                        enchantId = tonumber(string.sub(enchantmentsStr, 1, firstSpace - 1)) or 0
+                    else
+                        enchantId = tonumber(enchantmentsStr) or 0
+                    end
+                end
+                
+                -- Get item info from world database
+                local itemName = "Unknown Item"
+                local itemQuality = 0
+                local displayId = 0
+                local itemClass = 0
+                
+                if itemEntry > 0 then
+                    local itemInfoQuery = WorldDBQuery(string.format(
+                        "SELECT name, Quality, displayid, class FROM item_template WHERE entry = %d",
+                        itemEntry
+                    ))
+                    
+                    if itemInfoQuery then
+                        itemName = itemInfoQuery:GetString(0) or "Unknown Item"
+                        itemQuality = itemInfoQuery:GetUInt32(1) or 0
+                        displayId = itemInfoQuery:GetUInt32(2) or 0
+                        itemClass = itemInfoQuery:GetUInt32(3) or 0
+                    end
+                end
+                
+                if slot <= 18 then  -- Only equipment slots 0-18
+                    equipmentData[slot] = {
+                        entry = itemEntry,
+                        count = itemCount,
+                        name = itemName,
+                        quality = itemQuality,
+                        displayId = displayId,
+                        class = itemClass,
+                        enchantId = enchantId
+                    }
+                    
+                    local slotNames = {
+                        [0] = "Head", [1] = "Neck", [2] = "Shoulders", [3] = "Shirt",
+                        [4] = "Chest", [5] = "Belt", [6] = "Legs", [7] = "Feet",
+                        [8] = "Wrists", [9] = "Hands", [10] = "Ring1", [11] = "Ring2",
+                        [12] = "Trinket1", [13] = "Trinket2", [14] = "Back", [15] = "MainHand",
+                        [16] = "OffHand", [17] = "Ranged", [18] = "Tabard"
+                    }
+                    print(string.format("[PlayerHandlers] Slot %d (%s): %s (ID: %d)", 
+                        slot, slotNames[slot] or "Unknown", itemName, itemEntry))
+                end
+            until not equippedResult:NextRow()
+        end
+    end
+    
+    -- For offline players, try to get bag sizes from database
+    if not targetPlayer then
+        print("[PlayerHandlers] Player offline, checking database for bag sizes")
+        -- Query for equipped bags (bag 255, slots 19-22)
+        local bagQuery = CharDBQuery(string.format([[
+            SELECT 
+                ci.slot,
+                ii.itemEntry
+            FROM character_inventory ci
+            JOIN item_instance ii ON ci.item = ii.guid
+            WHERE ci.guid = %d AND ci.bag = 255 AND ci.slot >= 19 AND ci.slot <= 22
+        ]], characterGuid))
+        
+        if bagQuery then
+            repeat
+                local slot = bagQuery:GetUInt32(0)
+                local itemEntry = bagQuery:GetUInt32(1)
+                
+                -- Get container slots from item_template
+                local containerQuery = WorldDBQuery(string.format(
+                    "SELECT ContainerSlots FROM item_template WHERE entry = %d AND class = 1",  -- class 1 = Container
+                    itemEntry
+                ))
+                
+                if containerQuery then
+                    local containerSlots = containerQuery:GetUInt32(0)
+                    bagSizes[slot] = containerSlots
+                    print(string.format("[PlayerHandlers] Bag slot %d (item %d) has size: %d", slot, itemEntry, containerSlots))
+                else
+                    bagSizes[slot] = 0
+                end
+            until not bagQuery:NextRow()
+        end
+        
+        -- Ensure all bag slots 19-22 have entries even if not equipped
+        for bagSlot = 19, 22 do
+            if not bagSizes[bagSlot] then
+                bagSizes[bagSlot] = 0  -- Mark as not equipped
+            end
+        end
+    end
+    
+    -- Add bank bag sizes if we have bank items
+    for _, item in ipairs(inventoryData) do
+        if item.bag >= 67 and item.bag <= 73 then
+            -- This is a bank bag, check if we have its size
+            if not bagSizes[item.bag] then
+                bagSizes[item.bag] = 28  -- Default bank bag size
+            end
+        end
+    end
+    
+    -- Check for non-standard bag IDs and map them to standard slots
+    -- Some servers use bags 35-38 instead of 19-22
+    for bagId, count in pairs(foundBagIds) do
+        if bagId >= 35 and bagId <= 38 then
+            local standardSlot = bagId - 35 + 19  -- Map 35->19, 36->20, etc.
+            if not bagSizes[standardSlot] or bagSizes[standardSlot] == 0 then
+                -- Assume a default size if we don't have the actual size
+                bagSizes[standardSlot] = 16  -- Default bag size
+                print(string.format("[PlayerHandlers] Mapping bag %d to slot %d with default size 16", 
+                    bagId, standardSlot))
+            end
+        elseif bagId >= 23 and bagId <= 26 then
+            local standardSlot = bagId - 23 + 19  -- Map 23->19, 24->20, etc.
+            if not bagSizes[standardSlot] or bagSizes[standardSlot] == 0 then
+                bagSizes[standardSlot] = 16  -- Default bag size
+                print(string.format("[PlayerHandlers] Mapping bag %d to slot %d with default size 16", 
+                    bagId, standardSlot))
+            end
+        end
+    end
+    
+    -- Create bag configuration data to send to client
+    local bagConfiguration = {
+        bagMapping = {},  -- Maps actual bag IDs to their info
+        bagSizes = bagSizes,  -- Legacy bag sizes
+    }
+    
+    -- Build complete bag mapping for client
+    for bagId, info in pairs(bagIdToInfo) do
+        bagConfiguration.bagMapping[bagId] = {
+            slot = info.slot,
+            size = info.size,
+            type = info.type,
+            name = info.name,
+            entry = info.entry  -- Include item entry for icon lookup
+        }
+    end
+    
+    -- Add special bags
+    bagConfiguration.bagMapping[0] = { slot = 0, size = 16, type = "backpack", name = "Backpack" }
+    bagConfiguration.bagMapping[255] = { slot = 255, size = 0, type = "equipment", name = "Equipment" }
+    
+    -- Add main bank slots as a special "bag" so client knows about them
+    -- Main bank is slots 39-66 in bag 0 (28 slots total)
+    bagConfiguration.bagMapping[-1] = { slot = -1, size = 28, type = "bank_main", name = "Bank" }
+    
+    -- Send data to client
+    local equipmentCount = 0
+    for _ in pairs(equipmentData) do
+        equipmentCount = equipmentCount + 1
+    end
+    
+    -- Debug: Log bag configuration being sent
+    print(string.format("[PlayerHandlers] Sending inventory data: %d items, %d equipped", 
+        #inventoryData, equipmentCount))
+    
+    -- Log all found bag IDs
+    print("[PlayerHandlers] Found items in the following bags:")
+    for bagId, count in pairs(foundBagIds) do
+        local bagInfo = bagIdToInfo[bagId]
+        if bagInfo then
+            print(string.format("  Bag %d (%s): %d items, %d slots, type: %s", 
+                bagId, bagInfo.name, count, bagInfo.size, bagInfo.type))
+        else
+            print(string.format("  Bag %d: %d items (unmapped)", bagId, count))
+        end
+    end
+    
+    Utils.sendMessage(player, "success", string.format("Loaded inventory for %s (%d items, %d equipped)", 
+        targetName, #inventoryData, equipmentCount))
+    
+    AIO.Handle(player, "GameMasterSystem", "receiveInventoryData", inventoryData, equipmentData, targetName, bagConfiguration)
+end
+
+-- Unequip item from player
+function PlayerHandlers.unequipPlayerItem(player, targetName, slotId)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    slotId = tonumber(slotId)
+    if not slotId or slotId < 0 or slotId > 18 then
+        Utils.sendMessage(player, "error", "Invalid equipment slot ID.")
+        return
+    end
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Get the equipped item
+    local item = targetPlayer:GetEquippedItemBySlot(slotId)
+    if not item then
+        Utils.sendMessage(player, "error", "No item equipped in slot " .. slotId)
+        return
+    end
+    
+    local itemName = item:GetName()
+    local itemEntry = item:GetEntry()
+    
+    -- Check if player has bag space
+    local hasSpace = false
+    for bag = 0, 4 do
+        for slot = 0, targetPlayer:GetBagSize(bag) - 1 do
+            if not targetPlayer:GetItemByPos(bag, slot) then
+                hasSpace = true
+                break
+            end
+        end
+        if hasSpace then break end
+    end
+    
+    if not hasSpace then
+        Utils.sendMessage(player, "error", "Player's inventory is full. Cannot unequip item.")
+        return
+    end
+    
+    -- Unequip the item (remove from slot and add to inventory)
+    targetPlayer:RemoveItem(item, 1)
+    local newItem = targetPlayer:AddItem(itemEntry, 1)
+    
+    if newItem then
+        targetPlayer:SaveToDB()
+        Utils.sendMessage(player, "success", string.format("Unequipped %s from %s.", itemName, targetName))
+        targetPlayer:SendBroadcastMessage(string.format("GM %s unequipped your %s.", player:GetName(), itemName))
+        
+        -- Trigger inventory refresh
+        PlayerHandlers.getPlayerInventory(player, targetName)
+    else
+        Utils.sendMessage(player, "error", "Failed to unequip item.")
+    end
+end
+
+-- Equip item on player
+function PlayerHandlers.equipPlayerItem(player, targetName, bag, slot)
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        return
+    end
+    
+    bag = tonumber(bag)
+    slot = tonumber(slot)
+    
+    -- Find target player
+    local targetPlayer = GetPlayerByName(targetName)
+    if not targetPlayer then
+        Utils.sendMessage(player, "error", "Player '" .. targetName .. "' not found or offline.")
+        return
+    end
+    
+    -- Get the item from inventory
+    local item = targetPlayer:GetItemByPos(bag, slot)
+    if not item then
+        Utils.sendMessage(player, "error", "Item not found at specified location.")
+        return
+    end
+    
+    local itemName = item:GetName()
+    local itemEntry = item:GetEntry()
+    
+    -- Check if item is equipable by getting its inventory type from database
+    local itemQuery = WorldDBQuery(string.format(
+        "SELECT InventoryType FROM item_template WHERE entry = %d",
+        itemEntry
+    ))
+    
+    if not itemQuery then
+        Utils.sendMessage(player, "error", "Failed to get item information.")
+        return
+    end
+    
+    local inventoryType = itemQuery:GetUInt32(0)
+    
+    -- Map inventory type to equipment slot
+    local equipSlot = nil
+    local slotMapping = {
+        [1] = 0,   -- Head
+        [2] = 1,   -- Neck
+        [3] = 2,   -- Shoulder
+        [4] = 3,   -- Shirt
+        [5] = 4,   -- Chest/Vest
+        [6] = 5,   -- Belt
+        [7] = 6,   -- Legs
+        [8] = 7,   -- Feet
+        [9] = 8,   -- Wrists
+        [10] = 9,  -- Hands
+        [11] = 10, -- Ring (slot 1)
+        [12] = 11, -- Trinket (slot 1)
+        [13] = 15, -- One-Hand weapon
+        [14] = 16, -- Shield
+        [15] = 17, -- Ranged
+        [16] = 14, -- Back/Cloak
+        [17] = 15, -- Two-Hand weapon
+        [18] = 17, -- Bag (not equipable)
+        [19] = 18, -- Tabard
+        [20] = 4,  -- Robe (chest slot)
+        [21] = 15, -- Main Hand
+        [22] = 16, -- Off Hand misc
+        [23] = 16, -- Held In Off-hand
+        [24] = 17, -- Ammo
+        [25] = 17, -- Thrown
+        [26] = 17, -- Ranged right (wands)
+        [28] = 17  -- Relic
+    }
+    
+    equipSlot = slotMapping[inventoryType]
+    
+    if not equipSlot then
+        Utils.sendMessage(player, "error", "This item cannot be equipped.")
+        return
+    end
+    
+    -- Special handling for rings and trinkets (can go in either slot)
+    if inventoryType == 11 then -- Ring
+        local ring1 = targetPlayer:GetEquippedItemBySlot(10)
+        local ring2 = targetPlayer:GetEquippedItemBySlot(11)
+        if not ring1 then
+            equipSlot = 10
+        elseif not ring2 then
+            equipSlot = 11
+        else
+            equipSlot = 10 -- Default to first slot if both occupied
+        end
+    elseif inventoryType == 12 then -- Trinket
+        local trinket1 = targetPlayer:GetEquippedItemBySlot(12)
+        local trinket2 = targetPlayer:GetEquippedItemBySlot(13)
+        if not trinket1 then
+            equipSlot = 12
+        elseif not trinket2 then
+            equipSlot = 13
+        else
+            equipSlot = 12 -- Default to first slot if both occupied
+        end
+    end
+    
+    -- Check if there's already an item in the target slot
+    local existingItem = targetPlayer:GetEquippedItemBySlot(equipSlot)
+    
+    -- Remove the item from inventory
+    targetPlayer:RemoveItem(item, 1)
+    
+    -- If there was an existing item, add it to inventory
+    if existingItem then
+        local existingEntry = existingItem:GetEntry()
+        targetPlayer:RemoveItem(existingItem, 1)
+        targetPlayer:AddItem(existingEntry, 1)
+    end
+    
+    -- Equip the new item
+    local success = targetPlayer:EquipItem(itemEntry, equipSlot)
+    
+    if success then
+        targetPlayer:SaveToDB()
+        Utils.sendMessage(player, "success", string.format("Equipped %s on %s.", itemName, targetName))
+        targetPlayer:SendBroadcastMessage(string.format("GM %s equipped %s on you.", player:GetName(), itemName))
+        
+        -- Trigger inventory refresh
+        PlayerHandlers.getPlayerInventory(player, targetName)
+    else
+        -- Try to restore the item if equip failed
+        targetPlayer:AddItem(itemEntry, 1)
+        Utils.sendMessage(player, "error", "Failed to equip item. It may not meet requirements.")
+    end
+end
+
+-- Get player inventory and equipment (public interface)
+function PlayerHandlers.getPlayerInventory(player, targetName)
+    print(string.format("[PlayerHandlers] getPlayerInventory called for target: %s by player: %s", 
+        tostring(targetName), player:GetName()))
+    print("[PlayerHandlers] Player GM rank:", player:GetGMRank())
+    
+    -- Validate GM permissions
+    if player:GetGMRank() < 2 then
+        Utils.sendMessage(player, "error", "You do not have permission to use this command.")
+        AIO.Handle(player, "GameMasterSystem", "receiveInventoryData", {}, {}, targetName)
+        return
+    end
+    
+    -- Check if we need to save online player data first
+    local savedData = PlayerHandlers.saveOnlinePlayerData(targetName, PlayerHandlers._queryAndSendInventory, player, targetName)
+    
+    if savedData then
+        -- Show feedback that we're refreshing from live data
+        Utils.sendMessage(player, "info", "Refreshing inventory data for online player " .. targetName .. "...")
+    end
+end
+
+return PlayerHandlers

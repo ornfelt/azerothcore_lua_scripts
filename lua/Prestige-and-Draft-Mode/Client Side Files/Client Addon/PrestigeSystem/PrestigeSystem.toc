@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Prestige System
+## Notes: Combines SpellChoice and PrestigeNameplates
+## Author: Stephen Kania/Yuppls
+## Version: 1.0
+SpellChoice.xml
+SpellChoice.lua
+PrestigeNameplates.lua

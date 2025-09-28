@@ -152,25 +152,27 @@ for id, subtable in pairs(paragon.spellsList) do
         paragon.centerButtons[id]:EnableMouseWheel(1)
         paragon.centerButtons[id]:SetFrameLevel(3)
 
-    local function handleParagonStatChange(self, button)
-        if button == "LeftButton" then
-            AIO.Handle("AIO_Paragon", "setStatsInformation", id, 1, true)
-        elseif button == "RightButton" then
-            AIO.Handle("AIO_Paragon", "setStatsInformation", id, 1, false)
-        elseif button == "MiddleButton" then
-            AIO.Handle("AIO_Paragon", "setStatsInformation", id, 10, true)
-        end
+    do
+        local statID = id  -- capture id in this loop iteration
+
+        paragon.centerButtons[id]:SetScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" then
+                AIO.Handle("AIO_Paragon", "setStatsInformation", statID, 1, true)
+            elseif button == "RightButton" then
+                AIO.Handle("AIO_Paragon", "setStatsInformation", statID, 1, false)
+            elseif button == "MiddleButton" then
+                AIO.Handle("AIO_Paragon", "setStatsInformation", statID, 10, true)
+            end
+        end)
+
+        paragon.centerButtons[id]:SetScript("OnMouseWheel", function(self, value)
+            if (value > 0) then
+                AIO.Handle("AIO_Paragon", "setStatsInformation", statID, 1, true)
+            else
+                AIO.Handle("AIO_Paragon", "setStatsInformation", statID, 1, false)
+            end
+        end)
     end
-    
-    paragon.centerButtons[id]:SetScript("OnMouseUp", handleParagonStatChange)
-    
-    paragon.centerButtons[id]:SetScript("OnMouseWheel", function(self, value)
-        if (value > 0) then
-            AIO.Handle("AIO_Paragon", "setStatsInformation", id, 1, true)
-        else
-            AIO.Handle("AIO_Paragon", "setStatsInformation", id, 1, false)
-        end
-    end)
 
     paragon.centerButtons[id]:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -304,7 +306,8 @@ function paragon_addon.setInfo(player, stats, level, points, exps, playerLevel, 
     paragon.pointsLeft:SetText(string.format("You have %s%d|r %s left to spend.", color, points, plural))
 
     paragon.currentXP, paragon.maxXP = exps.exp, exps.exp_max
-    paragon.expText:SetText("|CFFC758FE(".. exps.exp .. " / " .. exps.exp_max .. ")")
+    local percentage = math.floor((exps.exp / exps.exp_max) * 100)
+    paragon.expText:SetText(string.format("|CFFC758FE(%d / %d) %d%%", exps.exp, exps.exp_max, percentage))
 
     -- Hide the Paragon button if the player has not unlocked the Paragon system
     if playerLevel < minPlayerLevel then

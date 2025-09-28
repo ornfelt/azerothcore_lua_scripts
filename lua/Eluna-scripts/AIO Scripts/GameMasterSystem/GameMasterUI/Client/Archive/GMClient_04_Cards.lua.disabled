@@ -1,0 +1,1015 @@
+local AIO = AIO or require("AIO")
+
+if AIO.AddAddon() then
+    return
+end
+
+-- Verify namespace exists
+local GameMasterSystem = _G.GameMasterSystem
+if not GameMasterSystem then
+    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
+    return
+end
+
+-- Get module references
+local GMCards = _G.GMCards
+local GMConfig = _G.GMConfig
+local GMUtils = _G.GMUtils
+local GMData = _G.GMData
+local GMModels = _G.GMModels
+-- Note: GMMenus accessed from global at runtime since it loads after Cards
+
+-- Constants for card creation
+local CARD_CONFIG = {
+    NUM_COLUMNS = 5,
+    NUM_ROWS = 3,
+    PADDING = 3,  -- Reduced from 5 to give more space to cards
+    MODEL_CONFIG = {
+        DELAY = 0.01,
+        POOL_SIZE = 15,
+        ROTATION = 0.4,
+        ZOOM = {
+            MIN = 0.5,
+            MAX = 2.0,
+            STEP = 0.1,
+            DEFAULT = 0.8,  -- Slightly increased for better visibility
+        },
+        POSITION = { X = 0, Y = 0, Z = 0 },
+        SIZE = {
+            WIDTH_OFFSET = 15,  -- Adjusted for optimal spacing
+            HEIGHT_FACTOR = 0.6,  -- Increased to use more vertical space
+        },
+    },
+}
+
+local VIEW_CONFIG = {
+    ICONS = {
+        MAGNIFIER = "Interface\\Icons\\INV_Misc_Spyglass_03",
+        INFO = "Interface\\Icons\\INV_Misc_Book_09",
+    },
+    TEXTURES = {
+        BACKDROP = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        BORDER = "Interface\\Tooltips\\UI-Tooltip-Border",
+    },
+    SIZES = {
+        ICON = 16,
+        FULL_VIEW = 400,
+        TILE = 16,
+        INSETS = 5,
+    },
+}
+
+-- Model management - use GMModels module if available, otherwise create minimal fallback
+local ModelManager = {}
+
+-- Fallback functions that redirect to GMModels
+ModelManager.releaseModel = function(model)
+    if GMModels and GMModels.releaseModel then
+        GMModels.releaseModel(model)
+    else
+        -- Minimal fallback
+        if model then
+            model:Hide()
+            model:ClearAllPoints()
+            model:SetParent(nil)
+        end
+    end
+end
+
+ModelManager.acquireModel = function()
+    if GMModels and GMModels.acquireModel then
+        return GMModels.acquireModel()
+    else
+        -- Minimal fallback
+        local model = CreateFrame("DressUpModel")
+        model:SetUnit("player")
+        model:Undress()
+        model:Show()
+        return model
+    end
+end
+
+-- Helper function to get quality colors
+local function getQualityColor(quality)
+    if not quality or type(quality) ~= "number" then
+        quality = 1 -- Default to common quality
+    end
+
+    -- Ensure quality is in valid range (0-7)
+    quality = math.max(0, math.min(quality, 7))
+
+    -- GetItemQualityColor sometimes returns nil, so add fallbacks
+    local r, g, b = GetItemQualityColor(quality)
+    if not r or not g or not b then
+        -- Fallback quality colors if GetItemQualityColor fails
+        local fallbackColors = {
+            [0] = { r = 0.5, g = 0.5, b = 0.5 }, -- Poor (gray)
+            [1] = { r = 1.0, g = 1.0, b = 1.0 }, -- Common (white)
+            [2] = { r = 0.3, g = 0.8, b = 0.3 }, -- Uncommon (green)
+            [3] = { r = 0.0, g = 0.4, b = 0.8 }, -- Rare (blue)
+            [4] = { r = 0.7, g = 0.3, b = 1.0 }, -- Epic (purple)
+            [5] = { r = 1.0, g = 0.5, b = 0.0 }, -- Legendary (orange)
+            [6] = { r = 1.0, g = 0.0, b = 0.0 }, -- Artifact (red)
+            [7] = { r = 1.0, g = 0.8, b = 0.0 }, -- Heirloom (gold)
+        }
+        return fallbackColors[quality]
+    end
+
+    return { r = r, g = g, b = b }
+end
+
+-- Helper function to calculate card dimensions
+function GMCards.calculateCardDimensions(parent)
+    local parentWidth = parent:GetWidth()
+    local parentHeight = parent:GetHeight()
+    
+    -- Debug logging
+    if GMConfig.config.debug then
+        print("[GMCards] Parent dimensions:", parentWidth, "x", parentHeight)
+        print("[GMCards] Parent name:", parent:GetName() or "unnamed")
+        print("[GMCards] Grid config: Columns=", CARD_CONFIG.NUM_COLUMNS, "Rows=", CARD_CONFIG.NUM_ROWS)
+    end
+    
+    -- Calculate card dimensions with safety margins
+    local horizontalMargin = 25  -- Reduced horizontal margin for larger cards
+    local verticalMargin = 30    -- Reduced vertical margin since we have more control now
+    local safetyMargin = 10      -- Smaller safety margin since layout is fixed
+    
+    local cardWidth = (parentWidth - horizontalMargin) / CARD_CONFIG.NUM_COLUMNS
+    local cardHeight = (parentHeight - verticalMargin - safetyMargin) / CARD_CONFIG.NUM_ROWS
+    
+    -- Ensure minimum card size
+    local MIN_CARD_WIDTH = 95   -- Increased for better visibility
+    local MIN_CARD_HEIGHT = 115  -- Increased to better fill space
+    
+    if cardWidth < MIN_CARD_WIDTH then
+        print("[GMCards] WARNING: Card width too small:", cardWidth, "using minimum:", MIN_CARD_WIDTH)
+        cardWidth = MIN_CARD_WIDTH
+    end
+    
+    if cardHeight < MIN_CARD_HEIGHT then
+        print("[GMCards] WARNING: Card height too small:", cardHeight, "using minimum:", MIN_CARD_HEIGHT)
+        cardHeight = MIN_CARD_HEIGHT
+    end
+    
+    if GMConfig.config.debug then
+        print("[GMCards] Final card size:", cardWidth, "x", cardHeight)
+    end
+    
+    return cardWidth, cardHeight
+end
+
+-- Helper function to add magnifier icon
+local function addMagnifierIcon(card, entity, index, type)
+    local button = CreateStyledButton(card, "", VIEW_CONFIG.SIZES.ICON, VIEW_CONFIG.SIZES.ICON)
+    button:SetPoint("TOPRIGHT", card, "TOPRIGHT", -5, -5)
+    button:SetNormalTexture(VIEW_CONFIG.ICONS.MAGNIFIER)
+    button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+    button:GetHighlightTexture():SetBlendMode("ADD")
+
+    button:SetScript("OnClick", function()
+        -- Use GMModels module for full view functionality
+        if GMModels and GMModels.createFullViewFrame then
+            local fullViewFrame = GMModels.createFullViewFrame(index)
+            local closeButton = CreateStyledButton(fullViewFrame, "X", 32, 32)
+            closeButton:SetPoint("TOPRIGHT", fullViewFrame, "TOPRIGHT", -5, -5)
+            closeButton:SetScript("OnClick", function()
+                fullViewFrame:Hide()
+            end)
+
+            -- Use GMMenus for info button if available
+            if GMMenus and GMMenus.createInfoButton then
+                GMMenus.createInfoButton(fullViewFrame, entity, type)
+            end
+            
+            -- Use GMModels for model view
+            if GMModels and GMModels.createModelView then
+                GMModels.createModelView(fullViewFrame, entity, type, index)
+            end
+        end
+    end)
+
+    return button
+end
+
+-- Helper function to set up card base
+local function setupCard(card, parent, i, cardWidth, cardHeight)
+    card:SetSize(cardWidth, cardHeight)
+    card:EnableMouse(true)
+    card:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    
+    -- Calculate dynamic vertical spacing to evenly distribute cards
+    local parentHeight = parent:GetHeight()
+    local totalCardHeight = CARD_CONFIG.NUM_ROWS * cardHeight
+    local safetyMargin = 10  -- Reduced safety margin since layout is more controlled
+    local availableVerticalSpace = parentHeight - totalCardHeight - safetyMargin
+    local verticalSpacing = math.max(CARD_CONFIG.PADDING, availableVerticalSpace / (CARD_CONFIG.NUM_ROWS + 1))
+    
+    -- Ensure cards don't overflow by limiting vertical spacing
+    local maxSpacing = 20  -- Increased max spacing for better distribution
+    if verticalSpacing > maxSpacing then
+        verticalSpacing = maxSpacing
+    end
+    
+    -- Calculate position with dynamic vertical spacing
+    local row = math.floor((i - 1) / CARD_CONFIG.NUM_COLUMNS)
+    local col = (i - 1) % CARD_CONFIG.NUM_COLUMNS
+    
+    card:SetPoint(
+        "TOPLEFT",
+        parent,
+        "TOPLEFT",
+        CARD_CONFIG.PADDING + col * (cardWidth + CARD_CONFIG.PADDING),
+        -(verticalSpacing + row * (cardHeight + verticalSpacing))
+    )
+    
+    -- Set frame strata and level to ensure proper layering
+    card:SetFrameStrata("MEDIUM")
+    card:SetFrameLevel(parent:GetFrameLevel() + 1)
+
+    -- Add highlight texture
+    local highlight = card:CreateTexture(nil, "HIGHLIGHT")
+    highlight:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
+    highlight:SetBlendMode("ADD")
+    highlight:SetAllPoints()
+    
+    -- Ensure the card is visible
+    card:Show()
+    
+    if GMConfig.config.debug then
+        print("[GMCards] Card", i, "positioned at:", card:GetLeft() or 0, card:GetTop() or 0)
+        print("[GMCards] Card", i, "size:", card:GetWidth(), "x", card:GetHeight())
+    end
+end
+
+-- Create Item Card
+function GMCards.createItemCard(card, entity, index)
+    if not entity or not entity.entry then
+        print("[GMClient] Invalid entity data for item card")
+        return card
+    end
+
+    -- Pre-fetch item info
+    local itemID = tonumber(entity.entry)
+    local itemName, itemLink, itemQuality, itemLevel, _, _, _, _, itemEquipLoc, itemTexture = GetItemInfo(itemID)
+
+    -- Determine item quality (with fallbacks)
+    local quality = itemQuality
+    if not quality then
+        quality = tonumber(entity.quality)
+        if not quality then
+            quality = 1
+        end
+    end
+
+    -- Ensure quality is in valid range (0-7)
+    quality = math.max(0, math.min(quality, 7))
+
+    -- Get quality colors with improved reliability
+    local colors = getQualityColor(quality)
+
+    -- Apply card styling based on quality
+    card:SetBackdropColor(colors.r * 0.2, colors.g * 0.2, colors.b * 0.2, 0.7)
+    card:SetBackdropBorderColor(colors.r, colors.g, colors.b, 0.8)
+    card.quality = quality
+
+    -- Create icon background for better visibility
+    if not card.iconBackground then
+        card.iconBackground = card:CreateTexture(nil, "BACKGROUND")
+        card.iconBackground:SetSize(44, 44)
+        card.iconBackground:SetPoint("TOP", card, "TOP", 0, -5)
+        card.iconBackground:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+        card.iconBackground:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    end
+
+    -- Create icon border with quality color
+    if not card.iconBorder then
+        card.iconBorder = card:CreateTexture(nil, "OVERLAY")
+        card.iconBorder:SetSize(48, 48)
+        card.iconBorder:SetPoint("TOP", card, "TOP", 0, -5)
+        card.iconBorder:SetTexture("Interface\\Tooltips\\UI-Tooltip-Border")
+    end
+    card.iconBorder:SetVertexColor(colors.r, colors.g, colors.b, 1)
+
+    -- Create icon background for better visibility
+    if not card.iconBg then
+        card.iconBg = card:CreateTexture(nil, "BACKGROUND")
+        card.iconBg:SetSize(44, 44)
+        card.iconBg:SetPoint("TOP", card, "TOP", 0, -5)
+        card.iconBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Gold-Background")
+        card.iconBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    end
+    
+    -- Create or update icon texture
+    if not card.iconTexture then
+        card.iconTexture = card:CreateTexture(nil, "ARTWORK")
+        card.iconTexture:SetSize(40, 40)
+        card.iconTexture:SetPoint("CENTER", card.iconBg, "CENTER", 0, 0)
+    end
+
+    -- Attempt to fetch the item icon
+    local iconTexture = itemTexture or select(10, GetItemInfo(itemID)) or "Interface\\Icons\\INV_Misc_QuestionMark"
+    card.iconTexture:SetTexture(iconTexture)
+    
+    -- Create icon border with quality color
+    if not card.iconBorder then
+        card.iconBorder = card:CreateTexture(nil, "OVERLAY")
+        card.iconBorder:SetSize(44, 44)
+        card.iconBorder:SetPoint("CENTER", card.iconBg, "CENTER", 0, 0)
+        card.iconBorder:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+        card.iconBorder:SetBlendMode("ADD")
+    end
+    card.iconBorder:SetVertexColor(colors.r, colors.g, colors.b, 0.8)
+
+    -- Update text fields with proper positioning
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("TOP", card.iconBg, "BOTTOM", 0, -5)
+    card.nameText:SetText(itemName or ("Item #" .. itemID))
+    card.nameText:SetTextColor(colors.r, colors.g, colors.b)
+
+    card.entityText:ClearAllPoints()
+    card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+    card.entityText:SetText("ID: " .. itemID)
+
+    card.additionalText:ClearAllPoints()
+    card.additionalText:SetPoint("BOTTOM", card.entityText, "TOP", 0, 2)
+    card.additionalText:SetText(string.format("iLvl: %d | Quality: %d", itemLevel or 0, quality))
+
+    -- Handle equippable items with model preview
+    if entity.inventoryType and entity.inventoryType > 0 then
+        -- Use small delay to prevent UI freeze
+        if GMUtils.delayedExecution then
+            GMUtils.delayedExecution(0.01 * math.min(index, 5), function()
+                if not card:IsShown() or not entity or not entity.entry then
+                    return
+                end
+
+                -- Check if item is equippable
+                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(entity.entry)
+                if equipLoc and equipLoc ~= "" and equipLoc ~= "INVTYPE_BAG" then
+                    -- Acquire model from pool (use GMModels if available)
+                    local model = nil
+                    if GMModels and GMModels.acquireModel then
+                        model = GMModels.acquireModel()
+                    else
+                        model = ModelManager.acquireModel()
+                    end
+                    
+                    if model then
+                        model:SetParent(card)  -- Explicitly set parent
+                        model:SetSize(
+                            card:GetWidth() - 30,
+                            card:GetHeight() - 50
+                        )
+                        model:SetPoint("CENTER", card, "CENTER", 0, 5)
+                        model:SetFrameStrata("MEDIUM")
+                        model:SetFrameLevel(card:GetFrameLevel() + 3)
+                        
+                        -- Debug: Verify item model parent
+                        if GMConfig.config.debug then
+                            print(string.format("[GMCards] Item model parent: %s", model:GetParent():GetName() or "card"))
+                        end
+                        
+                        -- Try to apply item
+                        local success = pcall(function()
+                            model:TryOn(entity.entry)
+                        end)
+                        
+                        if success then
+                            card.modelFrame = model
+                        else
+                            if GMModels and GMModels.releaseModel then
+                                GMModels.releaseModel(model)
+                            else
+                                ModelManager.releaseModel(model)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+
+    -- Clean up handler
+    card:SetScript("OnHide", function(self)
+        if self.modelFrame then
+            if GMModels and GMModels.releaseModel then
+                GMModels.releaseModel(self.modelFrame)
+            else
+                ModelManager.releaseModel(self.modelFrame)
+            end
+            self.modelFrame = nil
+        end
+    end)
+
+    -- Tooltip handlers with quality-based highlighting
+    card:SetScript("OnEnter", function(self)
+        if itemLink then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(itemLink)
+            -- Manually set strata for item tooltips
+            local ownerStrata = self:GetFrameStrata()
+            if ownerStrata == "TOOLTIP" or ownerStrata == "FULLSCREEN_DIALOG" then
+                GameTooltip:SetFrameStrata("TOOLTIP")
+                GameTooltip:SetFrameLevel(self:GetFrameLevel() + 10)
+            end
+            GameTooltip:Show()
+        else
+            GMUtils.ShowTooltip(self, "ANCHOR_RIGHT", entity.name or ("Item #" .. itemID))
+        end
+        -- Highlight effect on hover (slightly brighter than normal)
+        self:SetBackdropColor(colors.r * 0.3, colors.g * 0.3, colors.b * 0.3, 0.8)
+    end)
+
+    card:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+        -- Return to normal color
+        self:SetBackdropColor(colors.r * 0.2, colors.g * 0.2, colors.b * 0.2, 0.7)
+    end)
+
+    -- Add tooltip with quality color
+    card:SetScript("OnEnter", function(self)
+        -- Show tooltip
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetHyperlink("item:" .. itemID)
+        -- Manually set strata for item tooltips
+        local ownerStrata = self:GetFrameStrata()
+        if ownerStrata == "TOOLTIP" or ownerStrata == "FULLSCREEN_DIALOG" then
+            GameTooltip:SetFrameStrata("TOOLTIP")
+            GameTooltip:SetFrameLevel(self:GetFrameLevel() + 10)
+        end
+        GameTooltip:Show()
+        
+        -- Lighten card color on hover
+        self:SetBackdropColor(colors.r * 0.3, colors.g * 0.3, colors.b * 0.3, 0.8)
+    end)
+    
+    card:SetScript("OnLeave", function(self)
+        GameTooltip:Hide()
+        
+        -- Return to normal color
+        self:SetBackdropColor(colors.r * 0.2, colors.g * 0.2, colors.b * 0.2, 0.7)
+    end)
+    
+    -- Add context menu
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
+            _G.GMMenus.ShowContextMenu("item", self, entity)
+        end
+    end)
+
+-- Add magnifier icon
+    addMagnifierIcon(card, entity, index, "Item")
+
+    return card
+end
+
+-- Create NPC Card
+function GMCards.createNPCCard(card, entity, i)
+    -- Create a background for better model visibility
+    local modelBg = card:CreateTexture(nil, "BACKGROUND")
+    modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+    modelBg:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
+    modelBg:SetPoint("CENTER", card, "CENTER", 0, 5)
+    modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    
+    -- Create the model frame with explicit parent
+    local model = CreateFrame("DressUpModel", "modelNpc" .. i, card)
+    model:SetParent(card)  -- Explicitly set parent
+    model:SetSize(card:GetWidth() - 30, card:GetHeight() - 50)
+    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)  -- Center on background
+    model:SetFrameStrata("MEDIUM")  -- Same strata as card
+    model:SetFrameLevel(card:GetFrameLevel() + 3)  -- Above background but reasonable
+    model:ClearModel()
+    
+    -- Debug: Verify model parent
+    if GMConfig.config.debug then
+        print(string.format("[GMCards] NPC model parent: %s", model:GetParent():GetName() or "card"))
+    end
+    
+    -- Apply the creature model immediately
+    local success = pcall(function()
+        model:SetCreature(entity.entry)
+    end)
+    
+    if success then
+        model:SetRotation(math.rad(30))
+        model:SetPosition(0, 0, 0)  -- Start at center, adjust if needed
+        model:Show()  -- Ensure model is visible
+        
+        -- Store reference
+        card.modelFrame = model
+        
+        -- Debug: Confirm model is set
+        if GMConfig.config.debug then
+            print(string.format("[GMCards] NPC model created for entry %d", entity.entry))
+            print(string.format("[GMCards] Model frame level: %d, Card frame level: %d", 
+                model:GetFrameLevel(), card:GetFrameLevel()))
+        end
+    else
+        -- Fallback to show model ID as text if creature fails
+        local errorMsg = model:CreateFontString(nil, "OVERLAY")
+        errorMsg:SetFontObject("GameFontNormalLarge")
+        errorMsg:SetPoint("CENTER")
+        errorMsg:SetText("Model: " .. (entity.modelid[1] or entity.modelid))
+        errorMsg:SetTextColor(1, 0.5, 0, 1)
+        
+        if GMConfig.config.debug then
+            print(string.format("[GMCards] Failed to set creature %d", entity.entry))
+        end
+    end
+
+    -- Update text positioning - compact layout with model taking most space
+    local name = entity.name .. (entity.subname and ("\n|cff888888" .. entity.subname .. "|r") or "")
+    card.nameText:SetText(name)
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+    
+    -- Hide other text elements to give more space to model
+    card.entityText:SetText("")
+    card.additionalText:SetText("")
+
+    card:SetScript("OnEnter", function(self)
+        local lines = {
+            entity.name,
+            "Creature ID: " .. entity.entry,
+            "Model ID: " .. (entity.modelid[1] or entity.modelid),
+            "Name: " .. entity.name,
+            "Subname: " .. (entity.subname or "")
+        }
+        GMUtils.ShowTooltip(self, "ANCHOR_RIGHT", unpack(lines))
+    end)
+
+    card:SetScript("OnLeave", function()
+        GMUtils.HideTooltip()
+    end)
+
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
+            _G.GMMenus.ShowContextMenu("npc", card, entity)
+        end
+    end)
+
+    addMagnifierIcon(card, entity, i, "NPC")
+
+    return card
+end
+
+-- Create GameObject Card
+function GMCards.createGameObjectCard(card, entity, i)
+    -- Create a background for better model visibility
+    local modelBg = card:CreateTexture(nil, "BACKGROUND")
+    modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+    modelBg:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
+    modelBg:SetPoint("CENTER", card, "CENTER", 0, 5)
+    modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    
+    -- Create the model frame with explicit parent
+    local model = CreateFrame("DressUpModel", "modelGob" .. i, card)
+    model:SetParent(card)  -- Explicitly set parent
+    model:SetSize(card:GetWidth() - 30, card:GetHeight() - 50)
+    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)  -- Center on background
+    model:SetFrameStrata("MEDIUM")  -- Same strata as card
+    model:SetFrameLevel(card:GetFrameLevel() + 3)  -- Above background but reasonable
+    model:ClearModel()
+
+    -- Apply the gameobject model immediately
+    local modelPath = entity.modelName or "World\\Generic\\ActiveDoodads\\Chest02\\Chest02.mdx"
+    local success, err = pcall(function()
+        model:SetModel(modelPath)
+    end)
+    if not success then
+        model:SetModel("World\\Generic\\ActiveDoodads\\Chest02\\Chest02.mdx")
+        local errorMsg = model:CreateFontString(nil, "OVERLAY")
+        errorMsg:SetFontObject("GameFontNormalLarge")
+        errorMsg:SetPoint("CENTER")
+        errorMsg:SetText("Model Error")
+        errorMsg:SetTextColor(1, 0, 0, 1)
+    end
+
+    model:SetRotation(math.rad(30))
+    model:SetPosition(0, 0, -0.5)  -- GameObjects often need slight offset
+    model:Show()  -- Ensure visibility
+    
+    -- Store reference
+    card.modelFrame = model
+    
+    -- Update text positioning - compact layout with model taking most space
+    card.nameText:SetText(entity.name)
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+    
+    -- Hide other text elements to give more space to model
+    card.entityText:SetText("")
+    card.additionalText:SetText("")
+
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
+            _G.GMMenus.ShowContextMenu("gameobject", card, entity)
+        end
+    end)
+
+    addMagnifierIcon(card, entity, i, "GameObject")
+
+    return card
+end
+
+-- Create Spell Card
+function GMCards.createSpellCard(card, entity, index)
+    local name, rank, icon = GetSpellInfo(entity.spellID)
+
+    -- Set defaults for nil values
+    name = name or "Unknown Spell"
+    rank = rank or ""
+
+    -- Create icon background for better visibility
+    if not card.iconBackground then
+        card.iconBackground = card:CreateTexture(nil, "BACKGROUND")
+        card.iconBackground:SetSize(36, 36)
+        card.iconBackground:SetPoint("TOP", card, "TOP", 0, -10)
+        card.iconBackground:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+        card.iconBackground:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    end
+
+    -- Create icon texture
+    card.iconTexture = card:CreateTexture(nil, "ARTWORK")
+    card.iconTexture:SetSize(32, 32)
+    card.iconTexture:SetPoint("TOP", card, "TOP", 0, -10)
+    card.iconTexture:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    
+    -- Update text positioning to account for icon
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("TOP", card.iconTexture, "BOTTOM", 0, -5)
+    card.nameText:SetText(name .. (rank ~= "" and ("\n" .. rank) or ""))
+    
+    card.entityText:ClearAllPoints()
+    card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+    card.entityText:SetText("Spell ID: " .. entity.spellID)
+    
+    card.additionalText:ClearAllPoints()
+    card.additionalText:SetPoint("BOTTOM", card.entityText, "TOP", 0, 2)
+    card.additionalText:SetText("Icon: " .. (icon and "Yes" or "N/A"))
+
+    card:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetSpellByID(entity.spellID)
+        -- Manually set strata for spell tooltips
+        local ownerStrata = self:GetFrameStrata()
+        if ownerStrata == "TOOLTIP" or ownerStrata == "FULLSCREEN_DIALOG" then
+            GameTooltip:SetFrameStrata("TOOLTIP")
+            GameTooltip:SetFrameLevel(self:GetFrameLevel() + 10)
+        end
+        if GameTooltip:NumLines() == 0 then
+            GameTooltip:SetText(
+                "|cffffff00Description:|r "
+                    .. (entity.spellDescription or "N/A")
+                    .. "\n\n|cffffff00Tooltip:|r "
+                    .. (entity.spellToolTip or "N/A"),
+                nil,
+                nil,
+                nil,
+                nil,
+                true
+            )
+        end
+        GameTooltip:Show()
+    end)
+
+    card:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
+            _G.GMMenus.ShowContextMenu("spell", card, entity)
+        end
+    end)
+
+    -- Add magnifier icon for spell preview
+    addMagnifierIcon(card, entity, index, "Spell")
+
+    return card
+end
+
+-- Create SpellVisual Card
+function GMCards.createSpellVisualCard(card, entity, i)
+    -- Create a background for better model visibility
+    local modelBg = card:CreateTexture(nil, "BACKGROUND")
+    modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+    modelBg:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
+    modelBg:SetPoint("CENTER", card, "CENTER", 0, 5)
+    modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    
+    -- Set up the spell visual model with explicit parent
+    local model = CreateFrame("DressUpModel", "modelSpellVisual" .. i, card)
+    model:SetParent(card)  -- Explicitly set parent
+    model:SetSize(card:GetWidth() - 30, card:GetHeight() - 50)
+    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)  -- Center on background
+    model:SetFrameStrata("MEDIUM")  -- Same strata as card
+    model:SetFrameLevel(card:GetFrameLevel() + 3)  -- Above background but reasonable
+    model:ClearModel()
+    
+    -- Apply the spell visual model immediately
+    local success = pcall(function()
+        model:SetModel(entity.FilePath)
+    end)
+    
+    if success then
+        model:SetRotation(math.rad(30))
+        model:SetPosition(0, 0, -1.0)  -- Spell visuals often need more distance
+        model:Show()  -- Ensure visibility
+        
+        -- Store reference
+        card.modelFrame = model
+    else
+        -- Show error message if model fails
+        local errorMsg = model:CreateFontString(nil, "OVERLAY")
+        errorMsg:SetFontObject("GameFontNormalLarge")
+        errorMsg:SetPoint("CENTER")
+        errorMsg:SetText("NO MODEL")
+        errorMsg:SetTextColor(1, 0, 0, 1)
+    end
+
+    -- Update text positioning - compact layout with model taking most space
+    card.nameText:SetText(entity.Name or "N/A")
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+    
+    -- Hide other text elements to give more space to model
+    card.entityText:SetText("")
+    card.additionalText:SetText("")
+
+    card:SetScript("OnEnter", function(self)
+        GMUtils.ShowTooltip(self, "ANCHOR_RIGHT", entity.tooltip or "No additional information.")
+    end)
+
+    card:SetScript("OnLeave", function()
+        GMUtils.HideTooltip()
+    end)
+
+    -- Right-click context menu
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
+            _G.GMMenus.ShowContextMenu("spellvisual", card, entity)
+        end
+    end)
+
+    -- Add magnifier icon for spell visual preview
+    addMagnifierIcon(card, entity, i, "SpellVisual")
+
+    return card
+end
+
+-- Create Player Card
+function GMCards.createPlayerCard(card, entity, i)
+    -- Debug logging
+    if GMConfig.config.debug then
+        print("[GMCards] Creating player card for:", entity.name)
+        print("[GMCards] Player displayId:", entity.displayId)
+    end
+    
+    -- Create a background for better character visibility
+    local modelBg = card:CreateTexture(nil, "BACKGROUND")
+    modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+    modelBg:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
+    modelBg:SetPoint("CENTER", card, "CENTER", 0, 5)
+    modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    
+    -- Try to create model, but don't fail if it doesn't work
+    local modelSuccess = false
+    local model = CreateFrame("PlayerModel", "modelPlayer" .. i, card)
+    
+    if model and entity.displayId then
+        model:SetParent(card)
+        model:SetSize(card:GetWidth() - 30, card:GetHeight() - 50)
+        model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)
+        model:SetFrameStrata("MEDIUM")
+        model:SetFrameLevel(card:GetFrameLevel() + 3)
+        model:ClearModel()
+        
+        -- Try to set the display ID directly
+        local success = pcall(function()
+            model:SetDisplayInfo(entity.displayId)
+        end)
+        
+        if success then
+            model:SetRotation(math.rad(-15))
+            model:SetPosition(0, 0, -0.1)
+            model:Show()
+            card.modelFrame = model
+            modelSuccess = true
+            
+            if GMConfig.config.debug then
+                print("[GMCards] Player model set successfully for", entity.name)
+            end
+        else
+            -- Hide model if it failed
+            model:Hide()
+            if GMConfig.config.debug then
+                print("[GMCards] Failed to set player model for", entity.name)
+            end
+        end
+    end
+    
+    -- If model failed, show a class icon instead
+    if not modelSuccess then
+        local classIcon = card:CreateTexture(nil, "ARTWORK")
+        classIcon:SetSize(48, 48)
+        classIcon:SetPoint("CENTER", modelBg, "CENTER", 0, 10)
+        
+        -- Class icons mapping
+        local classIcons = {
+            ["Warrior"] = "Interface\\Icons\\INV_Sword_27",
+            ["Paladin"] = "Interface\\Icons\\Spell_Holy_DevotionAura",
+            ["Hunter"] = "Interface\\Icons\\INV_Weapon_Bow_07",
+            ["Rogue"] = "Interface\\Icons\\INV_ThrowingKnife_04",
+            ["Priest"] = "Interface\\Icons\\INV_Staff_30",
+            ["Death Knight"] = "Interface\\Icons\\Spell_Deathknight_ClassIcon",
+            ["Shaman"] = "Interface\\Icons\\Spell_Nature_BloodLust",
+            ["Mage"] = "Interface\\Icons\\INV_Staff_13",
+            ["Warlock"] = "Interface\\Icons\\Spell_Nature_FaerieFire",
+            ["Druid"] = "Interface\\Icons\\Ability_Druid_Maul"
+        }
+        
+        local iconPath = classIcons[entity.class] or "Interface\\Icons\\INV_Misc_QuestionMark"
+        classIcon:SetTexture(iconPath)
+    end
+    
+    -- Player info display
+    local playerInfo = string.format("|cff%s%s|r", entity.classColor or "FFFFFF", entity.name)
+    card.nameText:SetText(playerInfo)
+    card.nameText:ClearAllPoints()
+    card.nameText:SetPoint("TOP", card, "TOP", 0, -5)
+    
+    -- Level and class info
+    local levelClassText = string.format("Level %d %s %s", entity.level or 1, entity.race or "", entity.class or "")
+    card.entityText:SetText(levelClassText)
+    card.entityText:ClearAllPoints()
+    card.entityText:SetPoint("TOP", card.nameText, "BOTTOM", 0, -2)
+    
+    -- Location info
+    local locationText = entity.zone or "Unknown Zone"
+    card.additionalText:SetText(locationText)
+    card.additionalText:ClearAllPoints()
+    card.additionalText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
+    
+    -- Tooltip
+    card:SetScript("OnEnter", function(self)
+        local lines = {
+            entity.name,
+            "Level " .. (entity.level or 1) .. " " .. (entity.race or "") .. " " .. (entity.class or ""),
+            "Guild: " .. (entity.guildName or "No Guild"),
+            "Zone: " .. (entity.zone or "Unknown"),
+            "Gold: " .. (entity.gold or 0) .. "g",
+            " ",
+            "Right-click for management options"
+        }
+        GMUtils.ShowTooltip(self, "ANCHOR_RIGHT", unpack(lines))
+    end)
+    
+    card:SetScript("OnLeave", function()
+        GMUtils.HideTooltip()
+    end)
+    
+    -- Right-click menu
+    card:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
+            _G.GMMenus.ShowContextMenu("player", card, entity)
+        end
+    end)
+    
+    -- Add online status indicator
+    local statusIndicator = card:CreateTexture(nil, "OVERLAY")
+    statusIndicator:SetSize(10, 10)
+    statusIndicator:SetPoint("TOPRIGHT", card, "TOPRIGHT", -5, -5)
+    if entity.online then
+        statusIndicator:SetTexture("Interface\\FriendsFrame\\StatusIcon-Online")
+    else
+        statusIndicator:SetTexture("Interface\\FriendsFrame\\StatusIcon-Offline")
+    end
+    
+    return card
+end
+
+-- Main function to generate cards
+function GMCards.generateCards(parent, data, type)
+    if GMConfig.config.debug then
+        print("[GMCards] Generating cards for type:", type)
+        print("[GMCards] Data count:", #data)
+        print("[GMCards] Parent frame:", parent:GetName() or "unnamed")
+    end
+    
+    local cards = {}
+    local cardWidth, cardHeight = GMCards.calculateCardDimensions(parent)
+    local maxVisible = CARD_CONFIG.NUM_COLUMNS * CARD_CONFIG.NUM_ROWS
+
+    for i = 1, math.min(#data, maxVisible) do
+        local entity = data[i]
+
+        -- Create styled card as a button for better mouse handling
+        local card = CreateFrame("Button", nil, parent)
+        -- Apply dark theme styling manually
+        card:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            tile = false,
+            edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 }
+        })
+        card:SetBackdropColor(0.06, 0.06, 0.06, 1)  -- DarkGrey
+        card:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)  -- BorderGrey
+        setupCard(card, parent, i, cardWidth, cardHeight)
+        
+        -- Debug: Track parent hierarchy
+        if GMConfig.config.debug then
+            local parentChain = {}
+            local current = card
+            while current do
+                table.insert(parentChain, current:GetName() or "unnamed")
+                current = current:GetParent()
+                if #parentChain > 5 then break end -- Prevent infinite loops
+            end
+            print(string.format("[GMCards] Card %d parent chain: %s", i, table.concat(parentChain, " -> ")))
+        end
+
+        -- Create text elements
+        card.nameText = card:CreateFontString(nil, "OVERLAY")
+        card.nameText:SetFontObject("GameFontNormalSmall")  -- Changed to smaller font
+        card.nameText:SetPoint("TOP", card, "TOP", 0, -8)  -- Adjusted position
+        card.nameText:SetWidth(cardWidth - 10)
+        card.nameText:SetWordWrap(true)
+        card.nameText:SetTextColor(1, 1, 1, 1)
+
+        card.entityText = card:CreateFontString(nil, "OVERLAY")
+        card.entityText:SetFontObject("GameFontNormalSmall")  -- Changed to smaller font
+        card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 8)  -- Adjusted position
+        card.entityText:SetWidth(cardWidth - 10)
+        card.entityText:SetWordWrap(true)
+        card.entityText:SetTextColor(0.5, 0.5, 0.5, 1)
+
+        card.additionalText = card:CreateFontString(nil, "OVERLAY")
+        card.additionalText:SetFontObject("GameFontHighlightSmall")  -- Changed to smaller font
+        card.additionalText:SetPoint("BOTTOM", card.entityText, "TOP", 0, 5)
+        card.additionalText:SetWidth(cardWidth - 10)
+        card.additionalText:SetFont("Fonts\\ARIALN.TTF", 10)
+        card.additionalText:SetTextColor(0.5, 0.5, 0.5, 1)
+
+        -- Create specific card type
+        print("[GMCards] Creating card type:", type, "for entity", i)
+        
+        if type == "NPC" then
+            GMCards.createNPCCard(card, entity, i)
+        elseif type == "GameObject" then
+            GMCards.createGameObjectCard(card, entity, i)
+        elseif type == "Spell" then
+            GMCards.createSpellCard(card, entity, i)
+        elseif type == "SpellVisual" then
+            GMCards.createSpellVisualCard(card, entity, i)
+        elseif type == "Item" then
+            GMCards.createItemCard(card, entity, i)
+        elseif type == "Player" then
+            print("[GMCards] Creating player card for:", entity.name or "unknown")
+            GMCards.createPlayerCard(card, entity, i)
+        else
+            print("[GMClient] Unknown card type:", type)
+            -- Fallback: show basic info
+            card.nameText:SetText(entity.name or "Unknown")
+            card.entityText:SetText("Type: " .. type)
+        end
+
+        -- Make sure the card is shown after creation
+        if card then
+            card:Show()
+            
+            -- Debug: Confirm card creation
+            if GMConfig.config.debug then
+                print(string.format("[GMCards] Card %d created for %s type with entry: %s", 
+                    i, type, tostring(entity.entry or entity.spellID or entity.ID)))
+            end
+        end
+
+        cards[i] = card
+    end
+
+    -- Make sure parent frame is shown
+    if parent then
+        parent:Show()
+        
+        if GMConfig.config.debug then
+            print(string.format("[GMCards] Generated %d cards for %s type", #cards, type))
+        end
+    end
+
+    -- Initialize model pool via GMModels if available
+    if GMModels and GMModels.initializeModelPool then
+        GMModels.initializeModelPool()
+    end
+
+    return cards
+end
+
+-- Export functions to namespace
+GMCards.ModelManager = ModelManager
+GMCards.CARD_CONFIG = CARD_CONFIG
+
+print("[GameMasterSystem] Cards module loaded successfully")
