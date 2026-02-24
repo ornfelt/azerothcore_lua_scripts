@@ -119,6 +119,9 @@ azerothcore-trivia-system [lua/azerothcore-trivia-system](lua/azerothcore-trivia
 azerothcore-wowhead-mod-lua [lua/azerothcore-wowhead-mod-lua](lua/azerothcore-wowhead-mod-lua)
 
 
+Black-Market-Auction-House [lua/Black-Market-Auction-House](lua/Black-Market-Auction-House)
+
+
 Config_Rates [lua/Config_Rates](lua/Config_Rates)
 
 
@@ -149,7 +152,13 @@ KaraLoot [lua/KaraLoot](lua/KaraLoot)
 LibAzerothCore-1.0 [lua/LibAzerothCore-1.0](lua/LibAzerothCore-1.0)
 
 
+lottery-lua [lua/lottery-lua](lua/lottery-lua)
+
+
 lua-aio-paragon-system [lua/lua-aio-paragon-system](lua/lua-aio-paragon-system)
+
+
+lua-battlepass [lua/lua-battlepass](lua/lua-battlepass)
 
 
 Lua-HardcoreMode [lua/Lua-HardcoreMode](lua/Lua-HardcoreMode)
@@ -198,6 +207,9 @@ WardenInject [lua/WardenInject](lua/WardenInject)
 
 
 World-of-Bloxcraft-Main [lua/World-of-Bloxcraft-Main](lua/World-of-Bloxcraft-Main)
+
+
+wow-lua-scripts [lua/wow-lua-scripts](lua/wow-lua-scripts)
 
 
 WowEmulationScriptPack [lua/WowEmulationScriptPack](lua/WowEmulationScriptPack)

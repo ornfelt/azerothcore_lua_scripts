@@ -1,0 +1,12 @@
+## Interface: 30300
+## Title: Battle Pass
+## Notes: Battle Pass progression and rewards UI
+## Author: ReanuKeeves
+## Version: 2.0.0
+## SavedVariables: BattlePassDB
+## SavedVariablesPerCharacter: BattlePassCharDB
+
+smallfolk.lua
+CMH.lua
+BattlePass.xml
+BattlePass.lua

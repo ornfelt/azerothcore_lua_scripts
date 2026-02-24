@@ -46,3 +46,8 @@ function getQualityString(Quality)
     }
     return QualityStrings[Quality]
 end
+
+-- Like math.random(a, b) but also works correctly with floating point values.
+function randomFloatBetween(a, b)
+    return a + (math.random() * (b - a))
+end

@@ -111,10 +111,11 @@ local AllowConjured            = false                           -- Default: Fal
 -- The way it works is that it feeds all the items of the class/ID X times into the weight tables,
 -- increasing the bool we can pick items from with duplicates of higher weighted categories.
 -- Increasing one value will supplant the value of the other values.
+-- Each weight number must be an integer, otherwise its category will be skipped
 local ItemWeights = {
     Gear = {
         ["Gray/Poor"]            = 0,
-        ["White/Common"]         = 0.1,
+        ["White/Common"]         = 1,
         ["Green/Uncommon"]       = 25,
         ["Blue/Rare"]            = 15,
         ["Purple/Epic"]          = 5,
@@ -576,10 +577,13 @@ local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
     if not itemResults then return end
     
     local itemEntries = {}
+    local stackSizes = {}
     repeat
         local guid = itemResults:GetUInt32(0)
         local itemEntry = itemResults:GetUInt32(1)
+        local stackSize = itemResults:GetUInt32(2)
         itemEntries[guid] = itemEntry
+        stackSizes[guid] = stackSize
     until not itemResults:NextRow()
     
     local underpricedItems = {}
@@ -601,14 +605,18 @@ local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
             if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Final adjusted cost for item " .. item.entry .. ": " .. cost) end
 
             for _, auction in ipairs(auctionResults) do
-                if itemEntries[auction.itemguid] == item.entry and auction.buyoutprice < cost then
-                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Found underpriced item " .. item.entry .. " at " .. auction.buyoutprice .. " vs calculated " .. cost) end
-                    table.insert(underpricedItems, {
-                        entry = item.entry,
-                        currentPrice = auction.buyoutprice,
-                        calculatedValue = cost,
-                        auctionId = auction.id
-                    })
+                if itemEntries[auction.itemguid] == item.entry then
+                    local count = stackSizes[auction.itemguid]
+                    local stackCost = cost * count
+                    if auction.buyoutprice < stackCost then
+                        if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Found underpriced item " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
+                        table.insert(underpricedItems, {
+                            entry = item.entry,
+                            auctionId = auction.id
+                        })
+                    else
+                        if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Not buying " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
+                    end
                 end
             end
         end
@@ -673,7 +681,7 @@ function AHBot_Buy_ProcessTransactions(underpricedItems, auctionResults)
                         transactionType = "buyout"
                         price = matchingAuction.buyoutprice
                     else
-                        price = math.random(minBid, maxBid)
+                        price = randomFloatBetween(minBid, maxBid)
                     end
                 end
                 
@@ -776,7 +784,7 @@ local function AHBot_Buy_ProcessAuctionResults(results)
         table.insert(itemGuids, auction.itemguid)
     end
 
-    local itemQuery = string.format("SELECT guid, itemEntry FROM item_instance WHERE guid IN (%s)", table.concat(itemGuids, ","))
+    local itemQuery = string.format("SELECT guid, itemEntry, count FROM item_instance WHERE guid IN (%s)", table.concat(itemGuids, ","))
     CharDBQueryAsync(itemQuery, function(itemResults)
         AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
     end)
@@ -911,7 +919,7 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
             cost = cost * stack
             
             if SellPriceVariance then
-                cost = cost * math.random(1 - (SellPriceVariance/100), 1 + (SellPriceVariance/100))
+                cost = cost * randomFloatBetween(1 - (SellPriceVariance/100), 1 + (SellPriceVariance/100))
             end
             
             cost = math.floor(cost)

@@ -1,0 +1,9 @@
+## Interface: 30300
+## Title: BlackMarketUI
+## Notes: MoP-style BMAH visual UI
+## Author: Stephen Kania/Yuppls
+## Version: 0.9
+## Dependencies: Blizzard_AuctionUI
+
+
+BlackMarketUI.xml
