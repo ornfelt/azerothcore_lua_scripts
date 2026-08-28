@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Use existing namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[GameMasterSystem] ERROR: Namespace not found in DatabaseErrorDialog! Check load order.")
-    return
-end
 
 -- Access shared data and UI references
 local GMData = _G.GMData
@@ -224,22 +221,6 @@ function GameMasterSystem.ShowDatabaseError(player, errorData)
             end
         end, ERROR_DISPLAY_TIME * 1000, 1)
     end
-end
-
--- Simplified error message for compatibility
-function GameMasterSystem.ShowSimpleDatabaseError(player, tableName, suggestion)
-    local errorData = {
-        errorType = "missing_table",
-        context = "Database operation failed",
-        missingTables = {
-            {
-                name = tableName,
-                suggestion = suggestion or "Check your database setup"
-            }
-        },
-        timestamp = date("%Y-%m-%d %H:%M:%S")
-    }
-    GameMasterSystem.ShowDatabaseError(player, errorData)
 end
 
 -- Debug message

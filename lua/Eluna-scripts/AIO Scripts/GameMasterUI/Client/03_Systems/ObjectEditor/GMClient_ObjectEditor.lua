@@ -19,7 +19,9 @@ ObjectEditor.CONFIG = {
     MODAL_HEIGHT = 630, -- Increased to accommodate new controls and delete button in third row
     SLIDER_WIDTH = 120, -- Reduced to fit within available space
     BUTTON_SIZE = 28,   -- Reduced from 32
-    UPDATE_THROTTLE = 0.05, -- Throttle updates to 20 per second (50ms delay)
+    UPDATE_THROTTLE = 0.35, -- Throttle updates to ~3 per second (350ms delay)
+    ACTION_COOLDOWN = 1.0, -- Cooldown for quick action buttons (seconds)
+    ACK_TIMEOUT = 2.0, -- Safety timeout for server acknowledgement gate
     MAX_RANGE = 100, -- Maximum range to edit objects
     MIN_SCALE = 0.1,
     MAX_SCALE = 10.0,
@@ -59,10 +61,26 @@ ObjectEditor.originalState = nil
 ObjectEditor.lastUpdate = 0
 ObjectEditor.pendingUpdates = {}
 ObjectEditor.positionMode = "relative" -- "relative" or "absolute"
+ObjectEditor.awaitingServerAck = false
+ObjectEditor.ackTimeoutTimer = nil
+ObjectEditor.lastActionTime = 0
 
 -- ===================================
 -- HELPER FUNCTIONS
 -- ===================================
+
+-- WoW 3.3.5 compatible delayed callback (no C_Timer)
+function ObjectEditor.DelayedCall(delay, callback)
+    local timer = CreateFrame("Frame")
+    local elapsed = 0
+    timer:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed >= delay then
+            self:SetScript("OnUpdate", nil)
+            callback()
+        end
+    end)
+end
 
 -- Get dynamic step based on modifier keys
 function ObjectEditor.GetDynamicStep(baseStep)
@@ -139,21 +157,42 @@ function ObjectEditor.PositionInRow(row, element, width, alignment)
     return element
 end
 
+-- Create a section header with accent underline
+function ObjectEditor.CreateSectionHeader(parent, text, accentColor)
+    local CONFIG = ObjectEditor.CONFIG
+    accentColor = accentColor or UISTYLE_COLORS.Blue
+
+    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header:SetPoint("TOPLEFT", parent, "TOPLEFT", CONFIG.GRID_PADDING, -CONFIG.GRID_PADDING)
+    header:SetText(text)
+    header:SetTextColor(1, 1, 1)
+
+    -- Accent underline
+    local accent = parent:CreateTexture(nil, "ARTWORK")
+    accent:SetHeight(2)
+    accent:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
+    accent:SetPoint("RIGHT", parent, "RIGHT", -CONFIG.GRID_PADDING, 0)
+    accent:SetTexture("Interface\\Buttons\\WHITE8X8")
+    accent:SetVertexColor(accentColor[1], accentColor[2], accentColor[3], 0.5)
+
+    return header
+end
+
 -- Create a standard control row (label, minus button, slider, plus button, value)
 function ObjectEditor.CreateStandardControlRow(parent, label, sliderConfig, handlers)
     local CONFIG = ObjectEditor.CONFIG
     local row = ObjectEditor.CreateGridRow(parent, CONFIG.CONTROL_ROW_HEIGHT)
     
-    -- Create background for the row
+    -- Create background for the row (subtle alternating)
     local rowBg = row:CreateTexture(nil, "BACKGROUND")
     rowBg:SetAllPoints()
     rowBg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    rowBg:SetVertexColor(0.15, 0.15, 0.15, 0.3)
-    
-    -- Label
+    rowBg:SetVertexColor(0.10, 0.11, 0.13, 0.4)
+
+    -- Label (brighter for readability)
     local labelText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     labelText:SetText(label)
-    labelText:SetTextColor(0.7, 0.7, 0.7)  -- Gray color for axis/property labels
+    labelText:SetTextColor(0.85, 0.85, 0.85)
     labelText:SetJustifyH("LEFT")
     labelText:SetSize(CONFIG.LABEL_WIDTH - 10, 20) -- Slightly smaller to fit input
     ObjectEditor.PositionInRow(row, labelText, CONFIG.LABEL_WIDTH - 10, "LEFT")
@@ -182,16 +221,24 @@ function ObjectEditor.CreateStandardControlRow(parent, label, sliderConfig, hand
     -- Slider background track
     local bg = slider:CreateTexture(nil, "BACKGROUND")
     bg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    bg:SetVertexColor(0.2, 0.2, 0.2, 1)
-    bg:SetHeight(4)
+    bg:SetVertexColor(0.15, 0.16, 0.20, 1)
+    bg:SetHeight(6)
     bg:SetPoint("LEFT", slider, "LEFT", 0, 0)
     bg:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
-    
-    -- Slider thumb
+
+    -- Track border (subtle outline)
+    local trackBorder = CreateFrame("Frame", nil, slider)
+    trackBorder:SetPoint("LEFT", bg, "LEFT", -1, 0)
+    trackBorder:SetPoint("RIGHT", bg, "RIGHT", 1, 0)
+    trackBorder:SetHeight(8)
+    trackBorder:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    trackBorder:SetBackdropBorderColor(0.22, 0.24, 0.30, 0.6)
+
+    -- Slider thumb (refined: narrower with accent color)
     local thumb = slider:CreateTexture(nil, "OVERLAY")
     thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
-    thumb:SetVertexColor(0.8, 0.8, 0.8, 1)
-    thumb:SetSize(12, 20)
+    thumb:SetVertexColor(0.40, 0.65, 0.95, 1)
+    thumb:SetSize(8, 18)
     slider:SetThumbTexture(thumb)
     
     -- Min/Max labels
@@ -226,13 +273,13 @@ function ObjectEditor.CreateStandardControlRow(parent, label, sliderConfig, hand
     inputBox:SetMaxLetters(10)
     inputBox:SetNumeric(false) -- Allow decimals and negative
     
-    -- Create background
+    -- Create background (darker recessed look)
     local inputBg = inputBox:CreateTexture(nil, "BACKGROUND")
     inputBg:SetAllPoints()
     inputBg:SetTexture("Interface\\Buttons\\WHITE8X8")
-    inputBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
-    
-    -- Create border
+    inputBg:SetVertexColor(0.05, 0.05, 0.07, 0.9)
+
+    -- Create border with subtle blue tint
     local inputBorder = CreateFrame("Frame", nil, inputBox)
     inputBorder:SetPoint("TOPLEFT", -2, 2)
     inputBorder:SetPoint("BOTTOMRIGHT", 2, -2)
@@ -240,7 +287,7 @@ function ObjectEditor.CreateStandardControlRow(parent, label, sliderConfig, hand
         edgeFile = "Interface\\Buttons\\WHITE8X8",
         edgeSize = 1
     })
-    inputBorder:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    inputBorder:SetBackdropBorderColor(0.28, 0.32, 0.42, 0.8)
     
     -- Set initial text based on default value
     inputBox:SetText(tostring(sliderConfig.default or "0"))
@@ -296,13 +343,15 @@ function ObjectEditor.CreateStandardControlRow(parent, label, sliderConfig, hand
         self:ClearFocus()
     end)
     
-    -- Highlight text on focus
+    -- Highlight text on focus with border glow
     inputBox:SetScript("OnEditFocusGained", function(self)
         self:HighlightText()
+        inputBorder:SetBackdropBorderColor(0.40, 0.65, 0.95, 1)
     end)
-    
+
     inputBox:SetScript("OnEditFocusLost", function(self)
         self:HighlightText(0, 0)
+        inputBorder:SetBackdropBorderColor(0.28, 0.32, 0.42, 0.8)
     end)
     
     -- Add tooltip
@@ -431,36 +480,10 @@ function ObjectEditor.CreateEditorModal()
     _G[modalName] = dialog
     tinsert(UISpecialFrames, modalName)
     
-    -- Add keyboard shortcuts
-    dialog:EnableKeyboard(true)
-    dialog:SetScript("OnKeyDown", function(self, key)
-        if IsAltKeyDown() then
-            if key == "LEFT" then
-                dialog:ClearAllPoints()
-                dialog:SetPoint("LEFT", UIParent, "LEFT", 50, 0)
-            elseif key == "RIGHT" then
-                dialog:ClearAllPoints()
-                dialog:SetPoint("RIGHT", UIParent, "RIGHT", -50, 0)
-            elseif key == "UP" or key == "DOWN" then
-                dialog:ClearAllPoints()
-                dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-            elseif key == "H" and IsAltKeyDown() then
-                -- Toggle opacity using the button's logic (Alt+H)
-                if dialog.opacityToggle then
-                    dialog.opacityToggle:Click()
-                else
-                    -- Fallback if button doesn't exist
-                    if dialog:GetAlpha() > 0.5 then
-                        dialog:SetAlpha(0.3)
-                    else
-                        dialog:SetAlpha(1.0)
-                    end
-                end
-            end
-        elseif key == "ESCAPE" then
-            ObjectEditor.CloseEditor()
-        end
-    end)
+    -- ESC close is handled by UISpecialFrames (registered above)
+    -- NOTE: EnableKeyboard(true) steals ALL keystrokes (WASD, chat, etc.)
+    -- in WoW 3.3.5 which has no SetPropagateKeyboardInput().
+    -- Position shortcuts (Alt+Arrow) are available via the < O > buttons instead.
     
     -- Title bar
     local titleBar = CreateStyledFrame(dialog, UISTYLE_COLORS.SectionBg)
@@ -480,17 +503,24 @@ function ObjectEditor.CreateEditorModal()
     
     -- Title text
     local title = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("CENTER", titleBar, "CENTER", 0, 0)
+    title:SetPoint("CENTER", titleBar, "CENTER", 0, 3)
     title:SetText("Object Editor")
-    title:SetTextColor(1, 1, 1)  -- Ensure white text
+    title:SetTextColor(1, 1, 1)
     ObjectEditor.titleText = title
-    
-    -- Add drag hint text
+
+    -- Drag hint (smaller, below title)
     local dragHint = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    dragHint:SetPoint("BOTTOM", titleBar, "BOTTOM", 0, 2)
+    dragHint:SetPoint("TOP", title, "BOTTOM", 0, -1)
     dragHint:SetText("(Drag to move)")
-    dragHint:SetTextColor(0.5, 0.5, 0.5)
-    dragHint:SetAlpha(0.7)
+    dragHint:SetTextColor(0.45, 0.45, 0.45)
+
+    -- Title bar bottom accent line
+    local titleAccent = titleBar:CreateTexture(nil, "ARTWORK")
+    titleAccent:SetHeight(1)
+    titleAccent:SetPoint("BOTTOMLEFT", titleBar, "BOTTOMLEFT", 0, 0)
+    titleAccent:SetPoint("BOTTOMRIGHT", titleBar, "BOTTOMRIGHT", 0, 0)
+    titleAccent:SetTexture("Interface\\Buttons\\WHITE8X8")
+    titleAccent:SetVertexColor(0.31, 0.69, 0.89, 0.4)
     
     -- Opacity toggle button
     local opacityToggle = CreateStyledButton(titleBar, "O", 20, 20)  -- Using simple O character
@@ -599,11 +629,8 @@ function ObjectEditor.CreatePositionControls(parent)
     sectionContainer:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -10)
     sectionContainer:SetHeight((CONFIG.CONTROL_ROW_HEIGHT * 3) + (CONFIG.GRID_SPACING * 2) + 60) -- Increased for mode toggle
     
-    -- Section header
-    local posHeader = sectionContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    posHeader:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", CONFIG.GRID_PADDING, -CONFIG.GRID_PADDING)
-    posHeader:SetText("Position")
-    posHeader:SetTextColor(1, 1, 1)  -- White for section headers
+    -- Section header with accent
+    local posHeader = ObjectEditor.CreateSectionHeader(sectionContainer, "Position", UISTYLE_COLORS.Blue)
     
     -- Mode toggle button
     local modeToggle = CreateStyledButton(sectionContainer, "Mode: Relative", 100, 20)
@@ -871,11 +898,8 @@ function ObjectEditor.CreateRotationControls(parent)
     sectionContainer:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -((CONFIG.CONTROL_ROW_HEIGHT * 3) + (CONFIG.GRID_SPACING * 2) + 35 + CONFIG.SECTION_SPACING + 10))
     sectionContainer:SetHeight(CONFIG.CONTROL_ROW_HEIGHT + 35)
     
-    -- Section header
-    local rotHeader = sectionContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    rotHeader:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", CONFIG.GRID_PADDING, -CONFIG.GRID_PADDING)
-    rotHeader:SetText("Rotation")
-    rotHeader:SetTextColor(1, 1, 1)  -- White for section headers
+    -- Section header with accent
+    local rotHeader = ObjectEditor.CreateSectionHeader(sectionContainer, "Rotation", UISTYLE_COLORS.Gold)
     
     -- Create grid container for controls
     local gridContainer = ObjectEditor.CreateGridContainer(
@@ -989,11 +1013,8 @@ function ObjectEditor.CreateScaleControls(parent)
     sectionContainer:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -totalOffset)
     sectionContainer:SetHeight(CONFIG.CONTROL_ROW_HEIGHT + 35)
     
-    -- Section header
-    local scaleHeader = sectionContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    scaleHeader:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", CONFIG.GRID_PADDING, -CONFIG.GRID_PADDING)
-    scaleHeader:SetText("Scale")
-    scaleHeader:SetTextColor(1, 1, 1)  -- White for section headers
+    -- Section header with accent
+    local scaleHeader = ObjectEditor.CreateSectionHeader(sectionContainer, "Scale", UISTYLE_COLORS.Green)
     
     -- Create grid container for controls
     local gridContainer = ObjectEditor.CreateGridContainer(
@@ -1098,16 +1119,13 @@ function ObjectEditor.CreateQuickActions(parent)
     sectionContainer:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -totalOffset)
     sectionContainer:SetHeight(140)  -- Increased to accommodate 3 rows
     
-    -- Section header
-    local actionHeader = sectionContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    actionHeader:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", CONFIG.GRID_PADDING, -CONFIG.GRID_PADDING)
-    actionHeader:SetText("Quick Actions")
-    actionHeader:SetTextColor(1, 1, 1)  -- White for section headers
+    -- Section header with accent
+    local actionHeader = ObjectEditor.CreateSectionHeader(sectionContainer, "Quick Actions", UISTYLE_COLORS.Orange)
     
     -- Create grid container for 2x3 button layout (2 columns, 3 rows)
     local gridContainer = CreateFrame("Frame", nil, sectionContainer)
-    gridContainer:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", CONFIG.GRID_PADDING, -35)
-    gridContainer:SetPoint("TOPRIGHT", sectionContainer, "TOPRIGHT", -CONFIG.GRID_PADDING, -35)
+    gridContainer:SetPoint("TOPLEFT", sectionContainer, "TOPLEFT", CONFIG.GRID_PADDING, -38)
+    gridContainer:SetPoint("TOPRIGHT", sectionContainer, "TOPRIGHT", -CONFIG.GRID_PADDING, -38)
     gridContainer:SetHeight(105)  -- Increased to fit three rows with spacing
     
     -- Calculate button dimensions for 2x3 grid (2 columns, 3 rows)
@@ -1151,43 +1169,164 @@ function ObjectEditor.CreateQuickActions(parent)
         },
         {
             text = "Teleport Away",
-            tooltip = { title = "Teleport Away", text = "Teleport yourself away from the entity\nUseful if stuck inside it" },
-            onClick = function() ObjectEditor.TeleportAway() end,
+            tooltip = { title = "Teleport Away", text = "Hover for directional options\nClick for default (away)" },
+            onClick = function()
+                local dirs = {"front", "back", "left", "right"}
+                ObjectEditor.TeleportAway(dirs[math.random(#dirs)])
+            end,
             row = 2, col = 1,
-            color = {0.2, 0.6, 0.8}  -- Blue tint for teleport button
+            color = {0.2, 0.6, 0.8},
+            flyout = true  -- flag for directional flyout
         }
     }
-    
+
     -- Create and position buttons
+    local teleportBtn = nil
     for _, btnData in ipairs(buttons) do
         local btn = CreateStyledButton(gridContainer, btnData.text, buttonWidth, buttonHeight)
-        
-        -- Apply custom color if specified (for delete button)
+
         if btnData.color then
             local r, g, b = unpack(btnData.color)
-            -- Override the backdrop color for the delete button
             btn:SetBackdropColor(r, g, b, 1)
-            
-            -- Update hover effects with red tint
-            btn:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(r * 1.2, g * 1.2, b * 1.2, 1)
-            end)
-            
-            btn:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(r, g, b, 1)
-            end)
+
+            if not btnData.flyout then
+                btn:SetScript("OnEnter", function(self)
+                    self:SetBackdropColor(r * 1.2, g * 1.2, b * 1.2, 1)
+                end)
+                btn:SetScript("OnLeave", function(self)
+                    self:SetBackdropColor(r, g, b, 1)
+                end)
+            end
         end
-        
-        -- Calculate position based on row and column with proper spacing
+
         local xPos = btnData.col * (buttonWidth + CONFIG.GRID_SPACING)
         local yPos = -btnData.row * (buttonHeight + CONFIG.GRID_SPACING)
-        
         btn:SetPoint("TOPLEFT", gridContainer, "TOPLEFT", xPos, yPos)
         btn:SetScript("OnClick", btnData.onClick)
-        btn:SetTooltip(btnData.tooltip.title, btnData.tooltip.text)
+
+        if not btnData.flyout then
+            btn:SetTooltip(btnData.tooltip.title, btnData.tooltip.text)
+        else
+            teleportBtn = btn
+        end
     end
-    
+
+    -- Directional teleport flyout (compass layout above the button)
+    if teleportBtn then
+        ObjectEditor.CreateTeleportFlyout(teleportBtn)
+    end
+
     return sectionContainer
+end
+
+-- Bottom action buttons
+-- Directional teleport flyout — compass layout above the Teleport button
+function ObjectEditor.CreateTeleportFlyout(parentBtn)
+    local FLYOUT_BTN = 28
+    local FLYOUT_GAP = 2
+    -- Flyout container: 3x3 grid but only the cross positions are used
+    local flyoutW = FLYOUT_BTN * 3 + FLYOUT_GAP * 2
+    local flyoutH = FLYOUT_BTN * 3 + FLYOUT_GAP * 2 + 4
+
+    local flyout = CreateFrame("Frame", nil, parentBtn)
+    flyout:SetSize(flyoutW, flyoutH)
+    flyout:SetPoint("BOTTOM", parentBtn, "TOP", 0, 4)
+    flyout:SetFrameStrata("DIALOG")
+    flyout:SetFrameLevel(parentBtn:GetFrameLevel() + 10)
+    flyout:Hide()
+
+    -- Block mouse clicks from passing through to elements behind
+    flyout:EnableMouse(true)
+
+    -- Background
+    flyout:SetBackdrop(UISTYLE_BACKDROPS.Frame)
+    flyout:SetBackdropColor(0.08, 0.08, 0.10, 0.95)
+    flyout:SetBackdropBorderColor(0.25, 0.50, 0.70, 0.7)
+
+    -- Title
+    local flyTitle = flyout:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    flyTitle:SetPoint("TOP", flyout, "TOP", 0, -2)
+    flyTitle:SetText("Teleport Direction")
+    flyTitle:SetTextColor(0.6, 0.75, 0.9)
+
+    -- Direction definitions: {id, label, row, col, icon}
+    -- Grid: row 0=top, 1=mid, 2=bottom; col 0=left, 1=center, 2=right
+    local dirs = {
+        { id = "front", label = "F",  row = 0, col = 1, tip = "Front (where entity faces)" },
+        { id = "left",  label = "L",  row = 1, col = 0, tip = "Left of entity" },
+        { id = "right", label = "R",  row = 1, col = 2, tip = "Right of entity" },
+        { id = "back",  label = "B",  row = 2, col = 1, tip = "Behind entity" },
+    }
+
+    local gridStartY = -14  -- below title
+    for _, d in ipairs(dirs) do
+        local dbtn = CreateFrame("Button", nil, flyout)
+        dbtn:SetSize(FLYOUT_BTN, FLYOUT_BTN)
+        local xOff = d.col * (FLYOUT_BTN + FLYOUT_GAP)
+        local yOff = gridStartY - d.row * (FLYOUT_BTN + FLYOUT_GAP)
+        dbtn:SetPoint("TOPLEFT", flyout, "TOPLEFT", xOff, yOff)
+
+        local bg = dbtn:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetTexture("Interface\\Buttons\\WHITE8X8")
+        bg:SetVertexColor(0.15, 0.30, 0.45, 0.9)
+        dbtn.bg = bg
+
+        local lbl = dbtn:CreateFontString(nil, "OVERLAY")
+        lbl:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+        lbl:SetPoint("CENTER")
+        lbl:SetText(d.label)
+        lbl:SetTextColor(1, 1, 1, 0.9)
+
+        dbtn:SetScript("OnEnter", function(self)
+            self.bg:SetVertexColor(0.25, 0.55, 0.80, 1)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(d.tip, 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        dbtn:SetScript("OnLeave", function(self)
+            self.bg:SetVertexColor(0.15, 0.30, 0.45, 0.9)
+            GameTooltip:Hide()
+        end)
+        dbtn:SetScript("OnClick", function()
+            ObjectEditor.TeleportAway(d.id)
+            flyout:Hide()
+        end)
+    end
+
+    -- Center cell: compass dot (visual only)
+    local centerDot = flyout:CreateTexture(nil, "ARTWORK")
+    centerDot:SetSize(6, 6)
+    local cx = 1 * (FLYOUT_BTN + FLYOUT_GAP) + FLYOUT_BTN / 2
+    local cy = gridStartY - 1 * (FLYOUT_BTN + FLYOUT_GAP) - FLYOUT_BTN / 2
+    centerDot:SetPoint("CENTER", flyout, "TOPLEFT", cx, cy)
+    centerDot:SetTexture("Interface\\Buttons\\WHITE8X8")
+    centerDot:SetVertexColor(0.4, 0.65, 0.95, 0.6)
+
+    -- Show/hide logic: show on hover, hide when mouse leaves entire area
+    parentBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.25, 0.75, 1.0, 1)
+        flyout:Show()
+    end)
+    parentBtn:SetScript("OnLeave", function(self)
+        -- Delay hide to allow mouse to move to flyout
+        ObjectEditor.DelayedCall(0.15, function()
+            if not flyout:IsMouseOver() and not self:IsMouseOver() then
+                flyout:Hide()
+                self:SetBackdropColor(0.2, 0.6, 0.8, 1)
+            end
+        end)
+    end)
+    flyout:SetScript("OnLeave", function(self)
+        ObjectEditor.DelayedCall(0.15, function()
+            if not self:IsMouseOver() and not parentBtn:IsMouseOver() then
+                self:Hide()
+                parentBtn:SetBackdropColor(0.2, 0.6, 0.8, 1)
+            end
+        end)
+    end)
+
+    ObjectEditor.teleportFlyout = flyout
 end
 
 -- Bottom action buttons
@@ -1198,19 +1337,23 @@ function ObjectEditor.CreateBottomButtons(dialog)
     buttonContainer:SetPoint("BOTTOMLEFT", dialog, "BOTTOMLEFT", 10, 5)
     buttonContainer:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -10, 5)
     
-    -- Save button
-    local saveBtn = CreateStyledButton(buttonContainer, "Save Changes", 110, 30)
-    saveBtn:SetPoint("LEFT", buttonContainer, "LEFT", 40, 0)
+    -- Save button (green accent — primary action)
+    local saveBtn = CreateStyledButton(buttonContainer, "Save Changes", 140, 32)
+    saveBtn:SetPoint("LEFT", buttonContainer, "LEFT", 25, 0)
+    saveBtn:SetBackdropColor(0.15, 0.45, 0.20, 1)
+    saveBtn:SetBackdropBorderColor(0.25, 0.65, 0.30, 0.8)
     saveBtn:SetScript("OnClick", function()
         ObjectEditor.SaveChanges()
     end)
-    
-    -- Cancel button
-    local cancelBtn = CreateStyledButton(buttonContainer, "Cancel", 90, 30)
-    cancelBtn:SetPoint("RIGHT", buttonContainer, "RIGHT", -40, 0)
+    saveBtn:SetTooltip("Save Changes", "Write current position, rotation, and scale to the database")
+
+    -- Cancel button (subtle)
+    local cancelBtn = CreateStyledButton(buttonContainer, "Cancel", 100, 32)
+    cancelBtn:SetPoint("RIGHT", buttonContainer, "RIGHT", -25, 0)
     cancelBtn:SetScript("OnClick", function()
         ObjectEditor.CloseEditor(true) -- true = restore original
     end)
+    cancelBtn:SetTooltip("Cancel", "Discard changes and restore original state")
 end
 
 -- Update queueing system for throttling
@@ -1219,23 +1362,30 @@ function ObjectEditor.QueueUpdate(updateType, data)
     ObjectEditor.ProcessPendingUpdates()
 end
 
--- Process pending updates with throttling
+-- Process pending updates with throttling + server ack gate
 function ObjectEditor.ProcessPendingUpdates()
     local now = GetTime()
-    if now - ObjectEditor.lastUpdate < ObjectEditor.CONFIG.UPDATE_THROTTLE then
-        -- Schedule update if not already scheduled
-        if not ObjectEditor.updateTimer then
-            ObjectEditor.updateTimer = CreateFrame("Frame")
-            ObjectEditor.updateTimer:SetScript("OnUpdate", function(self, elapsed)
-                if GetTime() - ObjectEditor.lastUpdate >= ObjectEditor.CONFIG.UPDATE_THROTTLE then
-                    self:SetScript("OnUpdate", nil)
-                    ObjectEditor.updateTimer = nil
-                    ObjectEditor.SendUpdates()
-                end
-            end)
-        end
-    else
+    local throttleReady = (now - ObjectEditor.lastUpdate >= ObjectEditor.CONFIG.UPDATE_THROTTLE)
+    local ackReady = not ObjectEditor.awaitingServerAck
+
+    if throttleReady and ackReady then
         ObjectEditor.SendUpdates()
+        return
+    end
+
+    -- Schedule a retry timer if not already running
+    if not ObjectEditor.updateTimer then
+        ObjectEditor.updateTimer = CreateFrame("Frame")
+        ObjectEditor.updateTimer:SetScript("OnUpdate", function(self)
+            local t = GetTime()
+            local canSend = (t - ObjectEditor.lastUpdate >= ObjectEditor.CONFIG.UPDATE_THROTTLE)
+                and not ObjectEditor.awaitingServerAck
+            if canSend then
+                self:SetScript("OnUpdate", nil)
+                ObjectEditor.updateTimer = nil
+                ObjectEditor.SendUpdates()
+            end
+        end)
     end
 end
 
@@ -1244,18 +1394,20 @@ function ObjectEditor.SendUpdates()
     if not ObjectEditor.currentObject or not next(ObjectEditor.pendingUpdates) then
         return
     end
-    
+
     local updates = {}
     for updateType, data in pairs(ObjectEditor.pendingUpdates) do
         updates[updateType] = data
     end
-    
-    -- Sending updates
-    
-    -- Clear pending updates
+
+    -- Clear pending updates and set ack gate
     ObjectEditor.pendingUpdates = {}
     ObjectEditor.lastUpdate = GetTime()
-    
+    ObjectEditor.awaitingServerAck = true
+
+    -- Safety timeout: auto-clear ack if server never responds
+    ObjectEditor.StartAckTimeout()
+
     -- Send to server based on entity type
     if ObjectEditor.currentObject.entityType == "Creature" then
         AIO.Handle("GameMasterSystem", "updateCreature", ObjectEditor.currentObject.guid, updates)
@@ -1263,6 +1415,48 @@ function ObjectEditor.SendUpdates()
         -- Default to GameObject for backward compatibility
         AIO.Handle("GameMasterSystem", "updateGameObject", ObjectEditor.currentObject.guid, updates)
     end
+end
+
+-- Start a safety timeout that clears the ack gate if server doesn't respond
+function ObjectEditor.StartAckTimeout()
+    ObjectEditor.CancelAckTimeout()
+    ObjectEditor.ackTimeoutTimer = CreateFrame("Frame")
+    local elapsed = 0
+    ObjectEditor.ackTimeoutTimer:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed >= ObjectEditor.CONFIG.ACK_TIMEOUT then
+            self:SetScript("OnUpdate", nil)
+            ObjectEditor.ackTimeoutTimer = nil
+            ObjectEditor.ClearAckGate()
+        end
+    end)
+end
+
+-- Cancel the ack timeout timer
+function ObjectEditor.CancelAckTimeout()
+    if ObjectEditor.ackTimeoutTimer then
+        ObjectEditor.ackTimeoutTimer:SetScript("OnUpdate", nil)
+        ObjectEditor.ackTimeoutTimer = nil
+    end
+end
+
+-- Clear the ack gate and flush any queued updates
+function ObjectEditor.ClearAckGate()
+    ObjectEditor.awaitingServerAck = false
+    ObjectEditor.CancelAckTimeout()
+    if next(ObjectEditor.pendingUpdates) then
+        ObjectEditor.ProcessPendingUpdates()
+    end
+end
+
+-- Guard for quick action buttons (returns true if action allowed)
+function ObjectEditor.CanPerformAction()
+    local now = GetTime()
+    if now - ObjectEditor.lastActionTime < ObjectEditor.CONFIG.ACTION_COOLDOWN then
+        return false
+    end
+    ObjectEditor.lastActionTime = now
+    return true
 end
 
 -- Helper functions
@@ -1286,7 +1480,7 @@ function ObjectEditor.RotateObject(degrees)
 end
 
 function ObjectEditor.CopyPlayerPosition()
-    if not ObjectEditor.currentObject then return end
+    if not ObjectEditor.currentObject or not ObjectEditor.CanPerformAction() then return end
     
     -- Check entity type and call appropriate handler
     if ObjectEditor.currentObject.entityType == "Creature" then
@@ -1297,7 +1491,7 @@ function ObjectEditor.CopyPlayerPosition()
 end
 
 function ObjectEditor.FacePlayer()
-    if not ObjectEditor.currentObject then return end
+    if not ObjectEditor.currentObject or not ObjectEditor.CanPerformAction() then return end
     
     -- Check entity type and call appropriate handler
     if ObjectEditor.currentObject.entityType == "Creature" then
@@ -1308,7 +1502,7 @@ function ObjectEditor.FacePlayer()
 end
 
 function ObjectEditor.ResetToOriginal()
-    if not ObjectEditor.originalState or not ObjectEditor.currentObject then return end
+    if not ObjectEditor.originalState or not ObjectEditor.currentObject or not ObjectEditor.CanPerformAction() then return end
     
     -- Reset UI values
     ObjectEditor.LoadObjectData(ObjectEditor.originalState)
@@ -1322,7 +1516,7 @@ function ObjectEditor.ResetToOriginal()
 end
 
 function ObjectEditor.DuplicateObject()
-    if not ObjectEditor.currentObject then return end
+    if not ObjectEditor.currentObject or not ObjectEditor.CanPerformAction() then return end
     
     -- Send any pending updates first
     if next(ObjectEditor.pendingUpdates) then
@@ -1351,7 +1545,7 @@ function ObjectEditor.DuplicateObject()
 end
 
 function ObjectEditor.DeleteObject()
-    if not ObjectEditor.currentObject then return end
+    if not ObjectEditor.currentObject or not ObjectEditor.CanPerformAction() then return end
 
     -- Check entity type and call appropriate delete handler
     if ObjectEditor.currentObject.entityType == "Creature" then
@@ -1371,25 +1565,26 @@ function ObjectEditor.DeleteObject()
     ObjectEditor.CloseEditor()
 end
 
-function ObjectEditor.TeleportAway()
+function ObjectEditor.TeleportAway(direction)
     if not ObjectEditor.currentObject then return end
+    local obj = ObjectEditor.currentObject
 
-    -- Send teleport request to server with entity position and scale
+    -- Send teleport request with optional direction and entity orientation
     AIO.Handle("GameMasterSystem", "teleportAwayFromEntity",
-        ObjectEditor.currentObject.x,
-        ObjectEditor.currentObject.y,
-        ObjectEditor.currentObject.z,
-        ObjectEditor.currentObject.scale or 1.0
+        obj.x, obj.y, obj.z,
+        obj.scale or 1.0,
+        obj.o or 0,
+        direction  -- nil for legacy "away", or "front"/"back"/"left"/"right"
     )
 
-    -- Show feedback
+    local label = direction and (direction:sub(1,1):upper() .. direction:sub(2)) or "Away"
     if CreateStyledToast then
-        CreateStyledToast("Teleporting away from entity...", 2, 0.5)
+        CreateStyledToast("Teleporting " .. label .. "...", 2, 0.5)
     end
 end
 
 function ObjectEditor.SaveChanges()
-    if not ObjectEditor.currentObject then return end
+    if not ObjectEditor.currentObject or not ObjectEditor.CanPerformAction() then return end
     
     -- Send any pending updates
     if next(ObjectEditor.pendingUpdates) then
@@ -1549,6 +1744,8 @@ function ObjectEditor.CloseEditor(restore)
     ObjectEditor.originalState = nil
     ObjectEditor.pendingUpdates = {}
     ObjectEditor.lastUpdate = 0
+    ObjectEditor.awaitingServerAck = false
+    ObjectEditor.CancelAckTimeout()
 
     -- Hide dialog
     if ObjectEditor.dialog then

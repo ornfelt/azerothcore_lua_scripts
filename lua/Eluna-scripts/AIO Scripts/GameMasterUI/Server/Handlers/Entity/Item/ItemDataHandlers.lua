@@ -10,20 +10,20 @@
 local ItemDataHandlers = {}
 
 -- Module dependencies (will be injected)
-local GameMasterSystem, Config, Utils, Database, DatabaseHelper
+local GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper
 
-function ItemDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+function ItemDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     GameMasterSystem = gms
     Config = config
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
+    DatabaseErrorHelper = dbErrorHelper
     
     -- Register data-related handlers
     GameMasterSystem.getItemData = ItemDataHandlers.getItemData
     GameMasterSystem.handleItemCategory = ItemDataHandlers.getItemData -- Alias for backward compatibility
     GameMasterSystem.searchItemData = ItemDataHandlers.searchItemData
-    GameMasterSystem.requestItemPacketsForList = ItemDataHandlers.requestItemPacketsForList
     GameMasterSystem.getItemIcon = ItemDataHandlers.getItemIcon
     GameMasterSystem.getItemTypeName = ItemDataHandlers.getItemTypeName
 end
@@ -48,8 +48,14 @@ function ItemDataHandlers.getItemData(player, offset, pageSize, sortOrder, inven
         local totalCount = 0
         if countResult then
             totalCount = Utils.getTotalCount(function() return countResult end, "")
-        elseif Config.debug then
-            print(string.format("[GameMasterUI] Failed to get item count: %s", countError or "unknown error"))
+        elseif countError then
+            -- Check if error is due to missing table and notify user
+            if DatabaseErrorHelper and string.find(countError, "Missing") then
+                DatabaseErrorHelper.CheckTablesForFeature(player, "Items", {"item_template"}, "world")
+                return -- Exit early - error sent to client
+            elseif Config.debug then
+                print(string.format("[GameMasterUI] Failed to get item count: %s", countError))
+            end
         end
 
         -- Calculate pagination info
@@ -75,8 +81,14 @@ function ItemDataHandlers.getItemData(player, offset, pageSize, sortOrder, inven
                     }
                     table.insert(itemData, item)
                 until not result:NextRow()
-            elseif Config.debug then
-                print(string.format("[GameMasterUI] Failed to get item data: %s", queryError or "unknown error"))
+            elseif queryError then
+                -- Check if error is due to missing table and notify user
+                if DatabaseErrorHelper and string.find(queryError, "Missing") then
+                    DatabaseErrorHelper.CheckTablesForFeature(player, "Items", {"item_template"}, "world")
+                    return -- Exit early - error sent to client
+                elseif Config.debug then
+                    print(string.format("[GameMasterUI] Failed to get item data: %s", queryError))
+                end
             end
 
             -- Send data with comprehensive pagination info
@@ -214,31 +226,6 @@ function ItemDataHandlers.getItemTypeName(class, subclass)
         [16] = "Glyph"
     }
     return classNames[class] or "Unknown"
-end
-
--- Handler for client requesting item packets for a list of items
-function ItemDataHandlers.requestItemPacketsForList(player, itemList)
-    -- Validate input
-    if not player or not itemList or type(itemList) ~= "table" then
-        return
-    end
-    
-    -- debugMessage(string.format("Client requested packets for %d items", #itemList))  -- Debug disabled
-    
-    -- DISABLED: Send item packets using the global functions
-    -- This functionality has been disabled to prevent packet sending
-    -- To re-enable, set ENABLE_ITEM_PACKETS = true in GameMasterUI_Init.lua
-    --[[
-    if _G.GameMasterUI_SendItemQueryForList and _G.GameMasterUI_ExtractItemEntries then
-        local itemEntries = _G.GameMasterUI_ExtractItemEntries(itemList)
-        _G.GameMasterUI_SendItemQueryForList(player, itemEntries)
-        -- debugMessage(string.format("Sent packets for %d item entries", #itemEntries))  -- Debug disabled
-    else
-        if Config.debug then
-            print("[ItemDataHandlers] ERROR: Global packet functions not available for client request!")
-        end
-    end
-    --]]
 end
 
 return ItemDataHandlers

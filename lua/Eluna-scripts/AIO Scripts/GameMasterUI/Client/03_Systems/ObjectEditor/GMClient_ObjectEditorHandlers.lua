@@ -12,9 +12,111 @@ if not ObjectEditor then
 end
 
 local GameMasterSystem = _G.GameMasterSystem
+local GMSettings = _G.GMSettings
 
 -- Register handlers
 local handlers = AIO.AddHandlers("ObjectEditor", {})
+
+local POSITION_AXES = { "x", "y", "z" }
+
+local function applyPositionToUI(x, y, z)
+    local sliders = ObjectEditor.positionSliders
+    if not sliders then return end
+    local values = { x = x, y = y, z = z }
+    local relative = ObjectEditor.positionMode == "relative"
+    for _, axis in ipairs(POSITION_AXES) do
+        local s = sliders[axis]
+        if s then
+            local v = values[axis]
+            if s.label then
+                s.label:SetText(string.format("%s: %.1f", axis:upper(), v))
+            end
+            if relative then
+                s.slider:SetValue(0)
+                s.offsetText:SetText("+0.0")
+            else
+                s.slider:SetValue(v)
+                s.offsetText:SetText(string.format("%.1f", v))
+            end
+            if s.inputBox then
+                s.inputBox:SetText(string.format("%.2f", v))
+            end
+        end
+    end
+end
+
+local function applyOrientationToUI(orientation, withValueText)
+    if not ObjectEditor.rotationSlider then return end
+    local degrees = math.deg(orientation)
+    ObjectEditor.rotationSlider:SetValue(degrees)
+    if withValueText and ObjectEditor.rotationValueText then
+        ObjectEditor.rotationValueText:SetText(string.format("%d deg", degrees))
+    end
+end
+
+local function applyScaleToUI(scale, withValueText)
+    if not ObjectEditor.scaleSlider then return end
+    ObjectEditor.scaleSlider:SetValue(scale)
+    if withValueText and ObjectEditor.scaleValueText then
+        ObjectEditor.scaleValueText:SetText(string.format("%.2fx", scale))
+    end
+end
+
+local function handlePositionUpdate(guid, x, y, z)
+    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
+        return
+    end
+    ObjectEditor.currentObject.x = x
+    ObjectEditor.currentObject.y = y
+    ObjectEditor.currentObject.z = z
+    if not ObjectEditor.isEditing then
+        ObjectEditor.isUpdating = true
+        applyPositionToUI(x, y, z)
+        ObjectEditor.isUpdating = false
+    end
+end
+
+local function handleOrientationUpdate(guid, orientation)
+    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
+        return
+    end
+    ObjectEditor.currentObject.o = orientation
+    if not ObjectEditor.isEditing then
+        ObjectEditor.isUpdating = true
+        applyOrientationToUI(orientation, false)
+        ObjectEditor.isUpdating = false
+    end
+end
+
+local function handleScaleUpdate(guid, scale)
+    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
+        return
+    end
+    ObjectEditor.currentObject.scale = scale
+    if not ObjectEditor.isEditing then
+        ObjectEditor.isUpdating = true
+        applyScaleToUI(scale, false)
+        ObjectEditor.isUpdating = false
+    end
+end
+
+local function handleRespawn(oldGuid, newData)
+    ObjectEditor.ClearAckGate()
+    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= oldGuid then
+        return
+    end
+    ObjectEditor.currentObject = newData
+    if ObjectEditor.originalState then
+        ObjectEditor.originalState.guid = newData.guid
+    end
+    if not ObjectEditor.isEditing then
+        ObjectEditor.isUpdating = true
+        applyPositionToUI(newData.x, newData.y, newData.z)
+        applyOrientationToUI(newData.o, true)
+        applyScaleToUI(newData.scale, true)
+        ObjectEditor.isUpdating = false
+    end
+end
 
 -- Handler: Open editor with object data
 function handlers.OpenEditor(player, objectData)
@@ -69,110 +171,17 @@ end
 
 -- Handler: Object position updated
 function handlers.ObjectPositionUpdated(player, guid, x, y, z)
-    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
-        return
-    end
-
-    -- Update stored position
-    ObjectEditor.currentObject.x = x
-    ObjectEditor.currentObject.y = y
-    ObjectEditor.currentObject.z = z
-
-    -- Update UI if not actively editing
-    if not ObjectEditor.isEditing then
-        ObjectEditor.isUpdating = true
-
-        -- Update value displays and labels
-        if ObjectEditor.positionSliders then
-            -- Update X
-            if ObjectEditor.positionSliders.x.label then
-                ObjectEditor.positionSliders.x.label:SetText(string.format("X: %.1f", x))
-            end
-            -- Update based on position mode
-            if ObjectEditor.positionMode == "relative" then
-                ObjectEditor.positionSliders.x.slider:SetValue(0)
-                ObjectEditor.positionSliders.x.offsetText:SetText("+0.0")
-            else
-                ObjectEditor.positionSliders.x.slider:SetValue(x)
-                ObjectEditor.positionSliders.x.offsetText:SetText(string.format("%.1f", x))
-            end
-            -- Update input box
-            if ObjectEditor.positionSliders.x.inputBox then
-                ObjectEditor.positionSliders.x.inputBox:SetText(string.format("%.2f", x))
-            end
-
-            -- Update Y
-            if ObjectEditor.positionSliders.y.label then
-                ObjectEditor.positionSliders.y.label:SetText(string.format("Y: %.1f", y))
-            end
-            -- Update based on position mode
-            if ObjectEditor.positionMode == "relative" then
-                ObjectEditor.positionSliders.y.slider:SetValue(0)
-                ObjectEditor.positionSliders.y.offsetText:SetText("+0.0")
-            else
-                ObjectEditor.positionSliders.y.slider:SetValue(y)
-                ObjectEditor.positionSliders.y.offsetText:SetText(string.format("%.1f", y))
-            end
-            -- Update input box
-            if ObjectEditor.positionSliders.y.inputBox then
-                ObjectEditor.positionSliders.y.inputBox:SetText(string.format("%.2f", y))
-            end
-
-            -- Update Z
-            if ObjectEditor.positionSliders.z.label then
-                ObjectEditor.positionSliders.z.label:SetText(string.format("Z: %.1f", z))
-            end
-            -- Update based on position mode
-            if ObjectEditor.positionMode == "relative" then
-                ObjectEditor.positionSliders.z.slider:SetValue(0)
-                ObjectEditor.positionSliders.z.offsetText:SetText("+0.0")
-            else
-                ObjectEditor.positionSliders.z.slider:SetValue(z)
-                ObjectEditor.positionSliders.z.offsetText:SetText(string.format("%.1f", z))
-            end
-            -- Update input box
-            if ObjectEditor.positionSliders.z.inputBox then
-                ObjectEditor.positionSliders.z.inputBox:SetText(string.format("%.2f", z))
-            end
-        end
-
-        ObjectEditor.isUpdating = false
-    end
+    handlePositionUpdate(guid, x, y, z)
 end
 
 -- Handler: Object rotation updated
 function handlers.ObjectRotationUpdated(player, guid, orientation)
-    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
-        return
-    end
-    
-    -- Update stored orientation
-    ObjectEditor.currentObject.o = orientation
-    
-    -- Update UI if not actively editing
-    if not ObjectEditor.isEditing and ObjectEditor.rotationSlider then
-        ObjectEditor.isUpdating = true
-        local degrees = math.deg(orientation)
-        ObjectEditor.rotationSlider:SetValue(degrees)
-        ObjectEditor.isUpdating = false
-    end
+    handleOrientationUpdate(guid, orientation)
 end
 
 -- Handler: Object scale updated
 function handlers.ObjectScaleUpdated(player, guid, scale)
-    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
-        return
-    end
-    
-    -- Update stored scale
-    ObjectEditor.currentObject.scale = scale
-    
-    -- Update UI if not actively editing
-    if not ObjectEditor.isEditing and ObjectEditor.scaleSlider then
-        ObjectEditor.isUpdating = true
-        ObjectEditor.scaleSlider:SetValue(scale)
-        ObjectEditor.isUpdating = false
-    end
+    handleScaleUpdate(guid, scale)
 end
 
 -- Handler: Object saved to database
@@ -232,6 +241,7 @@ end
 
 -- Handler: Error message
 function handlers.Error(player, message)
+    ObjectEditor.ClearAckGate()
     if CreateStyledToast then
         CreateStyledToast("Error: " .. (message or "Unknown error"), 3, 0.5)
     else
@@ -250,6 +260,7 @@ end
 
 -- Handler: Object not found or out of range
 function handlers.ObjectNotFound(player, guid)
+    ObjectEditor.ClearAckGate()
     if CreateStyledToast then
         CreateStyledToast("GameObject not found or out of range!", 3, 0.5)
     end
@@ -270,7 +281,7 @@ end
 -- Handler: Auto-open editor after spawn (if enabled)
 function handlers.AutoOpenAfterSpawn(player, objectData)
     -- Check if auto-open is enabled in config
-    if GMConfig and GMConfig.config and GMConfig.config.autoOpenObjectEditor then
+    if GMSettings and GMSettings.current and GMSettings.current.autoOpenObjectEditor then
         ObjectEditor.OpenEditor(objectData)
     else
         if CreateStyledToast then
@@ -346,114 +357,22 @@ end
 
 -- Handler: Creature position updated
 function handlers.CreaturePositionUpdated(player, guid, x, y, z)
-    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
-        return
-    end
-
-    -- Update stored position
-    ObjectEditor.currentObject.x = x
-    ObjectEditor.currentObject.y = y
-    ObjectEditor.currentObject.z = z
-
-    -- Update UI if not actively editing
-    if not ObjectEditor.isEditing then
-        ObjectEditor.isUpdating = true
-
-        -- Update value displays and labels
-        if ObjectEditor.positionSliders then
-            -- Update X
-            if ObjectEditor.positionSliders.x.label then
-                ObjectEditor.positionSliders.x.label:SetText(string.format("X: %.1f", x))
-            end
-            -- Update based on position mode
-            if ObjectEditor.positionMode == "relative" then
-                ObjectEditor.positionSliders.x.slider:SetValue(0)
-                ObjectEditor.positionSliders.x.offsetText:SetText("+0.0")
-            else
-                ObjectEditor.positionSliders.x.slider:SetValue(x)
-                ObjectEditor.positionSliders.x.offsetText:SetText(string.format("%.1f", x))
-            end
-            -- Update input box
-            if ObjectEditor.positionSliders.x.inputBox then
-                ObjectEditor.positionSliders.x.inputBox:SetText(string.format("%.2f", x))
-            end
-
-            -- Update Y
-            if ObjectEditor.positionSliders.y.label then
-                ObjectEditor.positionSliders.y.label:SetText(string.format("Y: %.1f", y))
-            end
-            -- Update based on position mode
-            if ObjectEditor.positionMode == "relative" then
-                ObjectEditor.positionSliders.y.slider:SetValue(0)
-                ObjectEditor.positionSliders.y.offsetText:SetText("+0.0")
-            else
-                ObjectEditor.positionSliders.y.slider:SetValue(y)
-                ObjectEditor.positionSliders.y.offsetText:SetText(string.format("%.1f", y))
-            end
-            -- Update input box
-            if ObjectEditor.positionSliders.y.inputBox then
-                ObjectEditor.positionSliders.y.inputBox:SetText(string.format("%.2f", y))
-            end
-
-            -- Update Z
-            if ObjectEditor.positionSliders.z.label then
-                ObjectEditor.positionSliders.z.label:SetText(string.format("Z: %.1f", z))
-            end
-            -- Update based on position mode
-            if ObjectEditor.positionMode == "relative" then
-                ObjectEditor.positionSliders.z.slider:SetValue(0)
-                ObjectEditor.positionSliders.z.offsetText:SetText("+0.0")
-            else
-                ObjectEditor.positionSliders.z.slider:SetValue(z)
-                ObjectEditor.positionSliders.z.offsetText:SetText(string.format("%.1f", z))
-            end
-            -- Update input box
-            if ObjectEditor.positionSliders.z.inputBox then
-                ObjectEditor.positionSliders.z.inputBox:SetText(string.format("%.2f", z))
-            end
-        end
-
-        ObjectEditor.isUpdating = false
-    end
+    handlePositionUpdate(guid, x, y, z)
 end
 
 -- Handler: Creature rotation updated
 function handlers.CreatureRotationUpdated(player, guid, orientation)
-    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
-        return
-    end
-    
-    -- Update stored orientation
-    ObjectEditor.currentObject.o = orientation
-    
-    -- Update UI if not actively editing
-    if not ObjectEditor.isEditing and ObjectEditor.rotationSlider then
-        ObjectEditor.isUpdating = true
-        local degrees = math.deg(orientation)
-        ObjectEditor.rotationSlider:SetValue(degrees)
-        ObjectEditor.isUpdating = false
-    end
+    handleOrientationUpdate(guid, orientation)
 end
 
 -- Handler: Creature scale updated
 function handlers.CreatureScaleUpdated(player, guid, scale)
-    if not ObjectEditor.currentObject or ObjectEditor.currentObject.guid ~= guid then
-        return
-    end
-    
-    -- Update stored scale
-    ObjectEditor.currentObject.scale = scale
-    
-    -- Update UI if not actively editing
-    if not ObjectEditor.isEditing and ObjectEditor.scaleSlider then
-        ObjectEditor.isUpdating = true
-        ObjectEditor.scaleSlider:SetValue(scale)
-        ObjectEditor.isUpdating = false
-    end
+    handleScaleUpdate(guid, scale)
 end
 
 -- Handler: Creature not found or out of range
 function handlers.CreatureNotFound(player, guid)
+    ObjectEditor.ClearAckGate()
     if CreateStyledToast then
         CreateStyledToast("Creature not found or out of range!", 3, 0.5)
     end
@@ -489,191 +408,12 @@ end
 
 -- Handler: GameObject respawned with new GUID
 function handlers.ObjectRespawned(player, oldGuid, newObjectData)
-    -- GameObject respawned with new GUID
-    
-    -- Update current object if this was the one being edited
-    if ObjectEditor.currentObject and ObjectEditor.currentObject.guid == oldGuid then
-        -- Update all data with new values
-        ObjectEditor.currentObject = newObjectData
-        
-        -- Update original state GUID if needed
-        if ObjectEditor.originalState then
-            ObjectEditor.originalState.guid = newObjectData.guid
-        end
-        
-        -- Update UI to reflect new position/rotation/scale
-        if not ObjectEditor.isEditing then
-            ObjectEditor.isUpdating = true
-
-            -- Update position displays
-            if ObjectEditor.positionSliders then
-                -- Update X
-                if ObjectEditor.positionSliders.x.label then
-                    ObjectEditor.positionSliders.x.label:SetText(string.format("X: %.1f", newObjectData.x))
-                end
-                -- Update based on position mode
-                if ObjectEditor.positionMode == "relative" then
-                    ObjectEditor.positionSliders.x.slider:SetValue(0)
-                    ObjectEditor.positionSliders.x.offsetText:SetText("+0.0")
-                else
-                    ObjectEditor.positionSliders.x.slider:SetValue(newObjectData.x)
-                    ObjectEditor.positionSliders.x.offsetText:SetText(string.format("%.1f", newObjectData.x))
-                end
-                -- Update input box
-                if ObjectEditor.positionSliders.x.inputBox then
-                    ObjectEditor.positionSliders.x.inputBox:SetText(string.format("%.2f", newObjectData.x))
-                end
-
-                -- Update Y
-                if ObjectEditor.positionSliders.y.label then
-                    ObjectEditor.positionSliders.y.label:SetText(string.format("Y: %.1f", newObjectData.y))
-                end
-                -- Update based on position mode
-                if ObjectEditor.positionMode == "relative" then
-                    ObjectEditor.positionSliders.y.slider:SetValue(0)
-                    ObjectEditor.positionSliders.y.offsetText:SetText("+0.0")
-                else
-                    ObjectEditor.positionSliders.y.slider:SetValue(newObjectData.y)
-                    ObjectEditor.positionSliders.y.offsetText:SetText(string.format("%.1f", newObjectData.y))
-                end
-                -- Update input box
-                if ObjectEditor.positionSliders.y.inputBox then
-                    ObjectEditor.positionSliders.y.inputBox:SetText(string.format("%.2f", newObjectData.y))
-                end
-
-                -- Update Z
-                if ObjectEditor.positionSliders.z.label then
-                    ObjectEditor.positionSliders.z.label:SetText(string.format("Z: %.1f", newObjectData.z))
-                end
-                -- Update based on position mode
-                if ObjectEditor.positionMode == "relative" then
-                    ObjectEditor.positionSliders.z.slider:SetValue(0)
-                    ObjectEditor.positionSliders.z.offsetText:SetText("+0.0")
-                else
-                    ObjectEditor.positionSliders.z.slider:SetValue(newObjectData.z)
-                    ObjectEditor.positionSliders.z.offsetText:SetText(string.format("%.1f", newObjectData.z))
-                end
-                -- Update input box
-                if ObjectEditor.positionSliders.z.inputBox then
-                    ObjectEditor.positionSliders.z.inputBox:SetText(string.format("%.2f", newObjectData.z))
-                end
-            end
-
-            -- Update rotation display
-            if ObjectEditor.rotationSlider then
-                local degrees = math.deg(newObjectData.o)
-                ObjectEditor.rotationSlider:SetValue(degrees)
-                if ObjectEditor.rotationValueText then
-                    ObjectEditor.rotationValueText:SetText(string.format("%d deg", degrees))
-                end
-            end
-
-            -- Update scale display
-            if ObjectEditor.scaleSlider then
-                ObjectEditor.scaleSlider:SetValue(newObjectData.scale)
-                if ObjectEditor.scaleValueText then
-                    ObjectEditor.scaleValueText:SetText(string.format("%.2fx", newObjectData.scale))
-                end
-            end
-
-            ObjectEditor.isUpdating = false
-        end
-        
-        -- Updated to new GUID
-    end
+    handleRespawn(oldGuid, newObjectData)
 end
 
 -- Handler: Creature respawned with new GUID
 function handlers.CreatureRespawned(player, oldGuid, newCreatureData)
-    -- Update current object if this was the one being edited
-    if ObjectEditor.currentObject and ObjectEditor.currentObject.guid == oldGuid then
-        -- Update all data with new values
-        ObjectEditor.currentObject = newCreatureData
-        
-        -- Update original state GUID if needed
-        if ObjectEditor.originalState then
-            ObjectEditor.originalState.guid = newCreatureData.guid
-        end
-        
-        -- Update UI to reflect new position/rotation/scale
-        if not ObjectEditor.isEditing then
-            ObjectEditor.isUpdating = true
-
-            -- Update position displays
-            if ObjectEditor.positionSliders then
-                -- Update X
-                if ObjectEditor.positionSliders.x.label then
-                    ObjectEditor.positionSliders.x.label:SetText(string.format("X: %.1f", newCreatureData.x))
-                end
-                -- Update based on position mode
-                if ObjectEditor.positionMode == "relative" then
-                    ObjectEditor.positionSliders.x.slider:SetValue(0)
-                    ObjectEditor.positionSliders.x.offsetText:SetText("+0.0")
-                else
-                    ObjectEditor.positionSliders.x.slider:SetValue(newCreatureData.x)
-                    ObjectEditor.positionSliders.x.offsetText:SetText(string.format("%.1f", newCreatureData.x))
-                end
-                -- Update input box
-                if ObjectEditor.positionSliders.x.inputBox then
-                    ObjectEditor.positionSliders.x.inputBox:SetText(string.format("%.2f", newCreatureData.x))
-                end
-
-                -- Update Y
-                if ObjectEditor.positionSliders.y.label then
-                    ObjectEditor.positionSliders.y.label:SetText(string.format("Y: %.1f", newCreatureData.y))
-                end
-                -- Update based on position mode
-                if ObjectEditor.positionMode == "relative" then
-                    ObjectEditor.positionSliders.y.slider:SetValue(0)
-                    ObjectEditor.positionSliders.y.offsetText:SetText("+0.0")
-                else
-                    ObjectEditor.positionSliders.y.slider:SetValue(newCreatureData.y)
-                    ObjectEditor.positionSliders.y.offsetText:SetText(string.format("%.1f", newCreatureData.y))
-                end
-                -- Update input box
-                if ObjectEditor.positionSliders.y.inputBox then
-                    ObjectEditor.positionSliders.y.inputBox:SetText(string.format("%.2f", newCreatureData.y))
-                end
-
-                -- Update Z
-                if ObjectEditor.positionSliders.z.label then
-                    ObjectEditor.positionSliders.z.label:SetText(string.format("Z: %.1f", newCreatureData.z))
-                end
-                -- Update based on position mode
-                if ObjectEditor.positionMode == "relative" then
-                    ObjectEditor.positionSliders.z.slider:SetValue(0)
-                    ObjectEditor.positionSliders.z.offsetText:SetText("+0.0")
-                else
-                    ObjectEditor.positionSliders.z.slider:SetValue(newCreatureData.z)
-                    ObjectEditor.positionSliders.z.offsetText:SetText(string.format("%.1f", newCreatureData.z))
-                end
-                -- Update input box
-                if ObjectEditor.positionSliders.z.inputBox then
-                    ObjectEditor.positionSliders.z.inputBox:SetText(string.format("%.2f", newCreatureData.z))
-                end
-            end
-
-            -- Update rotation display
-            if ObjectEditor.rotationSlider then
-                local degrees = math.deg(newCreatureData.o)
-                ObjectEditor.rotationSlider:SetValue(degrees)
-                if ObjectEditor.rotationValueText then
-                    ObjectEditor.rotationValueText:SetText(string.format("%d deg", degrees))
-                end
-            end
-
-            -- Update scale display
-            if ObjectEditor.scaleSlider then
-                ObjectEditor.scaleSlider:SetValue(newCreatureData.scale)
-                if ObjectEditor.scaleValueText then
-                    ObjectEditor.scaleValueText:SetText(string.format("%.2fx", newCreatureData.scale))
-                end
-            end
-
-            ObjectEditor.isUpdating = false
-        end
-    end
-    
+    handleRespawn(oldGuid, newCreatureData)
     if CreateStyledToast then
         CreateStyledToast("Creature position updated", 2, 0.5)
     end

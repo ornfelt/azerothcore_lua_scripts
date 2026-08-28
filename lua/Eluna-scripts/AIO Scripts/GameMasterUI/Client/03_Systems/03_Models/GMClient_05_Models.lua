@@ -6,12 +6,7 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
-local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
+if not GM_RequireNamespace() then return end
 
 -- Get module references
 local GMModels = _G.GMModels
@@ -714,6 +709,29 @@ function GMModels.createFullViewFrame(index)
             updateStatusDisplay(model, model.viewState)
         end
     end)
+    btnYOffset = btnYOffset - VIEW_CONFIG.SIZES.PRESET_BUTTON_SIZE - 10
+
+    -- Animation dropdown separator
+    local animSep = sidePanel:CreateTexture(nil, "OVERLAY")
+    animSep:SetHeight(1)
+    animSep:SetPoint("LEFT", sidePanel, "LEFT", 5,
+        btnYOffset + VIEW_CONFIG.SIZES.PRESET_BUTTON_SIZE / 2)
+    animSep:SetPoint("RIGHT", sidePanel, "RIGHT", -5,
+        btnYOffset + VIEW_CONFIG.SIZES.PRESET_BUTTON_SIZE / 2)
+    animSep:SetTexture("Interface\\Buttons\\WHITE8X8")
+    animSep:SetVertexColor(
+        UISTYLE_COLORS.BorderGrey[1],
+        UISTYLE_COLORS.BorderGrey[2],
+        UISTYLE_COLORS.BorderGrey[3], 0.5)
+    btnYOffset = btnYOffset - 10
+
+    -- Animation dropdown
+    if _G.GMCards and _G.GMCards.AnimationData then
+        local animDD = _G.GMCards.AnimationData.createMagnifierAnimDropdown(
+            sidePanel, index)
+        animDD:SetPoint("TOP", sidePanel, "TOP", 0, btnYOffset)
+        frame.animDropdown = animDD
+    end
 
     frame.sidePanel = sidePanel
 
@@ -726,7 +744,11 @@ function GMModels.createFullViewFrame(index)
 
         if key == "ESCAPE" then
             -- ESC to close
-            self:Hide()
+            if _G.GMTransitions then
+                _G.GMTransitions.popOutModal(self)
+            else
+                self:Hide()
+            end
         elseif key == "R" then
             -- R to reset
             if model and model.viewState and GMModels and GMModels.resetModelState then

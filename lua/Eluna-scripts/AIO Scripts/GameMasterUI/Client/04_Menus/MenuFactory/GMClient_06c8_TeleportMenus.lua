@@ -17,11 +17,8 @@ if not MenuFactory then
     return
 end
 
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem not found! Check load order.")
-    return
-end
 
 -- Teleport Menu Integration
 local TeleportMenus = {}
@@ -209,12 +206,6 @@ end
 
 -- Add quick teleport menu creator to MenuFactory
 MenuFactory.createQuickTeleportMenu = TeleportMenus.CreateQuickTeleportMenu
-
--- Create global teleport button function
-function GameMasterSystem.ShowQuickTeleportMenu()
-    local menu = TeleportMenus.CreateQuickTeleportMenu()
-    ShowStyledEasyMenu(menu, "cursor")
-end
 
 -- Debug message
 if GMConfig and GMConfig.config and GMConfig.config.debug then

@@ -15,6 +15,7 @@ local DatabaseHelper = {}
 
 -- Cache for table existence checks
 local tableExistsCache = {}
+local columnExistsCache = {}
 local CACHE_MAX_SIZE = 100  -- Prevent unlimited cache growth
 
 -- Reference to config (will be loaded)
@@ -230,6 +231,34 @@ function DatabaseHelper.TableExists(tableName, databaseType)
         tableExistsCache[cacheKey] = exists
     end
     
+    return exists
+end
+
+-- Check if a column exists in a table (prevents C++ ABORT on unknown column queries)
+function DatabaseHelper.ColumnExists(tableName, columnName, databaseType)
+    databaseType = databaseType or "world"
+
+    if not tableName or not columnName then
+        return false
+    end
+
+    local cacheKey = databaseType .. "." .. tableName .. "." .. columnName
+    if Config and Config.database and Config.database.cacheTableChecks and columnExistsCache[cacheKey] ~= nil then
+        return columnExistsCache[cacheKey]
+    end
+
+    local checkQuery = string.format("SHOW COLUMNS FROM %s LIKE '%s'", tableName, columnName)
+    local success, result = pcall(function()
+        return executeDatabaseFunction(databaseType, true, false, checkQuery)
+    end)
+
+    local exists = success and result ~= nil
+
+    if Config and Config.database and Config.database.cacheTableChecks then
+        manageCacheSize()
+        columnExistsCache[cacheKey] = exists
+    end
+
     return exists
 end
 
@@ -650,9 +679,7 @@ function DatabaseHelper.CheckRequiredTables()
     end
 
     if #missingDBC > 0 then
-        log(LOG_LEVEL.INFO, "Missing DBC tables: %s", table.concat(missingDBC, ", "))
-        log(LOG_LEVEL.INFO, "Visual data features will be limited. These tables require manual DBC import.")
-        log(LOG_LEVEL.INFO, "To enable: Use DBC import tools (WoW Spell Editor, node-dbc-reader, or AzerothCore utilities)")
+        log(LOG_LEVEL.INFO, "Missing DBC tables (limited visual features) - see docs for import")
     end
 
     if #missingOther > 0 then
@@ -669,6 +696,7 @@ end
 function DatabaseHelper.ClearCache()
     tableExistsCache = {}
     tableReplacementCache = {}
+    columnExistsCache = {}
     log(LOG_LEVEL.DEBUG, "Database helper caches cleared")
 end
 

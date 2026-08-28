@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Get the shared namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Get module references
 local GMConfig = _G.GMConfig

@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Use existing namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[GameMasterSystem] ERROR: Namespace not found in DataHandlers! Check load order.")
-    return
-end
 
 -- Access shared data and UI references
 local GMData = _G.GMData
@@ -26,11 +23,6 @@ end
 -- Data Reception Handlers
 -- ============================================================================
 -- IMPORTANT: Client handlers ALWAYS receive player name as first parameter!
-
--- Test handler to verify AIO is working
-function GameMasterSystem.testPing(player, message)
-    -- TEST PING received
-end
 
 -- Item data handler
 function GameMasterSystem.receiveItemData(player, data, offset, pageSize, hasMoreData, inventoryType, totalCount, totalPages, currentPage)
@@ -571,6 +563,27 @@ function GameMasterSystem.handleError(player, errorType, message)
             print("[GameMasterUI Error]", errorType, message)
         end
     end
+end
+
+-- ============================================================================
+-- Toast Notifications
+-- ============================================================================
+
+-- Show toast notification (called from server via AIO.Handle)
+function GameMasterSystem.ShowToast(player, message, messageType)
+    if not message then return end
+
+    messageType = messageType or "info"
+
+    local durations = {
+        error = 5,
+        warning = 5,
+        success = 2,
+        info = 3
+    }
+
+    local duration = durations[messageType] or 3
+    CreateStyledToast(message, duration, 0.5, "TOP")
 end
 
 -- ============================================================================

@@ -232,54 +232,55 @@ function ObjectEditorCore.RegisterHandlers(gmSystem, config, utils, database, da
     -- =====================================================
 
     -- Teleport player away from entity (useful when stuck inside)
-    GameMasterSystem.teleportAwayFromEntity = function(player, entityX, entityY, entityZ, entityScale)
+    -- direction: nil = away from player (legacy), "front"/"back"/"left"/"right" = relative to entity facing
+    GameMasterSystem.teleportAwayFromEntity = function(player, entityX, entityY, entityZ, entityScale, entityO, direction)
         -- Calculate safe distance based on entity scale
-        -- Base distance: 5 yards + (scale * 3) to account for larger entities
         local baseDistance = 5
-        local scaledDistance = entityScale * 3
+        local scaledDistance = (entityScale or 1) * 3
         local safeDistance = baseDistance + scaledDistance
 
-        -- Get player's current position and facing
-        local playerX, playerY, playerZ = player:GetX(), player:GetY(), player:GetZ()
         local playerO = player:GetO()
-
-        -- Calculate direction vector from entity to player
-        local dx = playerX - entityX
-        local dy = playerY - entityY
-        local distance = math.sqrt(dx * dx + dy * dy)
-
-        -- Teleport position
         local newX, newY, newZ
 
-        if distance > 0.1 then
-            -- Player is not directly on top of entity - teleport away in current direction
-            local dirX = dx / distance
-            local dirY = dy / distance
-            newX = entityX + (dirX * safeDistance)
-            newY = entityY + (dirY * safeDistance)
+        if direction and entityO then
+            -- Directional teleport relative to entity facing
+            -- WoW orientation: 0 = north (+Y), increases counter-clockwise
+            local angleOffset = 0
+            if direction == "front" then
+                angleOffset = 0
+            elseif direction == "right" then
+                angleOffset = -math.pi / 2
+            elseif direction == "back" then
+                angleOffset = math.pi
+            elseif direction == "left" then
+                angleOffset = math.pi / 2
+            end
+            local angle = entityO + angleOffset
+            newX = entityX + math.cos(angle) * safeDistance
+            newY = entityY + math.sin(angle) * safeDistance
         else
-            -- Player is directly on top of entity - teleport backwards from player's facing
-            newX = playerX - math.cos(playerO) * safeDistance
-            newY = playerY - math.sin(playerO) * safeDistance
+            -- Legacy: teleport away from player's current position
+            local playerX, playerY = player:GetX(), player:GetY()
+            local dx = playerX - entityX
+            local dy = playerY - entityY
+            local distance = math.sqrt(dx * dx + dy * dy)
+
+            if distance > 0.1 then
+                newX = entityX + (dx / distance) * safeDistance
+                newY = entityY + (dy / distance) * safeDistance
+            else
+                newX = playerX - math.cos(playerO) * safeDistance
+                newY = playerY - math.sin(playerO) * safeDistance
+            end
         end
 
         -- Use entity Z + 2 yards to ensure player is above ground
         newZ = entityZ + 2
-
-        -- Teleport player
         player:Teleport(player:GetMapId(), newX, newY, newZ, playerO)
 
         if ObjectEditorUtils.IsDebugEnabled() then
-            print(string.format("[ObjectEditor] Teleported player away from entity. Distance: %.1f yards", safeDistance))
-        end
-    end
-
-    -- Duplicate at position handlers
-    GameMasterSystem.duplicateCreatureAtPosition = function(player, entry, x, y, z, o)
-        o = o or player:GetO()
-        local creature = player:SpawnCreature(entry, x, y, z, o, 2) -- spawn type 2 = TEMPSUMMON_TIMED_OR_DEAD_DESPAWN
-        if creature then
-            AIO.Handle(player, "GameMasterSystem", "EntityDuplicated", "Creature", entry)
+            print(string.format("[ObjectEditor] Teleported player %s entity. Distance: %.1f yards",
+                direction or "away from", safeDistance))
         end
     end
 

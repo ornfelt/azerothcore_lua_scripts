@@ -34,11 +34,6 @@ local utils = {
 		end
 	end,
 	
-	-- Backward compatibility alias
-	debugMessage = function(...)
-		utils.debug("DEBUG", ...)
-	end,
-
 	validatePageSize = function(pageSize)
 		local minPageSize = 10
 		local maxPageSize = 500
@@ -133,14 +128,6 @@ local utils = {
 		return 0
 	end,
 
-	-- Helper to build pagination query suffix
-	buildPaginationSuffix = function(offset, pageSize, sortColumn, sortOrder)
-		sortColumn = sortColumn or "entry"
-		sortOrder = sortOrder or "ASC"
-		return string.format(" ORDER BY %s %s LIMIT %d OFFSET %d", 
-			sortColumn, sortOrder, pageSize, offset)
-	end,
-
 	-- WoW 3.3.5 Class Information
 	classInfo = {
 		[1] = {name = "Warrior", color = "C79C6E"},
@@ -167,15 +154,6 @@ local utils = {
 		[8] = "Troll",
 		[10] = "Blood Elf",
 		[11] = "Draenei"
-	},
-
-	-- Equipment slot names
-	slotNames = {
-		[0] = "Head", [1] = "Neck", [2] = "Shoulders", [3] = "Shirt",
-		[4] = "Chest", [5] = "Belt", [6] = "Legs", [7] = "Feet",
-		[8] = "Wrists", [9] = "Hands", [10] = "Ring1", [11] = "Ring2",
-		[12] = "Trinket1", [13] = "Trinket2", [14] = "Back", [15] = "MainHand",
-		[16] = "OffHand", [17] = "Ranged", [18] = "Tabard"
 	},
 
 	-- Common debuff IDs in WoW 3.3.5

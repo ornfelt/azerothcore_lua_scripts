@@ -685,15 +685,22 @@ function PlayerInventory.updateInventoryDisplay(invPanel, inventoryData, isBank)
         end  -- End of if isCollapsed else block
     end
     
-    -- Hide any slots that are no longer used
+    -- Hide and clean up slots that are no longer used
     for slotKey, slot in pairs(invPanel.slotMap) do
         if not usedSlots[slotKey] then
             slot:Hide()
-            if GMConfig.config.debug then
-                print(string.format("[PlayerInventory] Hiding unused slot: %s", slotKey))
-            end
+            invPanel.slotMap[slotKey] = nil
         end
     end
+
+    -- Rebuild slots array to prevent linear scan growth
+    local newSlots = {}
+    for _, slot in ipairs(invPanel.slots) do
+        if slot and slot:IsShown() then
+            table.insert(newSlots, slot)
+        end
+    end
+    invPanel.slots = newSlots
     
     -- Hide any bag headers that are no longer used
     for headerKey, header in pairs(invPanel.bagHeaders or {}) do

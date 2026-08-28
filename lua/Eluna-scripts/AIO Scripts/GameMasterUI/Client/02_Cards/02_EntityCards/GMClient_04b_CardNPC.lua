@@ -4,58 +4,60 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
-local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
+if not GM_RequireNamespace() then return end
 
 -- Get module references
 local GMCards = _G.GMCards
 local GMConfig = _G.GMConfig
 local GMUtils = _G.GMUtils
 
+-- Text area height reserved at card bottom for name + subname + ID row
+local TEXT_AREA_HEIGHT = 48
+
 -- Create NPC Card
 function GMCards.createNPCCard(card, entity, i)
-    -- Create a background for better model visibility
-    local modelBg = card:CreateTexture(nil, "BACKGROUND")
-    modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
-    modelBg:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
-    modelBg:SetPoint("CENTER", card, "CENTER", 0, 5)
-    modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
-    
-    -- Create the model frame with explicit parent
-    local model = CreateFrame("DressUpModel", "modelNpc" .. i, card)
-    model:SetParent(card)  -- Explicitly set parent
-    model:SetSize(card:GetWidth() - 30, card:GetHeight() - 50)
-    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)  -- Center on background
-    model:SetFrameStrata("MEDIUM")  -- Same strata as card
-    model:SetFrameLevel(card:GetFrameLevel() + 3)  -- Above background but reasonable
-    model:ClearModel()
-    
-    -- Debug: Verify model parent
-    if GMConfig.config.debug then
-        -- Debug: NPC model parent
+    local cardW = card:GetWidth()
+    local cardH = card:GetHeight()
+    local textW = cardW - 10
+
+    -- Reuse or create model background
+    if not card.modelBg then
+        card.modelBg = card:CreateTexture(nil, "BACKGROUND")
     end
-    
+    local modelBg = card.modelBg
+    modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
+    modelBg:SetSize(cardW - 10, cardH - TEXT_AREA_HEIGHT - 4)
+    modelBg:ClearAllPoints()
+    modelBg:SetPoint("TOPLEFT", card, "TOPLEFT", 5, -2)
+    modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
+    modelBg:Show()
+
+    -- Reuse or create model frame
+    local model
+    if card.modelFrame then
+        model = card.modelFrame
+        model:ClearModel()
+        model:ClearAllPoints()
+        model:SetParent(card)
+    else
+        model = CreateFrame("DressUpModel", nil, card)
+        card.modelFrame = model
+    end
+    model:SetSize(cardW - 20, cardH - TEXT_AREA_HEIGHT - 14)
+    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)
+    model:SetFrameStrata("MEDIUM")
+    model:SetFrameLevel(card:GetFrameLevel() + 3)
+    model:SetScript("OnShow", nil)
+
     -- Apply the creature model immediately
     local success = pcall(function()
         model:SetCreature(entity.entry)
     end)
-    
+
     if success then
         model:SetRotation(math.rad(30))
-        model:SetPosition(0, 0, 0)  -- Start at center, adjust if needed
-        model:Show()  -- Ensure model is visible
-        
-        -- Store reference
-        card.modelFrame = model
-        
-        -- Debug: Confirm model is set
-        if GMConfig.config.debug then
-            -- Debug: NPC model created
-        end
+        model:SetPosition(0, 0, 0)
+        model:Show()
     else
         -- Fallback to show model ID as text if creature fails
         local errorMsg = model:CreateFontString(nil, "OVERLAY")
@@ -63,21 +65,28 @@ function GMCards.createNPCCard(card, entity, i)
         errorMsg:SetPoint("CENTER")
         errorMsg:SetText("Model: " .. (entity.modelid[1] or entity.modelid))
         errorMsg:SetTextColor(1, 0.5, 0, 1)
-        
-        if GMConfig.config.debug then
-            -- Debug: Failed to set creature
-        end
     end
 
-    -- Update text positioning - compact layout with model taking most space
-    local name = entity.name .. (entity.subname and ("\n|cff888888" .. entity.subname .. "|r") or "")
-    card.nameText:SetText(name)
+    -- Name text (top of text area)
     card.nameText:ClearAllPoints()
-    card.nameText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
-    
-    -- Hide other text elements to give more space to model
-    card.entityText:SetText("")
+    card.nameText:SetWidth(textW)
+    card.nameText:SetJustifyH("CENTER")
+    card.nameText:SetText(GMCards.truncateText(entity.name, textW))
+    card.nameText:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 5, 32)
+
+    -- Subname in entityText (middle line)
+    card.entityText:ClearAllPoints()
+    card.entityText:SetWidth(textW)
+    card.entityText:SetJustifyH("CENTER")
+    card.entityText:SetText(entity.subname and GMCards.truncateText(entity.subname, textW) or "")
+    card.entityText:SetTextColor(0.5, 0.5, 0.5, 1)
+    card.entityText:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 5, 20)
+
     card.additionalText:SetText("")
+
+    -- Copyable ID fields at bottom
+    local modelId = entity.modelid[1] or entity.modelid
+    GMCards.createCopyableIdLine(card, "Entry", entity.entry, "Model", modelId)
 
     card:SetScript("OnEnter", function(self)
         local lines = {
@@ -102,32 +111,64 @@ function GMCards.createNPCCard(card, entity, i)
 
     GMCards.addMagnifierIcon(card, entity, i, "NPC")
 
+    -- Wire up card animations
+    if GMCards.setupCardVisuals then
+        GMCards.setupCardVisuals(card, "NPC")
+    end
+    if GMCards.setupHoverEffects then
+        GMCards.setupHoverEffects(card)
+    end
+    if GMCards.setupBreathing then
+        GMCards.setupBreathing(card, "NPC")
+    end
+    if GMCards.setupClickFlash then
+        GMCards.setupClickFlash(card)
+    end
+
     return card
 end
 
 -- Create GameObject Card
 function GMCards.createGameObjectCard(card, entity, i)
-    -- Create a background for better model visibility
-    local modelBg = card:CreateTexture(nil, "BACKGROUND")
+    local cardW = card:GetWidth()
+    local cardH = card:GetHeight()
+    local textW = cardW - 10
+
+    -- Reuse or create model background
+    if not card.modelBg then
+        card.modelBg = card:CreateTexture(nil, "BACKGROUND")
+    end
+    local modelBg = card.modelBg
     modelBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
-    modelBg:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
-    modelBg:SetPoint("CENTER", card, "CENTER", 0, 5)
+    modelBg:SetSize(cardW - 10, cardH - TEXT_AREA_HEIGHT - 4)
+    modelBg:ClearAllPoints()
+    modelBg:SetPoint("TOPLEFT", card, "TOPLEFT", 5, -2)
     modelBg:SetVertexColor(0.1, 0.1, 0.1, 0.8)
-    
-    -- Create the model frame with explicit parent
-    local model = CreateFrame("DressUpModel", "modelGob" .. i, card)
-    model:SetParent(card)  -- Explicitly set parent
-    model:SetSize(card:GetWidth() - 30, card:GetHeight() - 50)
-    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)  -- Center on background
-    model:SetFrameStrata("MEDIUM")  -- Same strata as card
-    model:SetFrameLevel(card:GetFrameLevel() + 3)  -- Above background but reasonable
+    modelBg:Show()
+
+    -- Reuse or create model frame
+    local model
+    if card.modelFrame then
+        model = card.modelFrame
+        model:Hide()
+        pcall(function() model:SetCreature(0) end)
+        model:ClearModel()
+        model:ClearAllPoints()
+        model:SetParent(card)
+    else
+        model = CreateFrame("DressUpModel", nil, card)
+        card.modelFrame = model
+    end
+    model:SetSize(cardW - 20, cardH - TEXT_AREA_HEIGHT - 14)
+    model:SetPoint("CENTER", modelBg, "CENTER", 0, 0)
+    model:SetFrameStrata("MEDIUM")
+    model:SetFrameLevel(card:GetFrameLevel() + 3)
     model:ClearModel()
 
     -- Store the model path for restoration
     local modelPath = entity.modelName or "World\\Generic\\ActiveDoodads\\Chest02\\Chest02.mdx"
     model.modelPath = modelPath
     model.isGameObject = true
-    card.preserveOnClear = true  -- Mark card to preserve on clear
     
     -- Function to restore the model
     local function RestoreModel()
@@ -166,17 +207,19 @@ function GMCards.createGameObjectCard(card, entity, i)
     -- Add OnShow handler to restore model when shown
     model:SetScript("OnShow", RestoreModel)
     
-    -- Store reference
-    card.modelFrame = model
-    
-    -- Update text positioning - compact layout with model taking most space
-    card.nameText:SetText(entity.name)
+    -- Name text (above ID line)
     card.nameText:ClearAllPoints()
-    card.nameText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
-    
-    -- Hide other text elements to give more space to model
+    card.nameText:SetWidth(textW)
+    card.nameText:SetJustifyH("CENTER")
+    card.nameText:SetText(GMCards.truncateText(entity.name, textW))
+    card.nameText:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 5, 20)
+
     card.entityText:SetText("")
     card.additionalText:SetText("")
+
+    -- Copyable ID fields at bottom
+    local dispId = entity.displayid or "?"
+    GMCards.createCopyableIdLine(card, "Entry", entity.entry, "Disp", dispId)
 
     card:SetScript("OnMouseUp", function(self, button)
         if button == "RightButton" and _G.GMMenus and _G.GMMenus.ShowContextMenu then
@@ -185,6 +228,20 @@ function GMCards.createGameObjectCard(card, entity, i)
     end)
 
     GMCards.addMagnifierIcon(card, entity, i, "GameObject")
+
+    -- Wire up card animations
+    if GMCards.setupCardVisuals then
+        GMCards.setupCardVisuals(card, "GameObject")
+    end
+    if GMCards.setupHoverEffects then
+        GMCards.setupHoverEffects(card)
+    end
+    if GMCards.setupBreathing then
+        GMCards.setupBreathing(card, "GameObject")
+    end
+    if GMCards.setupClickFlash then
+        GMCards.setupClickFlash(card)
+    end
 
     return card
 end

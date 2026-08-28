@@ -9,15 +9,16 @@ local ItemHandlers = {}
 local subModules = {}
 
 -- Module dependencies (will be injected)
-local GameMasterSystem, Config, Utils, Database, DatabaseHelper
+local GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper
 local PlayerHandlers = nil  -- Will be set after all modules are loaded
 
-function ItemHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+function ItemHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     GameMasterSystem = gms
     Config = config
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
+    DatabaseErrorHelper = dbErrorHelper
     
     -- Set up package path for sub-modules
     local scriptPath = debug.getinfo(1, "S").source:sub(2)
@@ -44,7 +45,7 @@ function ItemHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
     ItemUtilities.Initialize(config)
     
     -- Register all sub-module handlers
-    ItemDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+    ItemDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     ItemManagementHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
     ItemEnchantmentHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
     ItemInventoryHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)

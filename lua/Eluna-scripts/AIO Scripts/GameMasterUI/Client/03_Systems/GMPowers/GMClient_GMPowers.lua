@@ -10,12 +10,8 @@ end
 
 -- Module loading (debug message removed)
 
--- Verify namespace exists
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Create GMPowers namespace
 _G.GMPowers = _G.GMPowers or {}
@@ -45,274 +41,216 @@ GMPowers.state = {
 -- UI Elements storage
 GMPowers.frames = {}
 
--- Create the GM Powers panel
+-- Online player names cache (for autocomplete)
+GMPowers.onlinePlayerNames = {}
+
+-- Create the GM Powers panel with scrollable content
 function GMPowers.CreatePanel(parent)
-    -- GMUtils.debug("INFO", "[GMPowers] Creating panel...")
-    
-    -- Main container frame
     local panel = CreateFrame("Frame", nil, parent)
     panel:SetAllPoints(parent)
-    
-    -- Title
-    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", panel, "TOP", 0, -10)
-    title:SetText("GM Powers Control Panel")
-    title:SetTextColor(1, 1, 1)  -- White for main title
-    
-    -- GMUtils.debug("INFO", "[GMPowers] Creating sections...")
-    
-    -- Create sections with consistent spacing
-    GMPowers.CreateToggleSection(panel)
-    GMPowers.CreateSpeedSection(panel)
-    GMPowers.CreateActionSection(panel)
-    
+
+    -- Scrollable container filling the panel
+    local pw = parent:GetWidth()
+    local ph = parent:GetHeight()
+    local container, content, scrollBar, updateScrollBar = CreateScrollableFrame(panel, pw, ph)
+    container:ClearAllPoints()
+    container:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    container:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+    -- Transparent backdrop — individual sections have their own backgrounds
+    container:SetBackdropColor(0, 0, 0, 0)
+    container:SetBackdropBorderColor(0, 0, 0, 0)
+
+    -- No title — the tab dropdown already says "GM Powers"
+
+    -- Store scroll references for GMPowersActions to use
+    GMPowers.frames.scrollContent = content
+    GMPowers.frames.updateScrollBar = updateScrollBar
+
+    GMPowers.CreateToggleSection(content)
+    GMPowers.CreateSpeedSection(content)
+    -- Action sections appended in GMClient_GMPowersActions.lua
+
     GMPowers.frames.panel = panel
-    GMPowers.frames.title = title
     panel:Show()
-    
-    -- GMUtils.debug("INFO", "[GMPowers] Panel created successfully")
+
     return panel
 end
 
--- Create toggle controls section
+-- Create toggle controls section (4 columns × 2 rows)
 function GMPowers.CreateToggleSection(parent)
-    -- GMUtils.debug("INFO", "[GMPowers] Creating toggle section...")
-    
-    -- Section frame
     local section = CreateStyledFrame(parent, UISTYLE_COLORS.OptionBg)
-    local sectionWidth = parent:GetWidth() - 40
-    section:SetSize(sectionWidth, 120)
-    section:SetPoint("TOP", parent, "TOP", 0, -40)
+    local sectionWidth = parent:GetWidth() - 30
+    section:SetSize(sectionWidth, 65)
+    section:SetPoint("TOP", parent, "TOP", 0, -4)
     section:Show()
-    
-    -- Section title
+
     local sectionTitle = section:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sectionTitle:SetPoint("TOPLEFT", section, "TOPLEFT", 15, -10)
+    sectionTitle:SetPoint("TOPLEFT", section, "TOPLEFT", 10, -5)
     sectionTitle:SetText("Toggle Controls")
-    sectionTitle:SetTextColor(0.9, 0.9, 0.9)  -- Light grey for section headers
-    
-    -- Toggle buttons configuration
+    sectionTitle:SetTextColor(0.9, 0.9, 0.9)
+
     local toggles = {
-        {id = "gmMode", text = "GM Mode", row = 0, col = 0},
-        {id = "flyMode", text = "Fly Mode", row = 0, col = 1},
-        {id = "godMode", text = "God Mode", row = 0, col = 2},
-        {id = "invisible", text = "Invisibility", row = 0, col = 3},
-        {id = "noCooldowns", text = "No Cooldowns", row = 1, col = 0},
-        {id = "instantCast", text = "Instant Cast", row = 1, col = 1},
-        {id = "waterWalk", text = "Water Walk", row = 1, col = 2},
-        {id = "taxiCheat", text = "Taxi Cheat", row = 1, col = 3}
+        {id = "gmMode",     text = "GM Mode",     tip = "Enable Game Master mode",       row = 0, col = 0},
+        {id = "flyMode",    text = "Fly Mode",    tip = "Allow flying without a mount",   row = 0, col = 1},
+        {id = "godMode",    text = "God Mode",    tip = "Become unkillable",              row = 0, col = 2},
+        {id = "invisible",  text = "Invisible",   tip = "Invisible to players",           row = 0, col = 3},
+        {id = "noCooldowns",text = "No CDs",      tip = "Remove spell cooldowns on cast", row = 1, col = 0},
+        {id = "instantCast",text = "Instant",     tip = "Remove cast times (partial)",    row = 1, col = 1},
+        {id = "waterWalk",  text = "Water Walk",  tip = "Walk on water surfaces",         row = 1, col = 2},
+        {id = "taxiCheat",  text = "Taxi Cheat",  tip = "Unlock all flight paths",        row = 1, col = 3},
     }
-    
-    -- Calculate centered button layout
-    local buttonWidth = 105
-    local buttonHeight = 30
-    local buttonsPerRow = 4
-    local xSpacing = buttonWidth + 8  -- Small gap between buttons
-    local ySpacing = 35
-    local totalButtonsWidth = (buttonsPerRow * buttonWidth) + ((buttonsPerRow - 1) * 8)
-    local startX = (sectionWidth - totalButtonsWidth) / 2  -- Center horizontally
-    local startY = -35
-    
+
+    local cols = 4
+    local gap = 6
+    local pad = 10
+    local buttonWidth = (sectionWidth - (pad * 2) - (gap * (cols - 1))) / cols
+    local buttonHeight = 18
+    local startY = -20
+
     for _, toggle in ipairs(toggles) do
         local btn = CreateStyledButton(section, toggle.text, buttonWidth, buttonHeight)
-        btn:SetPoint("TOPLEFT", section, "TOPLEFT", 
-            startX + (toggle.col * xSpacing), 
-            startY - (toggle.row * ySpacing))
-        
-        -- Store toggle ID on button
+        btn:SetPoint("TOPLEFT", section, "TOPLEFT",
+            pad + toggle.col * (buttonWidth + gap),
+            startY - (toggle.row * (buttonHeight + gap)))
         btn.toggleId = toggle.id
-        
-        -- Set initial color based on state
+        btn:SetTooltip(toggle.text, toggle.tip)
         GMPowers.UpdateToggleColor(btn, GMPowers.state[toggle.id])
-        
-        -- Click handler
         btn:SetScript("OnClick", function(self)
             GMPowers.TogglePower(self.toggleId)
         end)
-        
-        -- Store reference
         GMPowers.frames["toggle_" .. toggle.id] = btn
         btn:Show()
     end
-    
+
     GMPowers.frames.toggleSection = section
-    print("[GMPowers] Toggle section created")
 end
 
--- Create speed controls section
+-- Create speed controls section — compact inline sliders (2 columns × 2 rows)
 function GMPowers.CreateSpeedSection(parent)
-    -- GMUtils.debug("INFO", "[GMPowers] Creating speed section...")
-    
-    -- Section frame
     local section = CreateStyledFrame(parent, UISTYLE_COLORS.OptionBg)
-    local sectionWidth = parent:GetWidth() - 40
-    section:SetSize(sectionWidth, 180)  -- Increased height to accommodate Reset All button
-    section:SetPoint("TOP", GMPowers.frames.toggleSection, "BOTTOM", 0, -10)
+    local sectionWidth = parent:GetWidth() - 30
+    section:SetSize(sectionWidth, 85)
+    section:SetPoint("TOP", GMPowers.frames.toggleSection, "BOTTOM", 0, -4)
     section:Show()
-    
-    -- Section title
+
     local sectionTitle = section:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sectionTitle:SetPoint("TOPLEFT", section, "TOPLEFT", 15, -10)
+    sectionTitle:SetPoint("TOPLEFT", section, "TOPLEFT", 10, -5)
     sectionTitle:SetText("Speed Controls")
-    sectionTitle:SetTextColor(0.9, 0.9, 0.9)  -- Light grey for section headers
-    
-    -- Speed types arranged in 2x2 grid
+    sectionTitle:SetTextColor(0.9, 0.9, 0.9)
+
     local speedTypes = {
         {type = "walk", label = "Walk", min = 0, max = 10, default = 1, row = 0, col = 0},
-        {type = "run", label = "Run", min = 0, max = 10, default = 1, row = 0, col = 1},
+        {type = "run",  label = "Run",  min = 0, max = 10, default = 1, row = 0, col = 1},
         {type = "swim", label = "Swim", min = 0, max = 10, default = 1, row = 1, col = 0},
-        {type = "fly", label = "Fly", min = 0, max = 10, default = 1, row = 1, col = 1}
+        {type = "fly",  label = "Fly",  min = 0, max = 10, default = 1, row = 1, col = 1},
     }
-    
-    -- Calculate layout for 2x2 grid
-    local sliderWidth = 180
-    local sliderHeight = 20
-    local resetBtnWidth = 45
-    local totalItemWidth = sliderWidth + resetBtnWidth + 10  -- slider + gap + button
-    local xSpacing = totalItemWidth + 20
-    local ySpacing = 55
-    local totalWidth = (2 * totalItemWidth) + 20  -- 2 columns + gap
-    local startX = (sectionWidth - totalWidth) / 2
-    local startY = -35
-    
-    for _, speedInfo in ipairs(speedTypes) do
-        local xPos = startX + (speedInfo.col * xSpacing)
-        local yPos = startY - (speedInfo.row * ySpacing)
-        
-        -- Create styled slider with label and value display
-        local sliderContainer = CreateStyledSlider(
-            section,
-            sliderWidth,
-            sliderHeight,
-            speedInfo.min,
-            speedInfo.max,
-            0.1,  -- Fine control
-            GMPowers.state.speeds[speedInfo.type]
-        )
-        
-        -- Position the slider container
-        sliderContainer:SetPoint("TOPLEFT", section, "TOPLEFT", xPos, yPos)
-        
-        -- Set the label text
-        sliderContainer:SetLabel(speedInfo.label)
-        
-        -- Set value format to show multiplier
-        sliderContainer:SetValueText("%.1fx")
-        
-        -- Get the actual slider component
-        local slider = sliderContainer.slider
-        
-        -- Handle value changes (update state but don't send to server yet)
-        sliderContainer:SetOnValueChanged(function(value)
-            GMPowers.state.speeds[speedInfo.type] = value
+
+    -- Layout: [Label 32px][4px][====slider====][4px][value 34px][4px][R 24px]
+    local pad = 10
+    local colGap = 12
+    local colWidth = (sectionWidth - pad * 2 - colGap) / 2
+    local labelW, valueW, resetW, gap = 32, 34, 24, 4
+    local sliderW = colWidth - labelW - valueW - resetW - (gap * 3)
+    local sliderH = 10
+    local ySpacing = 22
+    local startY = -20
+
+    for _, si in ipairs(speedTypes) do
+        local xBase = pad + si.col * (colWidth + colGap)
+        local yPos = startY - (si.row * ySpacing)
+
+        -- Label (left-aligned)
+        local label = section:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("TOPLEFT", section, "TOPLEFT", xBase, yPos)
+        label:SetWidth(labelW)
+        label:SetJustifyH("LEFT")
+        label:SetText(si.label)
+        label:SetTextColor(1, 1, 1)
+
+        -- Raw slider track (inline, no container overhead)
+        local slider = CreateFrame("Slider", nil, section)
+        slider:SetSize(sliderW, sliderH)
+        slider:SetPoint("LEFT", label, "RIGHT", gap, 0)
+        slider:SetOrientation("HORIZONTAL")
+        slider:SetMinMaxValues(si.min, si.max)
+        slider:SetValueStep(0.1)
+        slider:SetValue(GMPowers.state.speeds[si.type])
+        slider:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Buttons\\WHITE8X8",
+            edgeSize = 1,
+        })
+        slider:SetBackdropColor(
+            UISTYLE_COLORS.ButtonBg[1], UISTYLE_COLORS.ButtonBg[2], UISTYLE_COLORS.ButtonBg[3], 1)
+        slider:SetBackdropBorderColor(
+            UISTYLE_COLORS.BorderGrey[1], UISTYLE_COLORS.BorderGrey[2], UISTYLE_COLORS.BorderGrey[3], 1)
+
+        local thumb = slider:CreateTexture(nil, "OVERLAY")
+        thumb:SetTexture("Interface\\Buttons\\WHITE8X8")
+        thumb:SetVertexColor(0.6, 0.6, 0.6, 1)
+        thumb:SetSize(8, sliderH - 2)
+        slider:SetThumbTexture(thumb)
+
+        -- Value text (right of slider)
+        local valueText = section:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        valueText:SetPoint("LEFT", slider, "RIGHT", gap, 0)
+        valueText:SetWidth(valueW)
+        valueText:SetJustifyH("RIGHT")
+        valueText:SetTextColor(
+            UISTYLE_COLORS.TextGrey[1], UISTYLE_COLORS.TextGrey[2], UISTYLE_COLORS.TextGrey[3])
+        valueText:SetText(string.format("%.1fx", GMPowers.state.speeds[si.type]))
+
+        slider:SetScript("OnValueChanged", function(self, value)
+            valueText:SetText(string.format("%.1fx", value))
+            GMPowers.state.speeds[si.type] = value
         end)
-        
-        -- Send to server when mouse is released
-        if slider then
-            slider:SetScript("OnMouseUp", function(self)
-                local value = self:GetValue()
-                GMPowers.UpdateSpeed(speedInfo.type, value)
-            end)
-        end
-        
-        -- Individual reset button
-        local resetBtn = CreateStyledButton(section, "R", resetBtnWidth, 22)
-        resetBtn:SetPoint("LEFT", sliderContainer, "RIGHT", 8, 0)
-        resetBtn:SetTooltip("Reset", "Reset to default speed")
+        slider:SetScript("OnMouseUp", function(self)
+            GMPowers.UpdateSpeed(si.type, self:GetValue())
+        end)
+        slider:SetScript("OnEnter", function() thumb:SetVertexColor(0.8, 0.8, 0.8, 1) end)
+        slider:SetScript("OnLeave", function() thumb:SetVertexColor(0.6, 0.6, 0.6, 1) end)
+
+        -- Mousewheel fine control on slider
+        slider:EnableMouseWheel(true)
+        slider:SetScript("OnMouseWheel", function(self, delta)
+            local cur = self:GetValue()
+            local step = 0.1
+            self:SetValue(cur + delta * step)
+            GMPowers.UpdateSpeed(si.type, self:GetValue())
+        end)
+
+        -- Reset button
+        local resetBtn = CreateStyledButton(section, "R", resetW, 14)
+        resetBtn:SetPoint("LEFT", valueText, "RIGHT", gap, 0)
+        resetBtn:SetTooltip("Reset", "Reset to default")
         resetBtn:SetScript("OnClick", function()
-            if slider then
-                slider:SetValue(speedInfo.default)
-                GMPowers.state.speeds[speedInfo.type] = speedInfo.default
-                GMPowers.UpdateSpeed(speedInfo.type, speedInfo.default)
-            end
+            slider:SetValue(si.default)
+            GMPowers.state.speeds[si.type] = si.default
+            GMPowers.UpdateSpeed(si.type, si.default)
         end)
         resetBtn:Show()
-        
-        -- Store references
-        GMPowers.frames["slider_" .. speedInfo.type] = slider
-        GMPowers.frames["sliderContainer_" .. speedInfo.type] = sliderContainer
-        GMPowers.frames["resetBtn_" .. speedInfo.type] = resetBtn
+
+        GMPowers.frames["slider_" .. si.type] = slider
+        GMPowers.frames["resetBtn_" .. si.type] = resetBtn
     end
-    
-    -- Add "Reset All Speeds" button at bottom center with more spacing
-    local resetAllBtn = CreateStyledButton(section, "Reset All Speeds", 120, 25)
-    resetAllBtn:SetPoint("BOTTOM", section, "BOTTOM", 0, 15)  -- More space from bottom
+
+    local resetAllBtn = CreateStyledButton(section, "Reset All", 80, 16)
+    resetAllBtn:SetPoint("BOTTOM", section, "BOTTOM", 0, 4)
     resetAllBtn:SetTooltip("Reset All", "Reset all speeds to default")
     resetAllBtn:SetScript("OnClick", function()
-        for _, speedInfo in ipairs(speedTypes) do
-            local slider = GMPowers.frames["slider_" .. speedInfo.type]
+        for _, si in ipairs(speedTypes) do
+            local slider = GMPowers.frames["slider_" .. si.type]
             if slider then
-                slider:SetValue(speedInfo.default)
-                GMPowers.state.speeds[speedInfo.type] = speedInfo.default
-                GMPowers.UpdateSpeed(speedInfo.type, speedInfo.default)
+                slider:SetValue(si.default)
+                GMPowers.state.speeds[si.type] = si.default
+                GMPowers.UpdateSpeed(si.type, si.default)
             end
         end
-        GMPowers.ShowStatusMessage("All speeds reset to default", "success")
+        GMPowers.ShowStatusMessage("All speeds reset", "success")
     end)
     resetAllBtn:Show()
-    
+
     GMPowers.frames.speedSection = section
-    -- GMUtils.debug("INFO", "[GMPowers] Speed section created")
-end
-
--- Create quick action buttons section
-function GMPowers.CreateActionSection(parent)
-    -- GMUtils.debug("INFO", "[GMPowers] Creating action section...")
-    
-    -- Section frame
-    local section = CreateStyledFrame(parent, UISTYLE_COLORS.OptionBg)
-    local sectionWidth = parent:GetWidth() - 40
-    section:SetSize(sectionWidth, 100)  -- Adjusted for 2 rows
-    section:SetPoint("TOP", GMPowers.frames.speedSection, "BOTTOM", 0, -10)
-    section:Show()
-    
-    -- Section title
-    local sectionTitle = section:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sectionTitle:SetPoint("TOPLEFT", section, "TOPLEFT", 15, -10)
-    sectionTitle:SetText("Quick Actions")
-    sectionTitle:SetTextColor(0.9, 0.9, 0.9)  -- Light grey for section headers
-    
-    -- Action buttons arranged in 2x3 grid
-    local actions = {
-        {id = "resetCooldowns", text = "Reset CDs", tooltip = "Reset all spell cooldowns", row = 0, col = 0},
-        {id = "fullHeal", text = "Full Heal", tooltip = "Restore health and mana to full", row = 0, col = 1},
-        {id = "refresh", text = "Refresh", tooltip = "Refresh GM powers state", row = 0, col = 2},
-        {id = "teleportTarget", text = "Teleport", tooltip = "Teleport to target location", row = 1, col = 0},
-        {id = "appear", text = "Appear", tooltip = "Appear at target player", row = 1, col = 1},
-        {id = "summon", text = "Summon", tooltip = "Summon target player", row = 1, col = 2}
-    }
-    
-    -- Calculate centered layout
-    local buttonWidth = 95
-    local buttonHeight = 25
-    local buttonsPerRow = 3
-    local xSpacing = buttonWidth + 10
-    local ySpacing = 30
-    local totalButtonsWidth = (buttonsPerRow * buttonWidth) + ((buttonsPerRow - 1) * 10)
-    local startX = (sectionWidth - totalButtonsWidth) / 2
-    local startY = -35
-    
-    for _, action in ipairs(actions) do
-        local btn = CreateStyledButton(section, action.text, buttonWidth, buttonHeight)
-        btn:SetPoint("TOPLEFT", section, "TOPLEFT", 
-            startX + (action.col * xSpacing), 
-            startY - (action.row * ySpacing))
-        
-        -- Set tooltip
-        btn:SetTooltip(action.text, action.tooltip)
-        
-        -- Click handler
-        btn:SetScript("OnClick", function()
-            GMPowers.ExecuteAction(action.id)
-        end)
-        
-        -- Store reference
-        GMPowers.frames["action_" .. action.id] = btn
-        btn:Show()
-    end
-
-    GMPowers.frames.actionSection = section
-    -- GMUtils.debug("INFO", "[GMPowers] Action section created")
 end
 
 -- Toggle a GM power
@@ -408,14 +346,6 @@ function GMPowers.UpdateSpeed(speedType, value)
     AIO.Handle("GameMasterSystem", "setGMSpeed", speedType, value)
 end
 
--- Execute quick action
-function GMPowers.ExecuteAction(actionId)
-    AIO.Handle("GameMasterSystem", "executeGMAction", actionId)
-
-    -- Show toast notification
-    CreateStyledToast("Executed: " .. actionId, 2, 0.5, "TOP")
-end
-
 -- Handle server responses
 function GMPowers.HandleServerUpdate(powerId, state)
     GMPowers.state[powerId] = state
@@ -488,6 +418,10 @@ end
 
 handlers.Initialize = function(player, initialState)
     GMPowers.Initialize(initialState)
+end
+
+handlers.ReceiveOnlinePlayerNames = function(player, names)
+    GMPowers.onlinePlayerNames = names or {}
 end
 
 -- Export

@@ -8,12 +8,7 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
-local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
+if not GM_RequireNamespace() then return end
 
 local GMConfig = _G.GMConfig
 
@@ -29,8 +24,8 @@ GMConfig.config = {
     -- Legacy properties for backward compatibility
     BG_WIDTH = 900,
     BG_HEIGHT = 650,
-    PAGE_SIZE = 15,
-    NUM_COLUMNS = 5,
+    PAGE_SIZE = 6,
+    NUM_COLUMNS = 2,
     NUM_ROWS = 3,
     
     -- Responsive sizing
@@ -49,15 +44,26 @@ GMConfig.config = {
         spacing = 5,
     },
     
-    -- Grid layout
+    -- Side panel layout
+    sidePanel = {
+        width = { default = 600, min = 300, max = 800 },
+        heightPercent = 0.9,
+        position = "RIGHT",
+        opacity = 1.0,
+        compactMode = false,
+        padding = 8,
+        spacing = 4,
+    },
+
+    -- Grid layout (column thresholds tuned for side panel 300-600px range)
     grid = {
         columns = {
-            small = 3,
-            medium = 4,
-            large = 5,
+            small = 2,   -- < 450px
+            medium = 3,  -- 450-549px
+            large = 4,   -- >= 550px
         },
         rows = 3,
-        pageSize = 15,
+        pageSize = 6, -- fallback only; dynamically computed as cols * rows
     },
     
     -- Performance
@@ -70,9 +76,9 @@ GMConfig.config = {
 
 -- Responsive helper functions
 function GMConfig.config.getResponsiveColumns(width)
-    if width < 800 then
+    if width < 450 then
         return GMConfig.config.grid.columns.small
-    elseif width < 1050 then
+    elseif width < 550 then
         return GMConfig.config.grid.columns.medium
     else
         return GMConfig.config.grid.columns.large

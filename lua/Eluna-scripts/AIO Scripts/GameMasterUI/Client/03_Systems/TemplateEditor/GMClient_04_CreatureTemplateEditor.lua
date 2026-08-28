@@ -97,8 +97,17 @@ function CreatureTemplateEditor.PopulateFields()
             yOffset = yOffset - spacing
             
             -- Set initial value
-            if CreatureTemplateEditor.editedData and CreatureTemplateEditor.editedData[field.key] ~= nil then
-                TemplateUI.SetFieldValue(fieldFrame, CreatureTemplateEditor.editedData[field.key])
+            if CreatureTemplateEditor.editedData then
+                if field.type == "number_pair" and field.fields then
+                    -- Pass both field values for pair type
+                    local pairData = {}
+                    for _, subField in ipairs(field.fields) do
+                        pairData[subField.key] = CreatureTemplateEditor.editedData[subField.key]
+                    end
+                    TemplateUI.SetFieldValue(fieldFrame, pairData)
+                elseif CreatureTemplateEditor.editedData[field.key] ~= nil then
+                    TemplateUI.SetFieldValue(fieldFrame, CreatureTemplateEditor.editedData[field.key])
+                end
             end
         else
             print("|cFFFF0000Error creating field:|r", field.key)

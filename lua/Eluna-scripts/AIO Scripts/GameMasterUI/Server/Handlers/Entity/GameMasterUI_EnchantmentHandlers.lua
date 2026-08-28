@@ -105,9 +105,9 @@ function EnchantmentHandlers.queryDatabaseEnchantments(player)
     ]]
     
     local enchantments = {}
-    local queryResult = WorldDBQuery(query)
-    
-    if queryResult then
+    local queryOk, queryResult = pcall(WorldDBQuery, query)
+
+    if queryOk and queryResult then
         repeat
             local enchant = {
                 id = queryResult:GetUInt32(0),

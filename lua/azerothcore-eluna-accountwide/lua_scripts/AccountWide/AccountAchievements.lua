@@ -7,6 +7,10 @@
 local ENABLE_ACCOUNTWIDE_COMPLETED_ACHIEVEMENTS = false
 local ENABLE_ACCOUNTWIDE_CRITERIA_PROGRESS = false
 
+-- Realm First achievements are excluded by default because 
+-- they represent a specific character or realm race
+local ENABLE_ACCOUNTWIDE_REALM_FIRST_ACHIEVEMENTS = false
+
 local ANNOUNCE_ON_LOGIN = false
 local ANNOUNCEMENT = "This server is running the |cFF00B0E8AccountWide Achievements |rlua script."
 
@@ -14,24 +18,77 @@ local ANNOUNCEMENT = "This server is running the |cFF00B0E8AccountWide Achieveme
 -- END CONFIG
 -- ---------------------------------------------------------------------------------------------
 
+if not ENABLE_ACCOUNTWIDE_COMPLETED_ACHIEVEMENTS and not ENABLE_ACCOUNTWIDE_CRITERIA_PROGRESS then return end
+
 local AUtils = AccountWideUtils
+if not AUtils then
+    print("[AccountWide] Missing 00_AccountWideUtils.lua; disabling AccountWide Achievements.")
+    return
+end
+
+local completedAchievementsCache = {}
+local completedAchievementsLoaded = {}
+local completedAchievementsSeedAttempted = {}
+
+local REALM_FIRST_ACHIEVEMENTS = {
+    [456] = true, [457] = true, [458] = true, [459] = true, [460] = true, [461] = true,
+    [462] = true, [463] = true, [464] = true, [465] = true, [466] = true, [467] = true,
+    [1400] = true, [1402] = true, [1404] = true, [1405] = true, [1406] = true, [1407] = true,
+    [1408] = true, [1409] = true, [1410] = true, [1411] = true, [1412] = true, [1413] = true,
+    [1414] = true, [1415] = true, [1416] = true, [1417] = true, [1418] = true, [1419] = true,
+    [1420] = true, [1421] = true, [1422] = true, [1423] = true, [1424] = true, [1425] = true, 
+    [1426] = true, [1427] = true, [1463] = true, [3117] = true, [3259] = true, [4078] = true,
+    [4576] = true
+}
+
+local REALM_FIRST_ACHIEVEMENT_IDS = "456,457,458,459,460,461,462,463,464,465,466,467,1400,1402,1404,1405,1406,1407,1408,1409,1410,1411,1412,1413,1414,1415,1416,1417,1418,1419,1420,1421,1422,1423,1424,1425,1426,1427,1463,3117,3259,4078,4576"
+
+local function ShouldSkipCompletedAchievement(achievementId)
+    return not ENABLE_ACCOUNTWIDE_REALM_FIRST_ACHIEVEMENTS and REALM_FIRST_ACHIEVEMENTS[achievementId]
+end
+
+local function CompletedAchievementSqlFilter(columnName)
+    if ENABLE_ACCOUNTWIDE_REALM_FIRST_ACHIEVEMENTS then return "" end
+    return string.format(" AND %s NOT IN (%s)", columnName, REALM_FIRST_ACHIEVEMENT_IDS)
+end
+
+local function GetCompletedAchievementsForAccount(accountId)
+    if completedAchievementsLoaded[accountId] then
+        return completedAchievementsCache[accountId]
+    end
+
+    local achievements = {}
+    local query = CharDBQuery(string.format([[
+        SELECT achievementId
+          FROM accountwide_achievements
+         WHERE accountId = %d%s
+    ]], accountId, CompletedAchievementSqlFilter("achievementId")))
+
+    if query then
+        repeat
+            local achievementId = query:GetUInt32(0)
+            achievements[achievementId] = true
+        until not query:NextRow()
+    end
+
+    completedAchievementsCache[accountId] = achievements
+    completedAchievementsLoaded[accountId] = true
+    return achievements
+end
+
+local function MarkCompletedAchievementCached(accountId, achievementId)
+    if not completedAchievementsLoaded[accountId] then return end
+    local achievements = completedAchievementsCache[accountId]
+    if not achievements then return end
+    achievements[achievementId] = true
+end
 
 local function AddMissingAchievements(player, achievementsSet)
     for achievementID, _ in pairs(achievementsSet) do
-        if not player:HasAchieved(achievementID) then
+        if not ShouldSkipCompletedAchievement(achievementID) and not player:HasAchieved(achievementID) then
             player:SetAchievement(achievementID)
         end
     end
-end
-
-local function ExecAchievementsBatch(accountId, valuesBatch)
-    if #valuesBatch == 0 then return end
-    local sql = string.format([[
-        INSERT IGNORE INTO accountwide_achievements (accountId, achievementId)
-        VALUES %s
-    ]], table.concat(valuesBatch, ", "))
-
-    CharDBExecute(sql)
 end
 
 local function SyncCompletedAchievementsOnLogin(event, player)
@@ -44,47 +101,35 @@ local function SyncCompletedAchievementsOnLogin(event, player)
         player:SendBroadcastMessage(ANNOUNCEMENT)
     end
 
-    local achievements = {}
-    do
-        local query = CharDBQuery(string.format("SELECT achievementId FROM accountwide_achievements WHERE accountId = %d", accountId))
-        if query then
-            repeat
-                local achievementId = query:GetUInt32(0)
-                achievements[achievementId] = true
-            until not query:NextRow()
-        end
-    end
+    local achievements = GetCompletedAchievementsForAccount(accountId)
 
     local isAnchor = (AUtils.shouldDoDownsync and AUtils.shouldDoDownsync(player)) or false
     if isAnchor then
-        local achQuery = CharDBQuery(string.format([[
-            SELECT ca.achievement
-            FROM character_achievement AS ca
-            WHERE ca.guid IN (SELECT c.guid FROM characters AS c WHERE c.account = %d)
-        ]], accountId))
+        -- if this account has no rows yet, read directly from character achievements
+        if next(achievements) == nil and not completedAchievementsSeedAttempted[accountId] then
+            completedAchievementsSeedAttempted[accountId] = true
 
-        -- If we discover new achievements, queue them for a single batched insert
-        local batch, count = {}, 0
-        local BATCH_SIZE = 500
+            -- Seed accountwide table once for this account.
+            CharDBExecute(string.format([[
+                INSERT IGNORE INTO accountwide_achievements (accountId, achievementId)
+                SELECT DISTINCT %d, ca.achievement
+                FROM character_achievement AS ca
+                JOIN characters AS c ON c.guid = ca.guid
+                WHERE c.account = %d%s
+            ]], accountId, accountId, CompletedAchievementSqlFilter("ca.achievement")))
 
-        if achQuery then
-            repeat
-                local achievementId = achQuery:GetUInt32(0)
-                if not achievements[achievementId] then
-                    achievements[achievementId] = true
-                    table.insert(batch, string.format("(%d, %d)", accountId, achievementId))
-                    count = count + 1
-                    if count >= BATCH_SIZE then
-                        ExecAchievementsBatch(accountId, batch)
-                        batch = {}
-                        count = 0
-                    end
-                end
-            until not achQuery:NextRow()
-        end
+            local query = CharDBQuery(string.format([[
+                SELECT DISTINCT ca.achievement
+                FROM character_achievement AS ca
+                JOIN characters AS c ON c.guid = ca.guid
+                WHERE c.account = %d%s
+            ]], accountId, CompletedAchievementSqlFilter("ca.achievement")))
 
-        if count > 0 then
-            ExecAchievementsBatch(accountId, batch)
+            if query then
+                repeat
+                    achievements[query:GetUInt32(0)] = true
+                until not query:NextRow()
+            end
         end
     end
 
@@ -92,8 +137,26 @@ local function SyncCompletedAchievementsOnLogin(event, player)
     AddMissingAchievements(player, achievements)
 end
 
+local function SyncCompletedAchievementOnEarn(event, player, achievement)
+    -- Skip playerbot accounts
+    if AUtils.shouldSkipAll and AUtils.shouldSkipAll(player) then return end
+    if not achievement then return end
+
+    local achievementId = achievement:GetId()
+    if not achievementId then return end
+    if ShouldSkipCompletedAchievement(achievementId) then return end
+
+    local accountId = player:GetAccountId()
+    CharDBExecute(string.format([[
+        INSERT IGNORE INTO accountwide_achievements (accountId, achievementId)
+        VALUES (%d, %d)
+    ]], accountId, achievementId))
+    MarkCompletedAchievementCached(accountId, achievementId)
+end
+
 if ENABLE_ACCOUNTWIDE_COMPLETED_ACHIEVEMENTS then
     RegisterPlayerEvent(3, SyncCompletedAchievementsOnLogin) -- PLAYER_EVENT_ON_LOGIN
+    RegisterPlayerEvent(45, SyncCompletedAchievementOnEarn) -- PLAYER_EVENT_ON_ACHIEVEMENT_COMPLETE
 end
 
 -- ====================
@@ -110,6 +173,17 @@ local function ExecuteCharacterProgressBatch(batchRows)
         ON DUPLICATE KEY UPDATE
             counter = IF(VALUES(counter) > counter, VALUES(counter), counter),
             date = IF(VALUES(counter) > counter, VALUES(date), GREATEST(date, VALUES(date)))
+    ]])
+end
+
+local function ExecuteCharacterProgressBatchIfCounterHigher(batchRows)
+    if #batchRows == 0 then return end
+    CharDBExecute([[
+        INSERT INTO character_achievement_progress (guid, criteria, counter, date)
+        VALUES ]] .. table.concat(batchRows, ", ") .. [[
+        ON DUPLICATE KEY UPDATE
+            counter = IF(VALUES(counter) > counter, VALUES(counter), counter),
+            date = IF(VALUES(counter) > counter, VALUES(date), date)
     ]])
 end
 
@@ -143,26 +217,12 @@ local function LoadCharacterCriteriaProgress(characterGuid)
     return progressByCriteria
 end
 
-local function ChunkList(list, chunkSize)
-    local chunks = {}
-    local i = 1
-    while i <= #list do
-        local chunk = {}
-        for j = i, math.min(i + chunkSize - 1, #list) do
-            chunk[#chunk+1] = list[j]
-        end
-        chunks[#chunks+1] = chunk
-        i = i + chunkSize
-    end
-    return chunks
-end
-
 local function LoadAccountMaxForCriteria(accountId, criteriaList)
     if #criteriaList == 0 then return {} end
 
     local maxByCriteria = {}
-    for _, chunk in ipairs(ChunkList(criteriaList, 800)) do
-        local csv = table.concat(chunk, ",")
+    for _, chunk in ipairs(AUtils.chunkList(criteriaList, 800)) do
+        local csv = AUtils.csv(chunk)
         local query = CharDBQuery(string.format([[
             SELECT criteria, counter, date
               FROM accountwide_criteria_max
@@ -239,57 +299,20 @@ local function PropagateDeltasToOtherCharacters(accountId, saverGuid, updatedCri
     end
     if #otherCharacterGuids == 0 then return end
 
-    local criteriaList = {}
-    for criteriaId, _ in pairs(updatedCriteria) do
-        table.insert(criteriaList, criteriaId)
-    end
-    local guidCSV = table.concat(otherCharacterGuids, ",")
-
-    -- Fetch current values for just these criteria and characters
-    local currentProgress = {}
-    local CRITERIA_CHUNK_SIZE = 800
-    local criteriaChunks = (#criteriaList > CRITERIA_CHUNK_SIZE)
-        and ChunkList(criteriaList, CRITERIA_CHUNK_SIZE)
-        or { criteriaList }
-
-    for _, chunk in ipairs(criteriaChunks) do
-        local chunkCSV = table.concat(chunk, ",")
-        local query = CharDBQuery(string.format([[
-            SELECT guid, criteria, counter
-            FROM character_achievement_progress
-            WHERE guid IN (%s)
-            AND criteria IN (%s)
-        ]], guidCSV, chunkCSV))
-
-        if query then
-            repeat
-                local guid = query:GetUInt32(0)
-                local criteriaId = query:GetUInt32(1)
-                local counterValue = query:GetUInt32(2)
-                if not currentProgress[guid] then currentProgress[guid] = {} end
-                currentProgress[guid][criteriaId] = counterValue
-            until not query:NextRow()
-        end
-    end
-
-    -- Apply updates only if the target value is lower
+    -- Upsert directly and let SQL only apply when incoming counter is higher.
     local batch, count = {}, 0
     for _, targetGuid in ipairs(otherCharacterGuids) do
-        local progressByCriteria = currentProgress[targetGuid] or {}
         for criteriaId, updatedRow in pairs(updatedCriteria) do
-            local currentValue = progressByCriteria[criteriaId] or 0
-            if currentValue < updatedRow.counter then
-                batch[#batch+1] = string.format("(%d,%d,%d,%d)", targetGuid, criteriaId, updatedRow.counter, updatedRow.date)
-                count = count + 1
-                if count >= PROGRESS_BATCH_SIZE then
-                    ExecuteCharacterProgressBatch(batch)
-                    batch = {}
-                    count = 0
-                end
+            batch[#batch+1] = string.format("(%d,%d,%d,%d)", targetGuid, criteriaId, updatedRow.counter, updatedRow.date)
+            count = count + 1
+            if count >= PROGRESS_BATCH_SIZE then
+                ExecuteCharacterProgressBatchIfCounterHigher(batch)
+                batch = {}
+                count = 0
             end
         end
     end
-    if count > 0 then ExecuteCharacterProgressBatch(batch) end
+    if count > 0 then ExecuteCharacterProgressBatchIfCounterHigher(batch) end
 end
 
 local function SyncCriteriaProgressOnCharacterCreate(event, player)

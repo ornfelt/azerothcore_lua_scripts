@@ -302,12 +302,11 @@ function PlayerInventory.createInventoryModalWithLoading(playerName)
     dialog:SetScript("OnKeyDown", function(self, key)
         -- Try HotkeyManager first
         if HotkeyManager and HotkeyManager.handleKeyPress(key) then
-            return -- Handled by HotkeyManager
+            return
         end
 
         -- Handle ESCAPE directly (not managed by HotkeyManager)
         if key == "ESCAPE" then
-            -- Notify state machine of modal closing
             local StateMachine = _G.GMStateMachine
             if StateMachine then
                 StateMachine.closeModal()
@@ -315,6 +314,7 @@ function PlayerInventory.createInventoryModalWithLoading(playerName)
 
             modal:Hide()
             PlayerInventory.currentModal = nil
+            return
         end
     end)
 

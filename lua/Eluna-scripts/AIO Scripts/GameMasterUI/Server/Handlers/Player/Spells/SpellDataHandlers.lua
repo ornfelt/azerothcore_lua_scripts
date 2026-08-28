@@ -10,14 +10,15 @@
 local SpellDataHandlers = {}
 
 -- Module dependencies (will be injected)
-local GameMasterSystem, Config, Utils, Database, DatabaseHelper
+local GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper
 
-function SpellDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+function SpellDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     GameMasterSystem = gms
     Config = config
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
+    DatabaseErrorHelper = dbErrorHelper
     
     -- Register spell data handlers
     GameMasterSystem.getSpellData = SpellDataHandlers.getSpellData
@@ -33,28 +34,52 @@ function SpellDataHandlers.getSpellData(player, offset, pageSize, sortOrder)
     pageSize = Utils.validatePageSize(pageSize or Config.defaultPageSize)
     sortOrder = Utils.validateSortOrder(sortOrder or "DESC")
     local coreName = GetCoreName()
-    
+
+    -- Validate DBC columns exist before querying (prevents C++ ABORT on unknown column)
+    if not DatabaseHelper.ColumnExists("spell", "spell_name_enus", "world") then
+        Utils.sendMessage(player, "error", "Spell data unavailable: DBC columns (spell_name_enus) not found in spell table.")
+        return
+    end
+
+    -- Detect if all visual tables exist to choose full vs simple query
+    local hasVisualTables = DatabaseHelper.TableExists("spellvisual", "world")
+        and DatabaseHelper.TableExists("spellvisualkit", "world")
+        and DatabaseHelper.TableExists("spellvisualeffectname", "world")
+    local queryName = hasVisualTables and "spellData" or "spellDataSimple"
+
     -- First, get the total count
     local countQuery = Database.getQuery(coreName, "spellCount")()
     local modifiedCountQuery, error = DatabaseHelper.BuildSafeQuery(countQuery, {"spell"}, "world")
     local totalCount = 0
     if modifiedCountQuery then
         totalCount = Utils.getTotalCount(WorldDBQuery, modifiedCountQuery)
-    elseif Config.debug then
-        print(string.format("[GameMasterUI] Failed to build spell count query: %s", error or "unknown error"))
+    else
+        -- Notify user about missing tables
+        if DatabaseErrorHelper and error then
+            DatabaseErrorHelper.CheckTablesForFeature(player, "Spells", {"spell"}, "world")
+            return -- Exit early - error sent to client
+        elseif Config.debug then
+            print(string.format("[GameMasterUI] Failed to build spell count query: %s", error or "unknown error"))
+        end
     end
-    
+
     -- Calculate pagination info
     local paginationInfo = Utils.calculatePaginationInfo(totalCount, offset, pageSize)
-    
+
     -- Get the actual data even if total count is 0 (to handle edge cases)
-    local query = Database.getQuery(coreName, "spellData")(sortOrder, pageSize, offset)
+    local query = Database.getQuery(coreName, queryName)(sortOrder, pageSize, offset)
     local modifiedQuery, queryError = DatabaseHelper.BuildSafeQuery(query, {"spell"}, "world")
     local result = nil
     if modifiedQuery then
         result = WorldDBQuery(modifiedQuery)
-    elseif Config.debug then
-        print(string.format("[GameMasterUI] Failed to build spell data query: %s", queryError or "unknown error"))
+    else
+        -- Notify user about missing tables
+        if DatabaseErrorHelper and queryError then
+            DatabaseErrorHelper.CheckTablesForFeature(player, "Spells", {"spell"}, "world")
+            return -- Exit early - error sent to client
+        elseif Config.debug then
+            print(string.format("[GameMasterUI] Failed to build spell data query: %s", queryError or "unknown error"))
+        end
     end
     local spellData = {}
 
@@ -96,8 +121,20 @@ function SpellDataHandlers.searchSpellData(player, query, offset, pageSize, sort
     offset = offset or 0
     pageSize = Utils.validatePageSize(pageSize or Config.defaultPageSize)
 
-    local searchQuery = Database.getQuery(GetCoreName(), "searchSpellData")(query, sortOrder, pageSize, offset)
-    
+    -- Validate DBC columns exist before querying (prevents C++ ABORT on unknown column)
+    if not DatabaseHelper.ColumnExists("spell", "spell_name_enus", "world") then
+        Utils.sendMessage(player, "error", "Spell search unavailable: DBC columns (spell_name_enus) not found in spell table.")
+        return
+    end
+
+    -- Detect if all visual tables exist to choose full vs simple query
+    local hasVisualTables = DatabaseHelper.TableExists("spellvisual", "world")
+        and DatabaseHelper.TableExists("spellvisualkit", "world")
+        and DatabaseHelper.TableExists("spellvisualeffectname", "world")
+    local queryName = hasVisualTables and "searchSpellData" or "searchSpellDataSimple"
+
+    local searchQuery = Database.getQuery(GetCoreName(), queryName)(query, sortOrder, pageSize, offset)
+
     local modifiedQuery, error = DatabaseHelper.BuildSafeQuery(searchQuery, {"spell"}, "world")
     local result = nil
     if modifiedQuery then
@@ -278,27 +315,33 @@ function SpellDataHandlers.searchSpells(player, searchText, offset, pageSize)
     
     offset = offset or 0
     pageSize = Utils.validatePageSize(pageSize or 50)
-    
+
+    -- Validate DBC columns exist before querying (prevents C++ ABORT on unknown column)
+    if not DatabaseHelper.ColumnExists("spell", "spell_name_enus", "world") then
+        Utils.sendMessage(player, "error", "Spell search unavailable: DBC columns (spell_name_enus) not found in spell table.")
+        return
+    end
+
     -- First get total count
     local countQuery
     if searchText and searchText ~= "" then
         searchText = Utils.escapeString(searchText)
         countQuery = string.format([[
-            SELECT COUNT(*) 
-            FROM spell 
-            WHERE spellName0 LIKE '%%%s%%' OR id = '%s'
+            SELECT COUNT(*)
+            FROM spell
+            WHERE spell_name_enus LIKE '%%%s%%' OR id = '%s'
         ]], searchText, searchText)
     else
         countQuery = [[
-            SELECT COUNT(*) 
-            FROM spell 
-            WHERE spellName0 != ''
+            SELECT COUNT(*)
+            FROM spell
+            WHERE spell_name_enus != ''
         ]]
     end
     
-    local countResult = WorldDBQuery(countQuery)
+    local countOk, countResult = pcall(WorldDBQuery, countQuery)
     local totalCount = 0
-    if countResult then
+    if countOk and countResult then
         totalCount = countResult:GetUInt32(0)
     end
     
@@ -307,27 +350,27 @@ function SpellDataHandlers.searchSpells(player, searchText, offset, pageSize)
     if searchText and searchText ~= "" then
         -- Search by name or ID
         query = string.format([[
-            SELECT id, spellName0 
-            FROM spell 
-            WHERE spellName0 LIKE '%%%s%%' OR id = '%s'
-            ORDER BY id ASC 
+            SELECT id, spell_name_enus
+            FROM spell
+            WHERE spell_name_enus LIKE '%%%s%%' OR id = '%s'
+            ORDER BY id ASC
             LIMIT %d OFFSET %d
         ]], searchText, searchText, pageSize, offset)
     else
         -- Get all spells
         query = string.format([[
-            SELECT id, spellName0 
-            FROM spell 
-            WHERE spellName0 != '' 
-            ORDER BY id ASC 
+            SELECT id, spell_name_enus
+            FROM spell
+            WHERE spell_name_enus != ''
+            ORDER BY id ASC
             LIMIT %d OFFSET %d
         ]], pageSize, offset)
     end
     
-    local result = WorldDBQuery(query)
+    local queryOk, result = pcall(WorldDBQuery, query)
     local spells = {}
-    
-    if result then
+
+    if queryOk and result then
         repeat
             local spellId = result:GetUInt32(0)
             local spellName = result:GetString(1)

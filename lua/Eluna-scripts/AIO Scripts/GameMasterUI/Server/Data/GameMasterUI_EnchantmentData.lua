@@ -45,12 +45,13 @@ EnchantmentData.WEAPON_ENCHANTS = {
     { id = 3251, name = "Giant Slayer", description = "Chance for extra damage to giants" },
     
     -- Tanking
-    { id = 3851, name = "Titanium Weapon Chain", description = "Reduces disarm duration and +28 hit" },
-    { id = 3731, name = "Titanium Plating", description = "+40 Block Value (Shield)" },
-    { id = 1952, name = "Major Intellect", description = "+30 Intellect (Shield)" },
-    { id = 3849, name = "Titanium Plating", description = "+36 Block Value (Shield)" },
-    { id = 3748, name = "Resilience", description = "+12 Defense (Shield)" },
+    { id = 3851, name = "Titanguard", description = "+50 Stamina" },
+    { id = 3731, name = "Titanium Weapon Chain", description = "Reduces disarm duration and +28 Hit" },
     
+    -- Classic Weapon Attachments
+    { id = 34, name = "Iron Counterweight", description = "+20 Haste Rating (2H only)" },
+    { id = 37, name = "Steel Weapon Chain", description = "Reduces disarm duration 50%" },
+
     -- Classic/TBC Enchants
     { id = 2674, name = "Spellsurge", description = "Chance to restore mana to party" },
     { id = 2675, name = "Battlemaster", description = "Chance for extra attack" },
@@ -69,6 +70,8 @@ EnchantmentData.WEAPON_ENCHANTS = {
     { id = 1606, name = "Greater Striking", description = "+4 Weapon Damage" },
     { id = 249, name = "Minor Beastslayer", description = "+2 damage to Beasts" },
     { id = 250, name = "Minor Striking", description = "+1 Weapon Damage" },
+    { id = 1103, name = "Exceptional Agility", description = "+26 Agility" },
+    { id = 3247, name = "Scourgebane", description = "+140 Attack Power vs Undead (2H)" },
 }
 
 -- Chest Enchants (Chest, Robe, Vest)
@@ -82,7 +85,8 @@ EnchantmentData.CHEST_ENCHANTS = {
     { id = 1953, name = "Greater Defense", description = "+22 Defense" },
     { id = 3236, name = "Mighty Health", description = "+150 Health" },
     { id = 3233, name = "Exceptional Mana", description = "+250 Mana" },
-    
+    { id = 2381, name = "Greater Mana Restoration", description = "+10 Mana per 5 sec" },
+
     -- TBC/Classic
     { id = 2661, name = "Exceptional Stats", description = "+6 All Stats" },
     { id = 2659, name = "Exceptional Health", description = "+150 Health" },
@@ -103,7 +107,11 @@ EnchantmentData.BOOT_ENCHANTS = {
     { id = 1597, name = "Greater Fortitude", description = "+22 Stamina" },
     { id = 983, name = "Superior Agility", description = "+16 Agility" },
     { id = 3606, name = "Nitro Boosts", description = "Engineering: Rocket boost" },
-    
+    { id = 1075, name = "Greater Fortitude", description = "+22 Stamina" },
+    { id = 1147, name = "Greater Spirit", description = "+18 Spirit" },
+
+    { id = 464, name = "Mithril Spurs", description = "+4% Mount Speed" },
+
     -- TBC/Classic
     { id = 2940, name = "Boar's Speed", description = "+9 Stamina and Minor Speed" },
     { id = 2939, name = "Cat's Swiftness", description = "+6 Agility and Minor Speed" },
@@ -130,7 +138,9 @@ EnchantmentData.GLOVE_ENCHANTS = {
     { id = 3604, name = "Hyperspeed Accelerators", description = "Engineering: +340 Haste for 12 sec" },
     { id = 3603, name = "Hand-Mounted Pyro Rocket", description = "Engineering: Fire damage" },
     { id = 3860, name = "Reticulated Armor Webbing", description = "Engineering: +885 Armor" },
-    
+    { id = 3249, name = "Greater Blasting", description = "+16 Critical Strike" },
+    { id = 3723, name = "Socket Gloves", description = "BS: Add a prismatic socket" },
+
     -- TBC/Classic
     { id = 2937, name = "Major Spellpower", description = "+20 Spell Power" },
     { id = 2935, name = "Major Healing", description = "+35 Healing" },
@@ -153,10 +163,10 @@ EnchantmentData.CLOAK_ENCHANTS = {
     { id = 3831, name = "Greater Speed", description = "+23 Haste" },
     { id = 3243, name = "Spell Piercing", description = "+35 Spell Penetration" },
     { id = 3256, name = "Shadow Armor", description = "+155 Armor" },
-    { id = 3296, name = "Superior Dodge", description = "+18 Dodge" },
-    { id = 3294, name = "Superior Defense", description = "+16 Defense" },
+    { id = 3296, name = "Wisdom", description = "+10 Spirit and 2% Reduced Threat" },
+    { id = 3294, name = "Mighty Armor", description = "+225 Armor" },
     { id = 3825, name = "Speed", description = "+15 Haste" },
-    { id = 3728, name = "Flexweave Underlay", description = "Engineering: Parachute" },
+    { id = 3728, name = "Darkglow Embroidery", description = "Tailoring: Chance to restore mana" },
     { id = 3859, name = "Springy Arachnoweave", description = "Engineering: Parachute + Spell Power" },
     { id = 1099, name = "Major Agility", description = "+22 Agility" },
     { id = 1262, name = "Superior Arcane Resistance", description = "+20 Arcane Resistance" },
@@ -165,7 +175,9 @@ EnchantmentData.CLOAK_ENCHANTS = {
     { id = 1446, name = "Superior Shadow Resistance", description = "+20 Shadow Resistance" },
     { id = 1441, name = "Superior Nature Resistance", description = "+20 Nature Resistance" },
     { id = 3230, name = "Titanweave", description = "+16 Defense" },
-    
+    { id = 3722, name = "Lightweave Embroidery", description = "Tailoring: Proc +295 Spell Power" },
+    { id = 3730, name = "Swordguard Embroidery", description = "Tailoring: Proc +400 Attack Power" },
+
     -- TBC/Classic
     { id = 2938, name = "Greater Dodge", description = "+12 Dodge" },
     { id = 2662, name = "Major Armor", description = "+120 Armor" },
@@ -195,7 +207,9 @@ EnchantmentData.BRACER_ENCHANTS = {
     { id = 2647, name = "Brawn", description = "+12 Strength" },
     { id = 2646, name = "Stats", description = "+4 All Stats" },
     { id = 3002, name = "Greater Spellpower", description = "+23 Spell Power" },
-    
+    { id = 1119, name = "Exceptional Intellect", description = "+16 Intellect" },
+    { id = 3717, name = "Socket Bracer", description = "BS: Add a prismatic socket" },
+
     -- Fur Lining (Leatherworking)
     { id = 3757, name = "Fur Lining - Attack Power", description = "LW: +130 Attack Power" },
     { id = 3758, name = "Fur Lining - Stamina", description = "LW: +102 Stamina" },
@@ -206,6 +220,10 @@ EnchantmentData.BRACER_ENCHANTS = {
     { id = 3763, name = "Fur Lining - Nature Resist", description = "LW: +70 Nature Resistance" },
     { id = 3756, name = "Fur Lining - Arcane Resist", description = "LW: +70 Arcane Resistance" },
     
+    -- TBC
+    { id = 2565, name = "Mana Regeneration", description = "+5 Mana per 5 sec" },
+    { id = 2679, name = "Restore Mana Prime", description = "+8 Mana per 5 sec" },
+
     -- TBC/Classic
     { id = 2661, name = "Superior Healing", description = "+30 Healing" },
     { id = 2650, name = "Major Defense", description = "+12 Defense" },
@@ -249,6 +267,10 @@ EnchantmentData.LEG_ENCHANTS = {
     -- Leatherworking Reinforcements
     { id = 3329, name = "Jormungar Leg Reinforcements", description = "LW: +45 Stamina and +15 Agility" },
     { id = 3330, name = "Nerubian Leg Reinforcements", description = "LW: +55 Attack Power and +15 Critical Strike" },
+    { id = 3328, name = "Nerubian Leg Reinforcements (Self)", description = "LW: Self-only leg reinforcement" },
+    { id = 3873, name = "Master's Spellthread", description = "Tailoring: +50 Spell Power and +30 Stamina" },
+    { id = 3331, name = "Dragonscale Leg Armor", description = "TBC: Attack Power and Critical Strike" },
+    { id = 3332, name = "Wyrmscale Leg Armor", description = "TBC: Attack Power and Stamina" },
 }
 
 -- Shoulder Enchants (Inscription/Reputation)
@@ -276,6 +298,12 @@ EnchantmentData.SHOULDER_ENCHANTS = {
     { id = 3810, name = "Inscription of Triumph", description = "+40 Attack Power and +15 Resilience" },
     { id = 3811, name = "Inscription of Dominance", description = "+23 Spell Power and +15 Resilience" },
     
+    -- Classic Naxxramas Shoulder Enchants (Sapphiron drops)
+    { id = 2715, name = "Resilience of the Scourge", description = "+16 Spell Power and +6 MP5" },
+    { id = 2716, name = "Fortitude of the Scourge", description = "+16 Stamina and +100 Armor" },
+    { id = 2717, name = "Might of the Scourge", description = "+26 Attack Power and +14 Critical Strike" },
+    { id = 2721, name = "Power of the Scourge", description = "+15 Spell Power and +14 Critical Strike" },
+
     -- TBC Shoulder Enchants
     { id = 2986, name = "Greater Inscription of Vengeance", description = "+30 Attack Power and +10 Critical Strike" },
     { id = 2982, name = "Greater Inscription of the Blade", description = "+20 Attack Power and +15 Critical Strike" },
@@ -303,6 +331,17 @@ EnchantmentData.HEAD_ENCHANTS = {
     -- Engineering Tinkers
     { id = 3826, name = "Mind Amplification Dish", description = "Engineering: Mind Control chance + 45 Stamina" },
     
+    -- Classic ZG Head/Leg Enchants (class-specific)
+    { id = 2583, name = "Presence of Might", description = "+10 Defense +10 Stamina +30 Block Value (Warrior)" },
+    { id = 2584, name = "Syncretist's Sigil", description = "+10 Defense +10 Stamina +12 Spell Power (Paladin)" },
+    { id = 2585, name = "Death's Embrace", description = "+28 Attack Power +12 Dodge (Rogue)" },
+    { id = 2586, name = "Falcon's Call", description = "+24 Ranged AP +10 Stamina +10 Hit (Hunter)" },
+    { id = 2587, name = "Vodouisant's Vigilant Embrace", description = "+13 Spell Power +15 Intellect (Shaman)" },
+    { id = 2588, name = "Presence of Sight", description = "+18 Spell Power +8 Hit (Mage)" },
+    { id = 2589, name = "Hoodoo Hex", description = "+18 Spell Power +10 Stamina (Warlock)" },
+    { id = 2590, name = "Prophetic Aura", description = "+13 Spell Power +10 Stamina +5 MP5 (Priest)" },
+    { id = 2591, name = "Animist's Caress", description = "+10 Intellect +10 Stamina +12 Spell Power (Druid)" },
+
     -- TBC Arcanums
     { id = 3002, name = "Arcanum of Ferocity", description = "+34 Attack Power and +16 Hit" },
     { id = 3003, name = "Arcanum of the Gladiator", description = "+30 Stamina and +20 Resilience" },
@@ -348,6 +387,11 @@ EnchantmentData.SHIELD_ENCHANTS = {
     { id = 1904, name = "Tough Shield", description = "+15 Block Value" },
     { id = 1128, name = "Greater Stamina", description = "+7 Stamina" },
     { id = 863, name = "Greater Stamina", description = "+7 Stamina" },
+    { id = 3748, name = "Titanium Shield Spike", description = "BS: 45-67 damage on block" },
+    { id = 2714, name = "Felsteel Shield Spike", description = "BS: 26-38 damage on block" },
+    { id = 1704, name = "Thorium Shield Spike", description = "BS: 20-30 damage on block" },
+    { id = 463, name = "Mithril Shield Spike", description = "BS: 16-20 damage on block" },
+    { id = 43, name = "Iron Shield Spike", description = "BS: 8-12 damage on block" },
 }
 
 -- Ranged Weapon Enchants (Bows, Crossbows, Guns)
@@ -361,6 +405,9 @@ EnchantmentData.RANGED_ENCHANTS = {
     { id = 2523, name = "Biznicks 247x128 Accurascope", description = "+30 Hit" },
     { id = 663, name = "Sniper Scope", description = "+7 Damage" },
     { id = 664, name = "Scope (+7 Damage)", description = "+7 Damage" },
+    { id = 33, name = "Accurate Scope", description = "+3 Damage" },
+    { id = 32, name = "Standard Scope", description = "+2 Damage" },
+    { id = 30, name = "Crude Scope", description = "+1 Damage" },
 }
 
 -- ============================================================================

@@ -71,6 +71,9 @@ local GMPowersHandlers = require("GameMasterUI.Server.Handlers.GMPowers.GameMast
 -- Load Reputation handler module
 local ReputationHandlers = require("GameMasterUI.Server.Handlers.Player.GameMasterUI_ReputationHandlers")
 
+-- Load Quest handler module
+local QuestHandlers = require("GameMasterUI.Server.Handlers.Player.GameMasterUI_QuestHandlers")
+
 -- Load Teleport handler module
 local TeleportHandlers = require("GameMasterUI.Server.Handlers.Teleport.GameMasterUI_TeleportHandlers")
 
@@ -81,12 +84,12 @@ local ObjectEditorHandlers = require("GameMasterUI.Server.Handlers.Entity.GameMa
 local TemplateHandlers = require("GameMasterUI.Server.Handlers.Template.GameMasterUI_TemplateHandlers")
 
 -- Set up the handlers
-ItemHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
-NPCHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
+ItemHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper)
+NPCHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper)
 
 -- Register player-related handlers
 PlayerHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, EntityHandlers, DatabaseHelper)
-PlayerSpellHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
+PlayerSpellHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper)
 PlayerInventoryHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, PlayerHandlers)
 PlayerMailHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
 PlayerBuffHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
@@ -98,14 +101,17 @@ GMPowersHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, Dat
 -- Register Reputation handlers
 ReputationHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
 
+-- Register Quest handlers
+QuestHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
+
 -- Register Teleport handlers
 TeleportHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper)
 
 -- Register ObjectEditor handlers
-ObjectEditorHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
+ObjectEditorHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper)
 
 -- Register Template handlers
-TemplateHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper)
+TemplateHandlers.RegisterHandlers(GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper)
 
 -- Register Report handlers (optional - for logging report attempts)
 local ReportHandlers = require("GameMasterUI.Server.Handlers.GameMasterUI_ReportHandlers")

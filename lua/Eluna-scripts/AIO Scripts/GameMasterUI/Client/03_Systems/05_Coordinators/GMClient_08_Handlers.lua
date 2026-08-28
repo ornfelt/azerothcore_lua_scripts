@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Use existing namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[GameMasterSystem] ERROR: Namespace not found in Handlers! Check load order.")
-    return
-end
 
 -- Access shared data and UI references
 local GMData = _G.GMData
@@ -21,20 +18,9 @@ if not GMData then
 end
 
 -- ================================================================================
--- HANDLER MODULE COORDINATOR
--- The handler submodules from the Handlers subdirectory are automatically loaded
--- by AIO because they have "Client" in their filenames.
--- The original 1,760 line file has been split into manageable modules:
---   - DataReceiveHandlersClient.lua  -- Data reception handlers (~280 lines)
---   - DialogHandlersClient.lua       -- Dialog handlers (~400 lines)  
---   - MailHandlersClient.lua         -- Mail system handlers (~830 lines)
---   - ErrorHandlersClient.lua        -- Error handling (~30 lines)
---   - CoreHandlersClient.lua         -- Core system handlers (~60 lines)
--- ================================================================================
-
--- ================================================================================
 -- MODULE VERIFICATION
--- Check that the expected functions have been loaded from the modules
+-- Check that the expected functions have been loaded from the handler modules
+-- (DataHandlers, DialogHandlers, MailDialog, DatabaseErrorDialog, etc.)
 -- ================================================================================
 
 -- Using OnUpdate for 3.3.5 compatibility (no C_Timer)
@@ -45,7 +31,6 @@ verifyHandlersFrame:SetScript("OnUpdate", function(self, delta)
     if verifyHandlersElapsed >= 0.1 then
         local requiredFunctions = {
             -- From DataReceiveHandlers
-            "testPing",
             "receiveItemData",
             "receiveNPCData",
             "receiveGameObjectData",
@@ -68,7 +53,7 @@ verifyHandlersFrame:SetScript("OnUpdate", function(self, delta)
             "handlePaginationError",
             "handleError",
 
-            -- From CoreHandlers
+            -- From DataHandlers (GMClient_08a)
             "FinalizeHandlers",
             "ShowToast"
         }

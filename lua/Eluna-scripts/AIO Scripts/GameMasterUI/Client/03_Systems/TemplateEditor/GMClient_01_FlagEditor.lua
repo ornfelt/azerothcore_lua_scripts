@@ -43,10 +43,11 @@ local FlagEditor = _G.FlagEditor
 
 -- Get UIStyleLibrary functions
 local CreateStyledFrame = _G.CreateStyledFrame
-local CreateStyledButton = _G.CreateStyledButton  
+local CreateStyledButton = _G.CreateStyledButton
 local CreateStyledCheckbox = _G.CreateStyledCheckbox
 local CreateFullyStyledDropdown = _G.CreateFullyStyledDropdown
 local CreateScrollableFrame = _G.CreateScrollableFrame
+local CreateEnumSelector = _G.CreateEnumSelector
 
 -- Flag definitions for each type
 FlagEditor.FLAG_DEFINITIONS = {
@@ -78,6 +79,8 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 22, value = 4194304, name = "Stable Master", desc = "Pet stable access" },
             { bit = 23, value = 8388608, name = "Guild Banker", desc = "Guild bank access" },
             { bit = 24, value = 16777216, name = "Spellclick", desc = "Can be clicked for spell" },
+            { bit = 25, value = 33554432, name = "Player Vehicle", desc = "Players can control this unit as vehicle" },
+            { bit = 26, value = 67108864, name = "Mailbox", desc = "NPC acts as mailbox" },
         }
     },
     unit_flags = {
@@ -97,9 +100,9 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 11, value = 2048, name = "Pet in Combat", desc = "Pet is in combat" },
             { bit = 12, value = 4096, name = "PVP", desc = "PVP flagged" },
             { bit = 13, value = 8192, name = "Silenced", desc = "Cannot cast spells" },
-            { bit = 14, value = 16384, name = "UNK 14", desc = "Unknown flag 14" },
-            { bit = 15, value = 32768, name = "UNK 15", desc = "Unknown flag 15" },
-            { bit = 16, value = 65536, name = "UNK 16", desc = "Unknown flag 16" },
+            { bit = 14, value = 16384, name = "Cannot Swim", desc = "Unit cannot swim" },
+            { bit = 15, value = 32768, name = "Can Swim", desc = "Unit can swim" },
+            { bit = 16, value = 65536, name = "Non Attackable 2", desc = "Not attackable variant 2" },
             { bit = 17, value = 131072, name = "Pacified", desc = "Cannot attack" },
             { bit = 18, value = 262144, name = "Stunned", desc = "Stunned state" },
             { bit = 19, value = 524288, name = "In Combat", desc = "Unit is in combat" },
@@ -107,13 +110,14 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 21, value = 2097152, name = "Disarmed", desc = "Weapons disabled" },
             { bit = 22, value = 4194304, name = "Confused", desc = "Confused state" },
             { bit = 23, value = 8388608, name = "Fleeing", desc = "Fleeing/feared" },
-            { bit = 24, value = 16777216, name = "Player Controlled", desc = "Mind controlled by player" },
-            { bit = 25, value = 33554432, name = "Not Selectable", desc = "Cannot be selected" },
+            { bit = 24, value = 16777216, name = "Possessed", desc = "Under direct client control (possess/vehicle)" },
+            { bit = 25, value = 33554432, name = "Uninteractible", desc = "Cannot be selected or interacted with" },
             { bit = 26, value = 67108864, name = "Skinnable", desc = "Can be skinned" },
             { bit = 27, value = 134217728, name = "Mount", desc = "Is a mount" },
             { bit = 28, value = 268435456, name = "UNK 28", desc = "Unknown flag 28" },
-            { bit = 29, value = 536870912, name = "UNK 29", desc = "Unknown flag 29" },
+            { bit = 29, value = 536870912, name = "Prevent Emotes From Chat", desc = "Prevent auto-playing emotes from chat text" },
             { bit = 30, value = 1073741824, name = "Sheathe", desc = "Sheathe weapons" },
+            { bit = 31, value = 2147483648, name = "Immune", desc = "Unit is immune" },
         }
     },
     unit_flags2 = {
@@ -128,17 +132,17 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 6, value = 64, name = "Force Movement", desc = "Force movement" },
             { bit = 7, value = 128, name = "Disarm Offhand", desc = "Offhand weapon disabled" },
             { bit = 8, value = 256, name = "Disable Pred Stats", desc = "Disable predicted stats" },
-            { bit = 9, value = 512, name = "Allow Changing Talents", desc = "Can change talents" },
+            { bit = 9, value = 512, name = "Unk 9", desc = "Unknown flag 9" },
             { bit = 10, value = 1024, name = "Disarm Ranged", desc = "Ranged weapon disabled" },
             { bit = 11, value = 2048, name = "Regenerate Power", desc = "Regenerate power/energy" },
             { bit = 12, value = 4096, name = "Restrict Party Interaction", desc = "Restrict party interaction" },
             { bit = 13, value = 8192, name = "Prevent Spell Click", desc = "Prevent spell click interactions" },
-            { bit = 14, value = 16384, name = "Interact While Hostile", desc = "Can interact even if hostile" },
-            { bit = 15, value = 32768, name = "Cannot Switch Targets", desc = "Cannot switch targets" },
+            { bit = 14, value = 16384, name = "Allow Enemy Interact", desc = "Allows enemy units to interact" },
+            { bit = 15, value = 32768, name = "Cannot Turn", desc = "Unit cannot turn/rotate" },
             { bit = 16, value = 65536, name = "Unk 16", desc = "Unknown flag 16" },
-            { bit = 17, value = 131072, name = "Unk 17", desc = "Unknown flag 17" },
-            { bit = 18, value = 262144, name = "Allow Enemy Interact", desc = "Enemies can interact" },
-            { bit = 19, value = 524288, name = "Disable Turn", desc = "Cannot turn" },
+            { bit = 17, value = 131072, name = "Play Death Anim", desc = "Plays special death animation upon death" },
+            { bit = 18, value = 262144, name = "Allow Cheat Spells", desc = "Allows casting spells with SPELL_ATTR7_IS_CHEAT_SPELL" },
+            { bit = 19, value = 524288, name = "Unk 19", desc = "Unknown/Unused in 3.3.5" },
             { bit = 20, value = 1048576, name = "Unk 20", desc = "Unknown flag 20" },
             { bit = 21, value = 2097152, name = "Play Dead", desc = "Playing dead (different from feign death)" },
             { bit = 22, value = 4194304, name = "Hide Body", desc = "Hide body/corpse" },
@@ -193,7 +197,10 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 21, value = 2097152, name = "Do Not Play Mount Anim", desc = "Don't play mount animation" },
             { bit = 22, value = 4194304, name = "Is Link All", desc = "Linked to all difficulties" },
             { bit = 23, value = 8388608, name = "Interact Only With Creator", desc = "Only creator can interact" },
-            { bit = 24, value = 16777216, name = "Force Gossip", desc = "Force gossip activation" },
+            { bit = 24, value = 16777216, name = "UNK 24", desc = "Unknown flag 24" },
+            { bit = 25, value = 33554432, name = "UNK 25", desc = "Unknown flag 25" },
+            { bit = 26, value = 67108864, name = "UNK 26", desc = "Unknown flag 26" },
+            { bit = 27, value = 134217728, name = "Force Gossip", desc = "Force gossip activation" },
         }
     },
     flags = {
@@ -219,7 +226,7 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 2, value = 4, name = "No Parry", desc = "Cannot parry attacks" },
             { bit = 3, value = 8, name = "No Parry Hasten", desc = "No parry haste" },
             { bit = 4, value = 16, name = "No Block", desc = "Cannot block attacks" },
-            { bit = 5, value = 32, name = "No Crush", desc = "Cannot do crushing blows" },
+            { bit = 5, value = 32, name = "No Crushing Blows", desc = "Cannot do crushing blows" },
             { bit = 6, value = 64, name = "No XP at Kill", desc = "No experience from kill" },
             { bit = 7, value = 128, name = "Trigger", desc = "Trigger NPC (invisible)" },
             { bit = 8, value = 256, name = "No Taunt", desc = "Cannot be taunted" },
@@ -227,24 +234,24 @@ FlagEditor.FLAG_DEFINITIONS = {
             { bit = 10, value = 1024, name = "Ghost Visibility", desc = "Visible as ghost" },
             { bit = 11, value = 2048, name = "Use Offhand Attack", desc = "Uses offhand attacks" },
             { bit = 12, value = 4096, name = "No Sell Vendor", desc = "Players can't sell to this vendor" },
-            { bit = 13, value = 8192, name = "Ignore Pathfinding", desc = "Ignores pathfinding" },
-            { bit = 14, value = 16384, name = "Immunity Knockback", desc = "Immune to knockback" },
-            { bit = 15, value = 32768, name = "Ignore Combat", desc = "Ignored in combat calculations" },
-            { bit = 16, value = 65536, name = "Worldevent", desc = "Active during world events only" },
-            { bit = 17, value = 131072, name = "Guard", desc = "Is a guard NPC" },
-            { bit = 18, value = 262144, name = "Ignore Feign Death", desc = "Ignores feign death" },
-            { bit = 19, value = 524288, name = "No Crit", desc = "Cannot be critically hit" },
-            { bit = 20, value = 1048576, name = "No Skill Gain", desc = "No skill gain from fighting" },
-            { bit = 21, value = 2097152, name = "Taunt Diminish", desc = "Taunt immunity after 5 taunts" },
-            { bit = 22, value = 4194304, name = "All Diminish", desc = "All CC subject to diminishing returns" },
-            { bit = 23, value = 8388608, name = "Log Kill Credit Only", desc = "Kill credit but no loot/xp" },
-            { bit = 24, value = 16777216, name = "Dual Wield Forced", desc = "Forced to dual wield" },
-            { bit = 25, value = 33554432, name = "No Player Damage Req", desc = "No player damage requirement" },
-            { bit = 26, value = 67108864, name = "Unused 26", desc = "Unused flag 26" },
-            { bit = 27, value = 134217728, name = "Unused 27", desc = "Unused flag 27" },
+            { bit = 13, value = 8192, name = "Cannot Enter Combat", desc = "Creature cannot enter combat" },
+            { bit = 14, value = 16384, name = "Worldevent", desc = "Active during world events only" },
+            { bit = 15, value = 32768, name = "Guard", desc = "Is a guard NPC" },
+            { bit = 16, value = 65536, name = "Ignore Feign Death", desc = "Ignores feign death" },
+            { bit = 17, value = 131072, name = "No Crit", desc = "Cannot be critically hit" },
+            { bit = 18, value = 262144, name = "No Skill Gains", desc = "No skill gain from fighting" },
+            { bit = 19, value = 524288, name = "Obeys Taunt Diminishing", desc = "Taunt subject to diminishing returns" },
+            { bit = 20, value = 1048576, name = "All Diminish", desc = "All CC subject to diminishing returns" },
+            { bit = 21, value = 2097152, name = "No Player Damage Req", desc = "No player damage requirement for loot" },
+            { bit = 22, value = 4194304, name = "Unk 22", desc = "Unknown/Unused flag 22" },
+            { bit = 23, value = 8388608, name = "Unk 23", desc = "Unknown/Unused flag 23" },
+            { bit = 24, value = 16777216, name = "Unk 24", desc = "Unknown/Unused flag 24" },
+            { bit = 25, value = 33554432, name = "Unk 25", desc = "Unknown/Unused flag 25" },
+            { bit = 26, value = 67108864, name = "Unk 26", desc = "Unknown/Unused flag 26" },
+            { bit = 27, value = 134217728, name = "Unk 27", desc = "Unknown/Unused flag 27" },
             { bit = 28, value = 268435456, name = "Dungeon Boss", desc = "Dungeon boss (requires special kill)" },
-            { bit = 29, value = 536870912, name = "Ignore Stat Scaling", desc = "Ignore stat scaling in dungeons" },
-            { bit = 30, value = 1073741824, name = "No Avoid", desc = "Cannot dodge/parry/block" },
+            { bit = 29, value = 536870912, name = "Ignore Pathfinding", desc = "Ignores pathfinding" },
+            { bit = 30, value = 1073741824, name = "Immunity Knockback", desc = "Immune to knockback" },
         }
     },
     
@@ -365,37 +372,37 @@ FlagEditor.FLAG_DEFINITIONS = {
     mechanic_immune_mask = {
         title = "Mechanic Immunities",
         flags = {
-            { bit = 0, value = 1, name = "Charm", desc = "Immune to charm" },
-            { bit = 1, value = 2, name = "Disoriented", desc = "Immune to disorient" },
-            { bit = 2, value = 4, name = "Disarm", desc = "Immune to disarm" },
-            { bit = 3, value = 8, name = "Distract", desc = "Immune to distract" },
-            { bit = 4, value = 16, name = "Fear", desc = "Immune to fear" },
-            { bit = 5, value = 32, name = "Grip", desc = "Immune to death grip" },
-            { bit = 6, value = 64, name = "Root", desc = "Immune to root" },
-            { bit = 7, value = 128, name = "Slow Attack", desc = "Immune to attack speed debuffs" },
-            { bit = 8, value = 256, name = "Silence", desc = "Immune to silence" },
-            { bit = 9, value = 512, name = "Sleep", desc = "Immune to sleep" },
-            { bit = 10, value = 1024, name = "Snare", desc = "Immune to snare/slow" },
-            { bit = 11, value = 2048, name = "Stun", desc = "Immune to stun" },
-            { bit = 12, value = 4096, name = "Freeze", desc = "Immune to freeze" },
-            { bit = 13, value = 8192, name = "Knockout", desc = "Immune to knockout" },
-            { bit = 14, value = 16384, name = "Bleed", desc = "Immune to bleed" },
-            { bit = 15, value = 32768, name = "Bandage", desc = "Immune to bandage" },
-            { bit = 16, value = 65536, name = "Polymorph", desc = "Immune to polymorph" },
-            { bit = 17, value = 131072, name = "Banish", desc = "Immune to banish" },
-            { bit = 18, value = 262144, name = "Shield", desc = "Immune to shield" },
-            { bit = 19, value = 524288, name = "Shackle", desc = "Immune to shackle" },
-            { bit = 20, value = 1048576, name = "Mount", desc = "Immune to mount" },
-            { bit = 21, value = 2097152, name = "Infected", desc = "Immune to infected" },
-            { bit = 22, value = 4194304, name = "Turn", desc = "Immune to turn undead" },
-            { bit = 23, value = 8388608, name = "Horror", desc = "Immune to horror" },
-            { bit = 24, value = 16777216, name = "Invulnerability", desc = "Immune to invulnerability" },
-            { bit = 25, value = 33554432, name = "Interrupt", desc = "Immune to interrupt" },
-            { bit = 26, value = 67108864, name = "Daze", desc = "Immune to daze" },
-            { bit = 27, value = 134217728, name = "Discovery", desc = "Immune to discovery" },
-            { bit = 28, value = 268435456, name = "Immune Shield", desc = "Immune to immune shield" },
-            { bit = 29, value = 536870912, name = "Sapped", desc = "Immune to sap" },
-            { bit = 30, value = 1073741824, name = "Enraged", desc = "Immune to enrage removal" },
+            { bit = 1, value = 2, name = "Charm", desc = "Immune to charm" },
+            { bit = 2, value = 4, name = "Disoriented", desc = "Immune to disorient" },
+            { bit = 3, value = 8, name = "Disarm", desc = "Immune to disarm" },
+            { bit = 4, value = 16, name = "Distract", desc = "Immune to distract" },
+            { bit = 5, value = 32, name = "Fear", desc = "Immune to fear" },
+            { bit = 6, value = 64, name = "Grip", desc = "Immune to death grip" },
+            { bit = 7, value = 128, name = "Root", desc = "Immune to root" },
+            { bit = 8, value = 256, name = "Slow Attack", desc = "Immune to attack speed debuffs" },
+            { bit = 9, value = 512, name = "Silence", desc = "Immune to silence" },
+            { bit = 10, value = 1024, name = "Sleep", desc = "Immune to sleep" },
+            { bit = 11, value = 2048, name = "Snare", desc = "Immune to snare/slow" },
+            { bit = 12, value = 4096, name = "Stun", desc = "Immune to stun" },
+            { bit = 13, value = 8192, name = "Freeze", desc = "Immune to freeze" },
+            { bit = 14, value = 16384, name = "Knockout", desc = "Immune to knockout" },
+            { bit = 15, value = 32768, name = "Bleed", desc = "Immune to bleed" },
+            { bit = 16, value = 65536, name = "Bandage", desc = "Immune to bandage" },
+            { bit = 17, value = 131072, name = "Polymorph", desc = "Immune to polymorph" },
+            { bit = 18, value = 262144, name = "Banish", desc = "Immune to banish" },
+            { bit = 19, value = 524288, name = "Shield", desc = "Immune to shield" },
+            { bit = 20, value = 1048576, name = "Shackle", desc = "Immune to shackle" },
+            { bit = 21, value = 2097152, name = "Mount", desc = "Immune to mount" },
+            { bit = 22, value = 4194304, name = "Infected", desc = "Immune to infected" },
+            { bit = 23, value = 8388608, name = "Turn", desc = "Immune to turn undead" },
+            { bit = 24, value = 16777216, name = "Horror", desc = "Immune to horror" },
+            { bit = 25, value = 33554432, name = "Invulnerability", desc = "Immune to invulnerability" },
+            { bit = 26, value = 67108864, name = "Interrupt", desc = "Immune to interrupt" },
+            { bit = 27, value = 134217728, name = "Daze", desc = "Immune to daze" },
+            { bit = 28, value = 268435456, name = "Discovery", desc = "Immune to discovery" },
+            { bit = 29, value = 536870912, name = "Immune Shield", desc = "Immune to immune shield" },
+            { bit = 30, value = 1073741824, name = "Sapped", desc = "Immune to sap" },
+            { bit = 31, value = 2147483648, name = "Enraged", desc = "Immune to enrage removal" },
         }
     },
     spell_school_immune_mask = {
@@ -447,71 +454,162 @@ FlagEditor.FLAG_DEFINITIONS = {
 -- Preset templates for common NPC types
 FlagEditor.PRESETS = {
     npcflag = {
-        { name = "Vendor", value = 128, desc = "Basic vendor" },
-        { name = "Repair Vendor", value = 4224, desc = "Vendor with repair" }, -- 128 + 4096
-        { name = "Quest Giver", value = 2, desc = "Gives quests" },
-        { name = "Trainer", value = 16, desc = "Skill/spell trainer" },
-        { name = "Flight Master", value = 8192, desc = "Flight path vendor" },
-        { name = "Innkeeper", value = 65536, desc = "Hearthstone binder" },
-        { name = "Banker", value = 131072, desc = "Bank access" },
-        { name = "Auctioneer", value = 2097152, desc = "Auction house" },
-        { name = "Stable Master", value = 4194304, desc = "Pet stable" },
-        { name = "Full Service Vendor", value = 4354, desc = "Vendor + Repair + Gossip" }, -- 128 + 4096 + 1 + 1
+        { name = "None", value = 0, desc = "No NPC flags" },
+        { name = "Gossip Only", value = 1, desc = "Only has gossip dialog" },
+        { name = "Quest Giver", value = 3, desc = "Quest giver with gossip" }, -- 1 + 2
+        { name = "Vendor", value = 129, desc = "Basic vendor with gossip" }, -- 1 + 128
+        { name = "Repair Vendor", value = 4225, desc = "Vendor + Repair + Gossip" }, -- 1 + 128 + 4096
+        { name = "Food Vendor", value = 641, desc = "Food/Drink vendor" }, -- 1 + 128 + 512
+        { name = "Reagent Vendor", value = 2177, desc = "Reagent vendor" }, -- 1 + 128 + 2048
+        { name = "Ammo Vendor", value = 385, desc = "Ammunition vendor" }, -- 1 + 128 + 256
+        { name = "Poison Vendor", value = 1153, desc = "Poison vendor (Rogue)" }, -- 1 + 128 + 1024
+        { name = "Class Trainer", value = 49, desc = "Class trainer" }, -- 1 + 16 + 32
+        { name = "Profession Trainer", value = 81, desc = "Profession trainer" }, -- 1 + 16 + 64
+        { name = "Flight Master", value = 8193, desc = "Flight path + Gossip" }, -- 1 + 8192
+        { name = "Innkeeper", value = 65537, desc = "Innkeeper + Gossip" }, -- 1 + 65536
+        { name = "Banker", value = 131073, desc = "Banker + Gossip" }, -- 1 + 131072
+        { name = "Guild Banker", value = 8388609, desc = "Guild bank + Gossip" }, -- 1 + 8388608
+        { name = "Auctioneer", value = 2097153, desc = "Auctioneer + Gossip" }, -- 1 + 2097152
+        { name = "Stable Master", value = 4194305, desc = "Stable master + Gossip" }, -- 1 + 4194304
+        { name = "Battlemaster", value = 1048577, desc = "BG queue + Gossip" }, -- 1 + 1048576
+        { name = "Spirit Healer", value = 16385, desc = "Resurrects players" }, -- 1 + 16384
+        { name = "Guild Services", value = 786433, desc = "Petitioner + Tabard + Gossip" }, -- 1 + 262144 + 524288
+        { name = "Full City NPC", value = 8519681, desc = "Bank + Guild Bank + Gossip" }, -- 1 + 131072 + 8388608
+        { name = "Spellclick", value = 16777216, desc = "Vehicle/mount spellclick" },
     },
     unit_flags = {
-        { name = "Non-Attackable", value = 258, desc = "Cannot be attacked" }, -- 2 + 256
-        { name = "Friendly NPC", value = 768, desc = "Immune to players" }, -- 256 + 512
-        { name = "Not Selectable", value = 33554432, desc = "Cannot be targeted" },
-        { name = "Standard NPC", value = 0, desc = "No special flags" },
-        { name = "Quest NPC", value = 2, desc = "Quest related NPC" },
+        { name = "None", value = 0, desc = "No special flags" },
+        { name = "Non-Attackable", value = 2, desc = "Cannot be attacked" },
+        { name = "Immune to PC", value = 256, desc = "Immune to player attacks" },
+        { name = "Immune to NPC", value = 512, desc = "Immune to NPC attacks" },
+        { name = "Immune to All", value = 768, desc = "Immune to all attacks" }, -- 256 + 512
+        { name = "Passive NPC", value = 770, desc = "Non-attackable + Immune" }, -- 2 + 256 + 512
+        { name = "Uninteractible", value = 33554432, desc = "Cannot be selected/targeted" },
+        { name = "Trigger/Invisible", value = 33554434, desc = "Invisible trigger NPC" }, -- 2 + 33554432
+        { name = "Skinnable", value = 67108864, desc = "Can be skinned" },
+        { name = "PvP Flagged", value = 4096, desc = "PvP enabled" },
+        { name = "Silenced", value = 8192, desc = "Cannot cast spells" },
+        { name = "Pacified", value = 131072, desc = "Cannot attack" },
+        { name = "Stunned", value = 262144, desc = "Stunned state" },
+        { name = "In Combat", value = 524288, desc = "Locked in combat" },
+        { name = "Disarmed", value = 2097152, desc = "Weapons disabled" },
+        { name = "Confused", value = 4194304, desc = "Confused/disoriented" },
+        { name = "Fleeing", value = 8388608, desc = "Fear effect" },
+        { name = "Mount", value = 134217728, desc = "Is a mount" },
+        { name = "Sheathed", value = 1073741824, desc = "Weapons sheathed" },
+        { name = "Full Immunity", value = 2147484418, desc = "Immune + Non-attackable" }, -- 2 + 256 + 512 + 2147483648
     },
     type_flags = {
-        { name = "Beast (Tameable)", value = 1, desc = "Hunter pet" },
-        { name = "Herb Node", value = 256, desc = "Herbalism node" },
-        { name = "Mining Node", value = 512, desc = "Mining node" },
-        { name = "Engineering Node", value = 32768, desc = "Engineering salvage" },
-        { name = "Boss", value = 4, desc = "Boss mob" },
-        { name = "Rare Elite", value = 4, desc = "Rare spawn elite" },
+        { name = "None", value = 0, desc = "No type flags" },
+        { name = "Tameable", value = 1, desc = "Can be tamed (Beast)" },
+        { name = "Tameable Exotic", value = 65537, desc = "Exotic pet (Beast Mastery)" }, -- 1 + 65536
+        { name = "Ghost Visible", value = 2, desc = "Visible to dead players" },
+        { name = "Boss", value = 4, desc = "Boss skull/portrait" },
+        { name = "Boss + Ghost", value = 6, desc = "Boss visible to ghosts" }, -- 4 + 2
+        { name = "Herb Node", value = 256, desc = "Herbalism lootable" },
+        { name = "Mining Node", value = 512, desc = "Mining lootable" },
+        { name = "Engineering Node", value = 32768, desc = "Engineering lootable" },
+        { name = "All Gathering", value = 33536, desc = "Herb + Mine + Engineer" }, -- 256 + 512 + 32768
+        { name = "Dead Interact", value = 128, desc = "Interact while dead" },
+        { name = "Mounted Combat", value = 2048, desc = "Can fight while mounted" },
+        { name = "Can Assist", value = 4096, desc = "Can help players" },
+        { name = "Hide Faction", value = 16, desc = "Hide faction in tooltip" },
+        { name = "Force Gossip", value = 134217728, desc = "Always show gossip" },
     },
     flags_extra = {
-        { name = "Civilian", value = 2, desc = "Protected NPC" },
-        { name = "World Boss", value = 1073741824, desc = "Raid boss" }, -- No Avoid flag
-        { name = "Dungeon Boss", value = 268435456, desc = "5-man boss" },
-        { name = "Guard", value = 131072, desc = "City guard" },
-        { name = "Training Dummy", value = 262144, desc = "Ignores combat" },
+        { name = "None", value = 0, desc = "No extra flags" },
+        { name = "Instance Bind", value = 1, desc = "Binds to instance on kill" },
+        { name = "Civilian", value = 2, desc = "Dishonorable kill" },
+        { name = "No XP", value = 64, desc = "No experience on kill" },
+        { name = "Trigger", value = 128, desc = "Invisible trigger NPC" },
+        { name = "No Taunt", value = 256, desc = "Cannot be taunted" },
+        { name = "Guard", value = 32768, desc = "City guard NPC" },
+        { name = "Worldevent", value = 16384, desc = "World event creature" },
+        { name = "Cannot Enter Combat", value = 8192, desc = "Cannot enter combat" },
+        { name = "Training Dummy", value = 8256, desc = "Training dummy" }, -- 64 + 8192
+        { name = "Ignore Feign Death", value = 65536, desc = "Ignores feign death" },
+        { name = "No Crit", value = 131072, desc = "Cannot be crit" },
+        { name = "No Skill Gains", value = 262144, desc = "No weapon skill gains" },
+        { name = "Dungeon Boss", value = 268435456, desc = "5-man dungeon boss" },
+        { name = "Raid Boss", value = 268435457, desc = "Raid boss (instance bind)" }, -- 1 + 268435456
+        { name = "World Boss", value = 268435713, desc = "World boss (no taunt)" }, -- 1 + 256 + 268435456
+        { name = "Elite Mob", value = 48, desc = "No parry/block" }, -- 4 + 16 + 32 - actually just no crushing
+        { name = "Immune Knockback", value = 1073741824, desc = "Immune to knockback" },
+        { name = "Ignore Pathfinding", value = 536870912, desc = "Ignores pathfinding" },
     },
     unit_flags2 = {
-        { name = "Standard", value = 0, desc = "No special flags" },
-        { name = "Feign Death", value = 1, desc = "Creature feigning death" },
-        { name = "Hide Model", value = 2, desc = "Model is hidden" },
+        { name = "None", value = 0, desc = "No special flags" },
+        { name = "Feign Death", value = 1, desc = "Feigning death" },
+        { name = "Hide Body", value = 2, desc = "Hide unit model" },
+        { name = "Ignore Reputation", value = 4, desc = "Ignore reputation for aggro" },
         { name = "Mirror Image", value = 16, desc = "Mirror image clone" },
-        { name = "Can't Turn", value = 524288, desc = "Cannot turn or rotate" },
+        { name = "Instant Spawn", value = 32, desc = "No fade-in on spawn" },
+        { name = "Disarm Offhand", value = 128, desc = "Offhand disabled" },
+        { name = "Disarm Ranged", value = 1024, desc = "Ranged weapon disabled" },
+        { name = "Disarm All", value = 1152, desc = "All weapons disabled" }, -- 128 + 1024
         { name = "Regenerate Power", value = 2048, desc = "Regenerates power" },
+        { name = "Prevent Spell Click", value = 8192, desc = "No spell click" },
+        { name = "Allow Enemy Interact", value = 16384, desc = "Enemies can interact" },
+        { name = "Cannot Turn", value = 32768, desc = "Cannot rotate" },
+        { name = "Play Death Anim", value = 131072, desc = "Special death animation" },
+        { name = "Allow Cheat Spells", value = 262144, desc = "GM cheat spells allowed" },
     },
     dynamicflags = {
         { name = "None", value = 0, desc = "No dynamic flags" },
-        { name = "Lootable", value = 1, desc = "Has loot to be looted" },
-        { name = "Tapped", value = 4, desc = "Already tapped" },
+        { name = "Lootable", value = 1, desc = "Has loot available" },
+        { name = "Track Unit", value = 2, desc = "Being tracked" },
+        { name = "Tapped", value = 4, desc = "Tapped by another" },
+        { name = "Tapped By Player", value = 8, desc = "Tapped by player" },
+        { name = "Special Info", value = 16, desc = "Show special info" },
         { name = "Dead", value = 32, desc = "Unit is dead" },
-        { name = "Lootable + Dead", value = 33, desc = "Dead with loot" },
+        { name = "Refer-A-Friend", value = 64, desc = "RAF linked" },
+        { name = "Tapped By Threat", value = 128, desc = "Tapped by threat list" },
+        { name = "Lootable + Dead", value = 33, desc = "Dead with loot" }, -- 1 + 32
+        { name = "Dead + Tapped", value = 36, desc = "Dead and tapped" }, -- 4 + 32
+        { name = "Full Corpse", value = 37, desc = "Lootable dead tapped" }, -- 1 + 4 + 32
     },
     mechanic_immune_mask = {
         { name = "None", value = 0, desc = "No immunities" },
-        { name = "CC Immune", value = 13019, desc = "Immune to most CC (Charm, Fear, Root, Silence, Sleep, Snare, Stun)" }, -- 1+2+8+16+64+256+512+1024+2048+8192
-        { name = "Boss Standard", value = 650854399, desc = "Standard boss immunities" }, -- Common boss immunities
-        { name = "Undead", value = 8388608, desc = "Immune to horror" },
-        { name = "Mechanical", value = 8389120, desc = "Immune to bleed and horror" }, -- 16384 + 8388608 + 512
-        { name = "Elemental", value = 16908800, desc = "Immune to bleed, poison, sleep" }, -- 16384 + 512 + 16777216
-        { name = "Charm Immune", value = 1, desc = "Immune to charm effects" },
-        { name = "Fear Immune", value = 16, desc = "Immune to fear effects" },
-        { name = "Stun Immune", value = 2048, desc = "Immune to stun effects" },
-        { name = "Root Immune", value = 64, desc = "Immune to root effects" },
-        { name = "Silence Immune", value = 256, desc = "Immune to silence effects" },
-        { name = "Sleep Immune", value = 512, desc = "Immune to sleep effects" },
-        { name = "Snare Immune", value = 1024, desc = "Immune to snare effects" },
-        { name = "Disarm Immune", value = 4, desc = "Immune to disarm effects" },
-        { name = "PvP Trinket", value = 65, desc = "Removes Root and Charm" }, -- 1 + 64
-        { name = "All Immunities", value = 1073741823, desc = "Immune to all mechanics" }, -- All bits except bit 31
+        -- Common presets
+        { name = "CC Immune", value = 7842, desc = "Charm, Fear, Root, Silence, Sleep, Snare, Stun" }, -- 2+32+128+512+1024+2048+4096
+        { name = "Boss Standard", value = 617299967, desc = "Standard raid boss immunities" },
+        { name = "Dungeon Boss", value = 7874, desc = "5-man boss (CC + Fear)" }, -- CC Immune + extra
+        { name = "Movement Immune", value = 6272, desc = "Root, Snare, Stun" }, -- 128+2048+4096
+        { name = "Mind Control Immune", value = 2, desc = "Immune to charm/MC" }, -- 1 << 1
+        { name = "Interrupt Immune", value = 67108864, desc = "Cannot be interrupted" }, -- 1 << 26
+        { name = "Taunt Immune", value = 0, desc = "Use No Taunt in flags_extra instead" },
+        -- Creature types
+        { name = "Undead", value = 16777216, desc = "Immune to horror" }, -- 1 << 24
+        { name = "Mechanical", value = 16810496, desc = "Bleed, Sleep, Horror immune" }, -- 32768+1024+16777216
+        { name = "Elemental", value = 33587200, desc = "Bleed, Sleep, Invuln immune" }, -- 32768+1024+33554432
+        { name = "Demon", value = 16777218, desc = "Charm, Horror immune" }, -- 2+16777216
+        { name = "Dragonkin", value = 1024, desc = "Sleep immune" }, -- 1 << 10
+        -- Individual immunities
+        { name = "Charm", value = 2, desc = "Immune to charm" }, -- 1 << 1
+        { name = "Disorient", value = 4, desc = "Immune to disorient" }, -- 1 << 2
+        { name = "Disarm", value = 8, desc = "Immune to disarm" }, -- 1 << 3
+        { name = "Distract", value = 16, desc = "Immune to distract" }, -- 1 << 4
+        { name = "Fear", value = 32, desc = "Immune to fear" }, -- 1 << 5
+        { name = "Grip", value = 64, desc = "Immune to death grip" }, -- 1 << 6
+        { name = "Root", value = 128, desc = "Immune to root" }, -- 1 << 7
+        { name = "Slow Attack", value = 256, desc = "Immune to attack speed slow" }, -- 1 << 8
+        { name = "Silence", value = 512, desc = "Immune to silence" }, -- 1 << 9
+        { name = "Sleep", value = 1024, desc = "Immune to sleep" }, -- 1 << 10
+        { name = "Snare", value = 2048, desc = "Immune to snare/slow" }, -- 1 << 11
+        { name = "Stun", value = 4096, desc = "Immune to stun" }, -- 1 << 12
+        { name = "Freeze", value = 8192, desc = "Immune to freeze" }, -- 1 << 13
+        { name = "Knockout", value = 16384, desc = "Immune to knockout" }, -- 1 << 14
+        { name = "Bleed", value = 32768, desc = "Immune to bleed" }, -- 1 << 15
+        { name = "Polymorph", value = 131072, desc = "Immune to polymorph" }, -- 1 << 17
+        { name = "Banish", value = 262144, desc = "Immune to banish" }, -- 1 << 18
+        { name = "Shackle", value = 1048576, desc = "Immune to shackle undead" }, -- 1 << 20
+        { name = "Horror", value = 16777216, desc = "Immune to horror" }, -- 1 << 24
+        { name = "Sap", value = 1073741824, desc = "Immune to sap" }, -- 1 << 30
+        -- Combined
+        { name = "Anti-Mage", value = 131586, desc = "Silence, Polymorph, Counterspell" }, -- 512+131072+2
+        { name = "Anti-Rogue", value = 1073743880, desc = "Sap, Disarm, Stun" }, -- 1073741824+8+4096+2048
+        { name = "PvP Trinket", value = 7970, desc = "Removes most PvP CC" }, -- Charm+Fear+Stun+Root+Snare+Sleep
+        { name = "All Immunities", value = 4294967294, desc = "Immune to ALL mechanics" }, -- All bits 1-31
     },
     spell_school_immune_mask = {
         { name = "None", value = 0, desc = "No school immunities" },
@@ -644,31 +742,33 @@ function FlagEditor.CreateDialog()
     presetLabel:SetText("Presets:")
     presetLabel:SetTextColor(UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3], 1)
     
-    -- Create styled dropdown instead of UIDropDownMenuTemplate
-    local presetItems = {}
-    frame.presetDropdown = CreateFullyStyledDropdown(presetFrame, 200, presetItems, "Select preset...", 
-        function(value, item)
-            if value == -1 then
-                -- Custom selected, do nothing
-            else
-                FlagEditor.ApplyPreset(value)
-            end
-        end
-    )
-    frame.presetDropdown:SetPoint("LEFT", presetLabel, "RIGHT", 10, 0)
+    -- Create preset selector container (will be populated in SetupPresetDropdown)
+    frame.presetContainer = CreateFrame("Frame", nil, presetFrame)
+    frame.presetContainer:SetSize(250, 50)
+    frame.presetContainer:SetPoint("LEFT", presetLabel, "RIGHT", 10, 10)
     
+    -- Search box for filtering flags
+    local CreateStyledSearchBox = _G.CreateStyledSearchBox
+    if CreateStyledSearchBox then
+        local searchFrame, searchEditBox = CreateStyledSearchBox(frame, 460, "Filter flags...", function(text)
+            FlagEditor.FilterFlags(text)
+        end)
+        searchFrame:SetPoint("TOPLEFT", 10, -110)
+        frame.searchBox = searchEditBox
+    end
+
     -- Scroll frame for checkboxes using UIStyleLibrary if available
     local content, scrollBar, updateScrollBar
     if _G.CreateScrollableFrame then
         local container
         container, content, scrollBar, updateScrollBar = _G.CreateScrollableFrame(frame, 460, 430)
-        container:SetPoint("TOPLEFT", 10, -110)
+        container:SetPoint("TOPLEFT", 10, -140)
         container:SetPoint("BOTTOMRIGHT", -10, 50)
         frame.updateScrollBar = updateScrollBar
     else
         -- Fallback to standard scroll frame
         local scrollFrame = CreateFrame("ScrollFrame", "FlagEditorScrollFrame", frame, "UIPanelScrollFrameTemplate")
-        scrollFrame:SetPoint("TOPLEFT", 10, -110)
+        scrollFrame:SetPoint("TOPLEFT", 10, -140)
         scrollFrame:SetPoint("BOTTOMRIGHT", -30, 50)
         
         content = CreateFrame("Frame", nil, scrollFrame)
@@ -847,47 +947,94 @@ function FlagEditor.PopulateFlags()
     FlagEditor.SetupPresetDropdown()
 end
 
--- Setup preset dropdown
+-- Filter checkboxes by search text
+function FlagEditor.FilterFlags(text)
+    local content = FlagEditor.frame.content
+    if not content or not content.checkboxes then
+        return
+    end
+
+    local filter = (text or ""):lower()
+    local yOffset = -35
+    for _, container in ipairs(content.checkboxes) do
+        local name = container.checkbox.flag.name:lower()
+        local visible = (filter == "" or name:find(filter, 1, true))
+        if visible then
+            container:ClearAllPoints()
+            container:SetPoint("TOPLEFT", 10, yOffset)
+            container:SetPoint("TOPRIGHT", -10, yOffset)
+            container:Show()
+            yOffset = yOffset - 30
+        else
+            container:Hide()
+        end
+    end
+
+    content:SetHeight(math.abs(yOffset) + 20)
+    if FlagEditor.frame.updateScrollBar then
+        FlagEditor.frame.updateScrollBar()
+    end
+end
+
+-- Setup preset dropdown using EnumSelector
 function FlagEditor.SetupPresetDropdown()
-    local dropdown = FlagEditor.frame.presetDropdown
+    local container = FlagEditor.frame.presetContainer
     local presets = FlagEditor.PRESETS[FlagEditor.currentFlagType]
-    
-    -- Build items for styled dropdown
+
+    -- Hide and cleanup existing selector
+    if FlagEditor.frame.presetSelector then
+        FlagEditor.frame.presetSelector:Hide()
+        FlagEditor.frame.presetSelector:SetParent(nil)
+    end
+
+    -- Convert presets to EnumSelector format
     local items = {}
-    
-    -- Add "Custom" option
-    table.insert(items, {
-        text = "Custom",
-        value = -1
-    })
-    
-    -- Add presets if available
+
     if presets then
         for _, preset in ipairs(presets) do
             table.insert(items, {
-                text = preset.name,
-                value = preset.value
+                id = preset.value,
+                name = preset.name,
+                desc = preset.desc or "",
+                category = "PRESET"
             })
         end
     end
-    
-    -- Update dropdown items (recreate dropdown with new items)
-    local parent = dropdown:GetParent()
-    local point, relativeTo, relativePoint, x, y = dropdown:GetPoint()
-    dropdown:Hide()
-    dropdown:SetParent(nil)
-    
-    -- Create new dropdown with updated items
-    FlagEditor.frame.presetDropdown = CreateFullyStyledDropdown(parent, 200, items, "Select preset...", 
-        function(value, item)
-            if value == -1 then
-                -- Custom selected, do nothing
-            else
-                FlagEditor.ApplyPreset(value)
+
+    -- Sort by value
+    table.sort(items, function(a, b) return a.id < b.id end)
+
+    -- Create EnumSelector if available, fallback to dropdown
+    if CreateEnumSelector and #items > 0 then
+        FlagEditor.frame.presetSelector = CreateEnumSelector(container, {
+            width = 240,
+            label = "",
+            items = items,
+            currentValue = FlagEditor.currentValue,
+            onSelect = function(item)
+                if item then
+                    FlagEditor.ApplyPreset(item.id)
+                end
+            end
+        })
+        FlagEditor.frame.presetSelector:SetPoint("TOPLEFT", 0, 0)
+    else
+        -- Fallback to original dropdown
+        local dropdownItems = {{ text = "Custom", value = -1 }}
+        if presets then
+            for _, preset in ipairs(presets) do
+                table.insert(dropdownItems, { text = preset.name, value = preset.value })
             end
         end
-    )
-    FlagEditor.frame.presetDropdown:SetPoint(point, relativeTo, relativePoint, x, y)
+        FlagEditor.frame.presetSelector = CreateFullyStyledDropdown(container, 200, dropdownItems, "Select preset...",
+            function(value, item)
+                if value ~= -1 then
+                    FlagEditor.ApplyPreset(value)
+                end
+            end
+        )
+        FlagEditor.frame.presetSelector:SetPoint("TOPLEFT", 0, -10)
+    end
 end
 
 -- Apply a preset value
@@ -921,10 +1068,9 @@ function FlagEditor.UpdateValue()
     FlagEditor.currentValue = value
     FlagEditor.UpdateDisplay()
     
-    -- Reset dropdown to custom - for styled dropdown, we need to update the text manually
-    if FlagEditor.frame.presetDropdown and FlagEditor.frame.presetDropdown.text then
-        FlagEditor.frame.presetDropdown.text:SetText("Custom")
-        FlagEditor.frame.presetDropdown.value = -1
+    -- Reset selector to show custom value
+    if FlagEditor.frame.presetSelector and FlagEditor.frame.presetSelector.SetValue then
+        FlagEditor.frame.presetSelector:SetValue(nil)
     end
 end
 
@@ -946,10 +1092,9 @@ function FlagEditor.ClearAll()
         end
     end
     
-    -- Reset dropdown to custom - for styled dropdown
-    if FlagEditor.frame.presetDropdown and FlagEditor.frame.presetDropdown.text then
-        FlagEditor.frame.presetDropdown.text:SetText("Custom")
-        FlagEditor.frame.presetDropdown.value = -1
+    -- Reset selector
+    if FlagEditor.frame.presetSelector and FlagEditor.frame.presetSelector.SetValue then
+        FlagEditor.frame.presetSelector:SetValue(nil)
     end
 end
 
@@ -991,6 +1136,11 @@ function FlagEditor.Open(flagType, currentValue, callback)
         FlagEditor.frame.title:SetText("Flag Editor - " .. flagDef.title)
     end
     
+    -- Clear search box
+    if FlagEditor.frame.searchBox then
+        FlagEditor.frame.searchBox:SetText("")
+    end
+
     -- Populate flags
     FlagEditor.PopulateFlags()
     

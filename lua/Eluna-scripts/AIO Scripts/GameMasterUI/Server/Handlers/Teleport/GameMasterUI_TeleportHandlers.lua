@@ -560,6 +560,62 @@ function TeleportHandlers.DuplicateTeleportLocation(player, locationId, newName)
     end
 end
 
+-- Update teleport location with full coordinates
+function TeleportHandlers.UpdateTeleportLocationFull(player, locationId, newName, x, y, z, o, mapId)
+    if player:GetGMRank() < 3 then
+        Utils.sendMessage(player, "error", "You need GM rank 3+ to edit teleport locations.")
+        return
+    end
+
+    -- Validate numeric inputs
+    locationId = tonumber(locationId)
+    x = tonumber(x)
+    y = tonumber(y)
+    z = tonumber(z)
+    o = tonumber(o)
+    mapId = tonumber(mapId)
+
+    if not (locationId and x and y and z and o and mapId) then
+        Utils.sendMessage(player, "error", "Invalid coordinate values.")
+        return
+    end
+
+    -- Sanitize name
+    if not newName or newName == "" then
+        Utils.sendMessage(player, "error", "Name cannot be empty.")
+        return
+    end
+    newName = newName:gsub("'", "''")
+    if #newName > 100 then newName = newName:sub(1, 100) end
+
+    -- Verify location exists
+    local checkQuery = string.format("SELECT id FROM game_tele WHERE id = %d", locationId)
+    local checkResult = WorldDBQuery(checkQuery)
+    if not checkResult then
+        Utils.sendMessage(player, "error", "Location not found.")
+        return
+    end
+
+    local query = string.format(
+        "UPDATE game_tele SET name = '%s', position_x = %.6f, position_y = %.6f, "
+        .. "position_z = %.6f, orientation = %.6f, map = %d WHERE id = %d",
+        newName, x, y, z, o, mapId, locationId)
+
+    WorldDBExecute(query)
+
+    -- Clear cache
+    teleportCache.data = nil
+
+    Utils.sendMessage(player, "success", "Updated teleport location: " .. newName)
+end
+
+-- Send player's current position to client (for "Use My Position" button)
+function TeleportHandlers.GetMyPosition(player)
+    if player:GetGMRank() < 2 then return end
+    AIO.Handle(player, "GameMasterSystem", "ReceiveMyPosition",
+        player:GetX(), player:GetY(), player:GetZ(), player:GetO(), player:GetMapId())
+end
+
 -- Teleport party to location
 function TeleportHandlers.TeleportPartyToLocation(player, locationId)
     -- Validate GM permissions
@@ -742,6 +798,8 @@ function TeleportHandlers.RegisterHandlers(gms, config, utils, database, dbHelpe
     -- Register CRUD handlers
     GameMasterSystem.CreateTeleportAtCurrentPosition = TeleportHandlers.CreateTeleportAtCurrentPosition
     GameMasterSystem.UpdateTeleportLocation = TeleportHandlers.UpdateTeleportLocation
+    GameMasterSystem.UpdateTeleportLocationFull = TeleportHandlers.UpdateTeleportLocationFull
+    GameMasterSystem.GetMyPosition = TeleportHandlers.GetMyPosition
     GameMasterSystem.DeleteTeleportLocation = TeleportHandlers.DeleteTeleportLocation
     GameMasterSystem.DuplicateTeleportLocation = TeleportHandlers.DuplicateTeleportLocation
     GameMasterSystem.TeleportPartyToLocation = TeleportHandlers.TeleportPartyToLocation

@@ -17,14 +17,15 @@ local PlayerSpellHandlers = {}
 local subModules = {}
 
 -- Module dependencies (will be injected)
-local GameMasterSystem, Config, Utils, Database, DatabaseHelper
+local GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper
 
-function PlayerSpellHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+function PlayerSpellHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     GameMasterSystem = gms
     Config = config
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
+    DatabaseErrorHelper = dbErrorHelper
     
     -- Set up package path for sub-modules
     local scriptPath = debug.getinfo(1, "S").source:sub(2)
@@ -44,7 +45,7 @@ function PlayerSpellHandlers.RegisterHandlers(gms, config, utils, database, dbHe
     subModules.auraHandlers = PlayerSpellAuraHandlers
     
     -- Register all sub-module handlers
-    SpellDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+    SpellDataHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     SpellEntityHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
     PlayerSpellManagementHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
     PlayerSpellAuraHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)

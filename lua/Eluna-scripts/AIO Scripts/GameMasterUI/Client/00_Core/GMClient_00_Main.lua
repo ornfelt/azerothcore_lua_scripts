@@ -53,6 +53,15 @@ _G.GMModels = {}     -- Model management
 _G.GMMenus = {}      -- Menu system
 _G.GMDataHandler = {} -- Data filtering and management
 
+-- Namespace guard used by all client modules
+function _G.GM_RequireNamespace()
+    if not _G.GameMasterSystem then
+        print("[ERROR] GameMasterSystem namespace not found!")
+        return false
+    end
+    return true
+end
+
 -- Debug flag (can be overridden by config)
 _G.GM_DEBUG = false
 

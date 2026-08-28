@@ -64,13 +64,46 @@ function TemplateUI.CreateDialog(CONFIG, onClose, onSave, onReset, onPreview, on
     entryContainer:SetPoint("TOPRIGHT", titleBar, "BOTTOMRIGHT", 0, -5)
     frame.entryContainer = entryContainer
     
-    -- Current entry label (for edit mode)
-    local currentLabel = entryContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    currentLabel:SetPoint("LEFT", 10, 0)
-    currentLabel:SetText("Current Entry ID: ")
-    currentLabel:SetTextColor(UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3], 1)
-    currentLabel:Hide()
-    entryContainer.currentLabel = currentLabel
+    -- Current entry label prefix (for edit mode)
+    local currentPrefix = entryContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    currentPrefix:SetPoint("LEFT", 10, 0)
+    currentPrefix:SetText("Current Entry ID:")
+    currentPrefix:SetTextColor(UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3], 1)
+    currentPrefix:Hide()
+    entryContainer.currentPrefix = currentPrefix
+
+    -- Copyable entry ID edit box
+    local currentEntry = CreateFrame("EditBox", nil, entryContainer)
+    currentEntry:SetSize(100, 20)
+    currentEntry:SetPoint("LEFT", currentPrefix, "RIGHT", 6, 0)
+    currentEntry:SetFontObject("GameFontNormal")
+    currentEntry:SetTextColor(UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3], 1)
+    currentEntry:SetAutoFocus(false)
+    currentEntry:EnableMouse(true)
+    currentEntry:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    currentEntry:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    currentEntry:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    currentEntry:SetScript("OnChar", function(self) self:SetText(self.entryValue or "") end)
+    currentEntry:Hide()
+    entryContainer.currentEntry = currentEntry
+
+    -- Backward compat: currentLabel wraps both elements
+    entryContainer.currentLabel = {
+        SetText = function(_, text)
+            local id = text:match(":%s*(.+)") or text
+            currentEntry.entryValue = id
+            currentEntry:SetText(id)
+        end,
+        Show = function()
+            currentPrefix:Show()
+            currentEntry:Show()
+        end,
+        Hide = function()
+            currentPrefix:Hide()
+            currentEntry:Hide()
+        end,
+        GetText = function() return "Current Entry ID: " .. (currentEntry.entryValue or "") end,
+    }
     
     -- Next available entry label (for duplicate mode)
     local nextLabel = entryContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -505,8 +538,144 @@ function TemplateUI.CreateField(parent, field, CONFIG, onFieldChanged)
                 self.lastValue = currentValueStr
             end
         end)
+
+    elseif field.type == "number_pair" then
+        -- Create container for 2 side-by-side number inputs (for model IDs, etc.)
+        local leftField = field.fields[1]
+        local rightField = field.fields[2]
+
+        -- Dimensions for compact 2x2 grid layout (centered in form)
+        local leftOffset = 40  -- Offset from left to center the pair fields
+        local pairLabelWidth = 90
+        local pairInputWidth = 100
+        local gap = 30
+
+        -- Left field: label + input
+        local leftLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        leftLabel:SetPoint("LEFT", leftOffset, 0)
+        leftLabel:SetWidth(pairLabelWidth)
+        leftLabel:SetJustifyH("RIGHT")
+        leftLabel:SetText(leftField.label)
+        leftLabel:SetTextColor(UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3], 1)
+
+        if parent.fieldLabels then
+            table.insert(parent.fieldLabels, leftLabel)
+        end
+
+        local leftInput = CreateStyledEditBox(container, pairInputWidth, true)
+        leftInput:SetPoint("LEFT", leftLabel, "RIGHT", 10, 0)
+
+        local leftEditBox = leftInput.editBox or leftInput
+        leftEditBox.field = leftField
+        leftEditBox.lastValue = ""
+
+        leftEditBox:SetScript("OnEditFocusGained", function(self)
+            self.lastValue = self:GetText() or ""
+        end)
+
+        leftEditBox:SetScript("OnEscapePressed", function(self)
+            self:SetText(self.lastValue or "")
+            self:ClearFocus()
+        end)
+
+        leftEditBox:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+        end)
+
+        leftEditBox:SetScript("OnEditFocusLost", function(self)
+            local text = self:GetText() or ""
+            local cleaned = text:gsub("[^0-9]", "")
+            if cleaned ~= text then
+                self:SetText(cleaned)
+                text = cleaned
+            end
+            local value = tonumber(text) or 0
+
+            local currentValueStr = tostring(value)
+            if currentValueStr ~= self.lastValue then
+                if onFieldChanged then
+                    onFieldChanged(self.field.key, value)
+                end
+                self.lastValue = currentValueStr
+            end
+        end)
+
+        -- Right field: label + input
+        local rightLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        rightLabel:SetPoint("LEFT", leftInput, "RIGHT", gap, 0)
+        rightLabel:SetWidth(pairLabelWidth)
+        rightLabel:SetJustifyH("RIGHT")
+        rightLabel:SetText(rightField.label)
+        rightLabel:SetTextColor(UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3], 1)
+
+        if parent.fieldLabels then
+            table.insert(parent.fieldLabels, rightLabel)
+        end
+
+        local rightInput = CreateStyledEditBox(container, pairInputWidth, true)
+        rightInput:SetPoint("LEFT", rightLabel, "RIGHT", 10, 0)
+
+        local rightEditBox = rightInput.editBox or rightInput
+        rightEditBox.field = rightField
+        rightEditBox.lastValue = ""
+
+        rightEditBox:SetScript("OnEditFocusGained", function(self)
+            self.lastValue = self:GetText() or ""
+        end)
+
+        rightEditBox:SetScript("OnEscapePressed", function(self)
+            self:SetText(self.lastValue or "")
+            self:ClearFocus()
+        end)
+
+        rightEditBox:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+        end)
+
+        rightEditBox:SetScript("OnEditFocusLost", function(self)
+            local text = self:GetText() or ""
+            local cleaned = text:gsub("[^0-9]", "")
+            if cleaned ~= text then
+                self:SetText(cleaned)
+                text = cleaned
+            end
+            local value = tonumber(text) or 0
+
+            local currentValueStr = tostring(value)
+            if currentValueStr ~= self.lastValue then
+                if onFieldChanged then
+                    onFieldChanged(self.field.key, value)
+                end
+                self.lastValue = currentValueStr
+            end
+        end)
+
+        -- Store both inputs for value setting/getting
+        input = { leftInput = leftInput, rightInput = rightInput, isPair = true }
+        container.pairFields = { leftField, rightField }
+
+        -- Tooltips for each side
+        if leftField.tooltip then
+            leftInput:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(leftField.label, UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3])
+                GameTooltip:AddLine(leftField.tooltip, UISTYLE_COLORS.TextGrey[1], UISTYLE_COLORS.TextGrey[2], UISTYLE_COLORS.TextGrey[3], true)
+                GameTooltip:Show()
+            end)
+            leftInput:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
+
+        if rightField.tooltip then
+            rightInput:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(rightField.label, UISTYLE_COLORS.White[1], UISTYLE_COLORS.White[2], UISTYLE_COLORS.White[3])
+                GameTooltip:AddLine(rightField.tooltip, UISTYLE_COLORS.TextGrey[1], UISTYLE_COLORS.TextGrey[2], UISTYLE_COLORS.TextGrey[3], true)
+                GameTooltip:Show()
+            end)
+            rightInput:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        end
     end
-    
+
     -- Tooltip for container
     if field.tooltip and input then
         container:SetScript("OnEnter", function(self)
@@ -660,7 +829,7 @@ function TemplateUI.SetFieldValue(fieldFrame, value)
                 editBox.lastValue = tostring(value or 0)
             end
         elseif input.SetValue and input.valueMap then
-            -- Set value in dropdown mode  
+            -- Set value in dropdown mode
             local textToSet = input.valueMap[value]
             if textToSet then
                 input:SetValue(value, textToSet)
@@ -668,6 +837,29 @@ function TemplateUI.SetFieldValue(fieldFrame, value)
             else
                 -- If value not in map, just set it directly
                 input:SetValue(value, tostring(value))
+            end
+        end
+    elseif field.type == "number_pair" then
+        -- Handle pair fields - value should be table with both keys
+        if input.isPair and fieldFrame.pairFields then
+            local leftKey = fieldFrame.pairFields[1].key
+            local rightKey = fieldFrame.pairFields[2].key
+            -- Values passed from editedData by key
+            if type(value) == "table" then
+                local leftBox = input.leftInput.editBox or input.leftInput
+                local rightBox = input.rightInput.editBox or input.rightInput
+                if leftBox.SetText then
+                    leftBox:SetText(tostring(value[leftKey] or 0))
+                    if leftBox.lastValue ~= nil then
+                        leftBox.lastValue = tostring(value[leftKey] or 0)
+                    end
+                end
+                if rightBox.SetText then
+                    rightBox:SetText(tostring(value[rightKey] or 0))
+                    if rightBox.lastValue ~= nil then
+                        rightBox.lastValue = tostring(value[rightKey] or 0)
+                    end
+                end
             end
         end
     end

@@ -204,6 +204,7 @@ function EntitySelectionDialog.CreateDialog()
         rangeSlider:SetValueText("%.0f yds")
         rangeSlider:SetOnValueChanged(function(value)
             EntitySelectionDialog.CONFIG.REFRESH_RANGE = value
+            EntitySelectionDialog.RefreshEntities()
         end)
     else
         -- Fallback to basic slider if styled slider not available
@@ -221,6 +222,7 @@ function EntitySelectionDialog.CreateDialog()
         basicSlider:SetScript("OnValueChanged", function(self, value)
             EntitySelectionDialog.CONFIG.REFRESH_RANGE = value
             dialog.rangeText:SetText(value .. " yds")
+            EntitySelectionDialog.RefreshEntities()
         end)
         
         local rangeText = rangeSliderContainer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")

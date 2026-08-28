@@ -13,9 +13,6 @@ local ENABLE_ACCOUNTWIDE_TAXI_PATHS = false
 local ANNOUNCE_ON_LOGIN = false
 local ANNOUNCEMENT = "This server is running the |cFF00B0E8AccountWide Taxi Paths |rlua script."
 
-local DEBUG_MODE = false  -- Toggle debug messages
-local BATCH_SIZE = 500
-
 -- ------------------------------------------------------------------------------------------------
 -- END CONFIG
 -- ------------------------------------------------------------------------------------------------
@@ -23,6 +20,10 @@ local BATCH_SIZE = 500
 if not ENABLE_ACCOUNTWIDE_TAXI_PATHS then return end
 
 local AUtils = AccountWideUtils
+if not AUtils then
+    print("[AccountWide] Missing 00_AccountWideUtils.lua; disabling AccountWide Taxi Paths.")
+    return
+end
 
 local accountTaxiCache = { alliance = {}, horde = {} }
 
@@ -56,20 +57,12 @@ end
 local function batchInsertIgnore(tableName, accountId, nodeIds)
     if #nodeIds == 0 then return end
 
-    local values, count = {}, 0
+    local values = {}
     for i = 1, #nodeIds do
         values[#values + 1] = string.format("(%d,%d)", accountId, nodeIds[i])
-        count = count + 1
-
-        if count == BATCH_SIZE then
-            CharDBExecute(("INSERT IGNORE INTO `%s` (accountId, nodeId) VALUES %s"):format(tableName, table.concat(values, ",")))
-            values, count = {}, 0
-        end
     end
 
-    if count > 0 then
-        CharDBExecute(("INSERT IGNORE INTO `%s` (accountId, nodeId) VALUES %s"):format(tableName, table.concat(values, ",")))
-    end
+    AUtils.insertValuesInBatches(("INSERT IGNORE INTO `%s` (accountId, nodeId) VALUES "):format(tableName), values, 500)
 end
 
 local function OnPlayerLogin(event, player)
@@ -89,16 +82,10 @@ local function OnPlayerLogin(event, player)
     for nodeId in pairs(accountSet) do
         if not player:HasKnownTaxiNode(nodeId) then
             toGrant[#toGrant + 1] = nodeId
-            if DEBUG_MODE then
-                print(string.format("[Taxi]: Player %s (guid=%d) missing nodeId=%d, adding to grant list", player:GetName(), player:GetGUIDLow(), nodeId))
-            end
         end
     end
 
     if #toGrant > 0 then
-        if DEBUG_MODE then
-            print(string.format("[Taxi]: Granting %d nodes to guid=%d", #toGrant, player:GetGUIDLow()))
-        end
         player:SetKnownTaxiNodes(toGrant)
     end
 end
@@ -126,11 +113,6 @@ local function OnPlayerLogout(event, player)
 
     if #toInsert > 0 then
         local tableName = factionTableName(team)
-
-        if DEBUG_MODE then
-            print(string.format("[Taxi]: Inserting %d new nodes for accountId=%d (%s)", #toInsert, accountId, tableName))
-        end
-
         batchInsertIgnore(tableName, accountId, toInsert)
     end
 end

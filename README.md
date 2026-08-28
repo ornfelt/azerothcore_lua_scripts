@@ -182,6 +182,9 @@ lua_vip [lua/lua_vip](lua/lua_vip)
 Mercenaries_Script [lua/Mercenaries_Script](lua/Mercenaries_Script)
 
 
+mod-nbem-scan-and-npcboteqmanager [lua/mod-nbem-scan-and-npcboteqmanager](lua/mod-nbem-scan-and-npcboteqmanager)
+
+
 NetherBot [lua/NetherBot](lua/NetherBot)
 
 

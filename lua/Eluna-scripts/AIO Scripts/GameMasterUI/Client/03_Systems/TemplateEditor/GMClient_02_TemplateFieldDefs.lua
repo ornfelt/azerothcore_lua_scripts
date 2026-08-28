@@ -13,6 +13,14 @@ TemplateFieldDefs.FIELDS = {
     Basic = {
         { key = "name", label = "Name:", type = "text", tooltip = "Creature's display name" },
         { key = "subname", label = "Subname:", type = "text", tooltip = "Title displayed under the name" },
+        { type = "number_pair", fields = {
+            { key = "modelid1", label = "Model ID 1:", min = 0, tooltip = "Primary display model ID (DisplayID from creature_model_info)" },
+            { key = "modelid2", label = "Model ID 2:", min = 0, tooltip = "Secondary display model ID (random selection)" }
+        }},
+        { type = "number_pair", fields = {
+            { key = "modelid3", label = "Model ID 3:", min = 0, tooltip = "Tertiary display model ID (random selection)" },
+            { key = "modelid4", label = "Model ID 4:", min = 0, tooltip = "Quaternary display model ID (random selection)" }
+        }},
         { key = "minlevel", label = "Min Level:", type = "number", min = 1, max = 255, tooltip = "Minimum level" },
         { key = "maxlevel", label = "Max Level:", type = "number", min = 1, max = 255, tooltip = "Maximum level" },
         { key = "faction", label = "Faction:", type = "number", min = 0, tooltip = "Faction template ID" },
@@ -111,15 +119,6 @@ TemplateFieldDefs.FIELDS = {
             {value = 1, text = "Random"},
             {value = 2, text = "Waypoint"},
         }, tooltip = "Default movement behavior" },
-        { key = "InhabitType", label = "Inhabit Type:", type = "dropdown", options = {
-            {value = 1, text = "Ground only"},
-            {value = 2, text = "Water only"},
-            {value = 3, text = "Ground + Water"},
-            {value = 4, text = "Flying"},
-            {value = 5, text = "Ground + Flying"},
-            {value = 6, text = "Water + Flying"},
-            {value = 7, text = "All"},
-        }, tooltip = "Where creature can move" },
     },
     Loot = {
         { key = "lootid", label = "Loot ID:", type = "number", min = 0, tooltip = "Loot table reference" },
@@ -140,6 +139,37 @@ TemplateFieldDefs.FIELDS = {
         { key = "resistance6", label = "Arcane Resistance:", type = "number", min = -32768, max = 32767, tooltip = "Arcane resistance" },
         { key = "AIName", label = "AI Name:", type = "text", tooltip = "SmartAI, NullAI, etc." },
         { key = "ScriptName", label = "Script Name:", type = "text", tooltip = "C++ script name" },
+    },
+    MoveOverride = {
+        { key = "Ground", label = "Ground:", type = "dropdown", options = {
+            {value = 0, text = "None"},
+            {value = 1, text = "Run"},
+            {value = 2, text = "Hover"},
+        }, tooltip = "Ground movement type (creature_template_movement)" },
+        { key = "Swim", label = "Swim:", type = "dropdown", options = {
+            {value = 0, text = "No"},
+            {value = 1, text = "Yes"},
+        }, tooltip = "Can the creature swim" },
+        { key = "Flight", label = "Flight:", type = "dropdown", options = {
+            {value = 0, text = "None"},
+            {value = 1, text = "DisableGravity"},
+            {value = 2, text = "CanFly"},
+        }, tooltip = "Flight movement type" },
+        { key = "Rooted", label = "Rooted:", type = "dropdown", options = {
+            {value = 0, text = "No"},
+            {value = 1, text = "Yes"},
+        }, tooltip = "Creature is rooted in place" },
+        { key = "Chase", label = "Chase:", type = "dropdown", options = {
+            {value = 0, text = "Run"},
+            {value = 1, text = "CanWalk"},
+            {value = 2, text = "AlwaysWalk"},
+        }, tooltip = "Chase movement behavior" },
+        { key = "Random", label = "Random:", type = "dropdown", options = {
+            {value = 0, text = "Walk"},
+            {value = 1, text = "CanRun"},
+            {value = 2, text = "AlwaysRun"},
+        }, tooltip = "Random movement behavior" },
+        { key = "InteractionPauseTimer", label = "Interact Pause (ms):", type = "number", min = 0, max = 600000, tooltip = "Pause duration after player interaction (ms)" },
     },
     Addon = {
         { key = "StandState", label = "Stand State:", type = "dropdown", options = {
@@ -200,6 +230,7 @@ TemplateFieldDefs.CONFIG = {
         "Movement",
         "Loot",
         "Advanced",
+        "MoveOverride",
         "Addon"
     }
 }

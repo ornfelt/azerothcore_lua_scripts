@@ -61,6 +61,45 @@ local config = {
     -- (prevents interference while managing server)
     removeFromWorld = true,
 
+    -- Enable/disable item query response packet sending
+    enableItemPackets = false,
+
+    -- =====================================================
+    -- GM Powers Configuration
+    -- =====================================================
+
+    -- Permission tiers: which actions each GM rank can use
+    GM_PERMISSIONS = {
+        [2] = { -- Basic GM
+            toggles = true,
+            actions = {
+                resetCooldowns = true, fullHeal = true, reviveSelf = true,
+                replenish = true, openTeleport = true, teleportTarget = true,
+                appear = true, summon = true, reviveTarget = true,
+                freezeTarget = false, kickTarget = false,
+                savePosition = false, announce = false,
+                refresh = true,
+            }
+        },
+        [3] = { -- Senior GM - all actions
+            toggles = true, actions = "all",
+        },
+    },
+
+    -- Rate limits per action: max attempts within window (seconds)
+    RATE_LIMITS = {
+        teleport      = { max = 10, window = 60 },
+        kick          = { max = 3,  window = 60 },
+        announce      = { max = 2,  window = 60 },
+        savePosition  = { max = 5,  window = 60 },
+    },
+
+    -- Log GM actions to server console
+    LOG_GM_ACTIONS = true,
+
+    -- Log speed changes (disabled by default to avoid spam)
+    LOG_SPEED_CHANGES = false,
+
     -- =====================================================
     -- Logging Configuration
     -- =====================================================
@@ -125,15 +164,15 @@ local config = {
             "creature_template_addon",
             "gameobject_template_addon",
             "item_enchantment_template",
-            "item_loot_template"
+            "item_loot_template",
+            "spell"
         },
 
         -- Required tables that will show warnings if missing
         requiredTables = {
             "creature_template",
             "gameobject_template",
-            "item_template",
-            "spell"
+            "item_template"
         },
 
         -- Fallback behavior when tables are missing

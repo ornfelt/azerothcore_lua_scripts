@@ -60,12 +60,4 @@ function SearchManagerInit.RegisterStrategies()
     print("[SearchManager] Registered: spells, items, players (fuzzy matching enabled)")
 end
 
--- Expose SearchManager for external access
-function SearchManagerInit.GetSearchManager()
-    return SearchManager
-end
-
--- Register global access for console debugging
-_G.GMSearchManager = SearchManager
-
 return SearchManagerInit

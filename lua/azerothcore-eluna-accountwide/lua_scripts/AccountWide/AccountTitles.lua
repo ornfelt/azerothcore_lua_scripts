@@ -9,8 +9,6 @@ local ENABLE_ACCOUNTWIDE_TITLES = false
 local ANNOUNCE_ON_LOGIN = false
 local ANNOUNCEMENT = "This server is running the |cFF00B0E8AccountWide Titles |rlua script."
 
-local BATCH_SIZE = 100 -- SQL batching for fewer DB calls
-
 -------------------------------------------------------------------------------------------------
 -- END CONFIG
 -------------------------------------------------------------------------------------------------
@@ -18,6 +16,10 @@ local BATCH_SIZE = 100 -- SQL batching for fewer DB calls
 if not ENABLE_ACCOUNTWIDE_TITLES then return end
 
 local AUtils = AccountWideUtils
+if not AUtils then
+    print("[AccountWide] Missing 00_AccountWideUtils.lua; disabling AccountWide Titles.")
+    return
+end
 
 -- Valid title IDs from your CharTitles.dbc
 local VALID_TITLE_IDS = {
@@ -33,32 +35,18 @@ local VALID_TITLE_IDS = {
     209, 210, 211, 212, 213
 }
 
-local VALID_TITLE_SET = (function()
-    local set = {}
-    for i = 1, #VALID_TITLE_IDS do set[VALID_TITLE_IDS[i]] = true end
-    return set
-end)()
-
 local accountTitleCache = {}
 local backfillDone = {}
 
 local function insertTitlesBatch(accountId, titleIds)
     if #titleIds == 0 then return end
 
-    local values, count = {}, 0
+    local values = {}
     for i = 1, #titleIds do
         values[#values+1] = string.format("(%d,%d)", accountId, titleIds[i])
-        count = count + 1
-
-        if count == BATCH_SIZE then
-            CharDBExecute("INSERT IGNORE INTO accountwide_titles (accountId, titleId) VALUES " .. table.concat(values, ","))
-            values, count = {}, 0
-        end
     end
 
-    if count > 0 then
-        CharDBExecute("INSERT IGNORE INTO accountwide_titles (accountId, titleId) VALUES " .. table.concat(values, ","))
-    end
+    AUtils.insertValuesInBatches("INSERT IGNORE INTO accountwide_titles (accountId, titleId) VALUES ", values, 100)
 end
 
 local function getOrLoadAccountTitleSet(accountId)

@@ -4,7 +4,7 @@ local EMBLEM_OF_FROST_ID = 49426          -- Item ID for entry cost
 local REGISTRATION_TIME_SECONDS = 60       -- 1 minute for lottery registration
 local CLAIM_TIMEOUT_SECONDS = 120         -- 2 minutes for prize claim
 local PRIZE_ITEM_ID = 49623              -- Prize item ID
-local NPC_ID = 500000                    -- Lottery NPC ID
+local NPC_ID = 500001                    -- Lottery NPC ID
 
 -- State Variables
 local participationTimes = {}             -- Tracks last participation time per player

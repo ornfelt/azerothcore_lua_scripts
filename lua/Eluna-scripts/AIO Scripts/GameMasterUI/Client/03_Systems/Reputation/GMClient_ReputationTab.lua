@@ -8,12 +8,8 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Create GMReputation namespace
 _G.GMReputation = _G.GMReputation or {}
@@ -203,9 +199,9 @@ function GMReputation.CreateTargetSection(parent)
     sectionTitle:SetText("Target Player")
     sectionTitle:SetTextColor(0.9, 0.9, 0.9)
 
-    -- Target input container
+    -- Target input container (full width for narrow panel)
     local inputContainer = CreateFrame("Frame", nil, section)
-    inputContainer:SetSize(300, 26)
+    inputContainer:SetSize(sectionWidth - 30, 26)
     inputContainer:SetPoint("TOPLEFT", section, "TOPLEFT", 15, -30)
     inputContainer:SetBackdrop(UISTYLE_BACKDROPS.Frame)
     inputContainer:SetBackdropColor(UISTYLE_COLORS.ButtonBg[1], UISTYLE_COLORS.ButtonBg[2], UISTYLE_COLORS.ButtonBg[3], 1)
@@ -276,7 +272,7 @@ end
 function GMReputation.CreateFactionSection(parent)
     local section = CreateStyledFrame(parent, UISTYLE_COLORS.OptionBg)
     local sectionWidth = parent:GetWidth() - 40
-    section:SetSize(sectionWidth, 60)
+    section:SetSize(sectionWidth, 90)  -- Taller for stacked dropdowns
     section:SetPoint("TOP", GMReputation.frames.targetSection, "BOTTOM", 0, -10)
     section:Show()
 
@@ -286,10 +282,11 @@ function GMReputation.CreateFactionSection(parent)
     sectionTitle:SetText("Faction Selection")
     sectionTitle:SetTextColor(0.9, 0.9, 0.9)
 
-    -- Expansion dropdown (filter)
+    -- Expansion dropdown (filter) - full width, stacked above faction dropdown
+    local dropdownWidth = sectionWidth - 30
     local expansionDropdown = CreateFullyStyledDropdown(
         section,
-        180,
+        dropdownWidth,
         {
             { text = "All Factions", value = "All Factions" },
             { text = "Classic", value = "Classic" },
@@ -304,10 +301,10 @@ function GMReputation.CreateFactionSection(parent)
     )
     expansionDropdown:SetPoint("TOPLEFT", section, "TOPLEFT", 15, -30)
 
-    -- Faction dropdown (will be populated after server sends data)
+    -- Faction dropdown (stacked below expansion dropdown, full width)
     local factionDropdown = CreateFullyStyledDropdown(
         section,
-        300,
+        dropdownWidth,
         {{ text = "Loading...", value = nil }},
         "Select Faction",
         function(value, item)
@@ -329,7 +326,7 @@ function GMReputation.CreateFactionSection(parent)
         true, -- Enable search
         "Search factions..."
     )
-    factionDropdown:SetPoint("LEFT", expansionDropdown, "RIGHT", 15, 0)
+    factionDropdown:SetPoint("TOPLEFT", expansionDropdown, "BOTTOMLEFT", 0, -5)
 
     GMReputation.frames.factionSection = section
     GMReputation.frames.expansionDropdown = expansionDropdown
@@ -430,7 +427,7 @@ end
 function GMReputation.CreateQuickSetSection(parent)
     local section = CreateStyledFrame(parent, UISTYLE_COLORS.OptionBg)
     local sectionWidth = parent:GetWidth() - 40
-    section:SetSize(sectionWidth, 90)
+    section:SetSize(sectionWidth, 115)  -- Taller for 3 rows of buttons
     section:SetPoint("TOP", GMReputation.frames.reputationSection, "BOTTOM", 0, -10)
     section:Show()
 
@@ -440,12 +437,12 @@ function GMReputation.CreateQuickSetSection(parent)
     sectionTitle:SetText("Quick Set Standing")
     sectionTitle:SetTextColor(0.9, 0.9, 0.9)
 
-    -- Calculate button layout (4 per row, 2 rows)
-    local buttonWidth = 95
+    -- Calculate button layout (3 per row for narrow panel)
+    local buttonsPerRow = 3
+    local buttonWidth = (sectionWidth - 40) / buttonsPerRow
     local buttonHeight = 25
-    local buttonsPerRow = 4
-    local xSpacing = buttonWidth + 10
-    local totalWidth = (buttonsPerRow * buttonWidth) + ((buttonsPerRow - 1) * 10)
+    local xSpacing = buttonWidth + 5
+    local totalWidth = (buttonsPerRow * buttonWidth) + ((buttonsPerRow - 1) * 5)
     local startX = (sectionWidth - totalWidth) / 2
     local startY = -30
 

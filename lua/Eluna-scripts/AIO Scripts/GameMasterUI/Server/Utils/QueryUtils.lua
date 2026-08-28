@@ -205,16 +205,8 @@ function QueryUtils.checkBanStatusAsync(accountId, charGuid, callback)
     )
 
     DatabaseHelper.SafeQueryAsync(charQuery, function(result, error)
-        if result then
-            banResults.character = true
-            onQueryComplete()
-        else
-            -- Try auth database as fallback
-            DatabaseHelper.SafeQueryAsync(charQuery, function(authResult, authError)
-                banResults.character = authResult ~= nil
-                onQueryComplete()
-            end, "auth", true)  -- allowEmptyResults = true (no char bans is valid)
-        end
+        banResults.character = result ~= nil
+        onQueryComplete()
     end, "char", true)  -- allowEmptyResults = true (no char bans is valid)
 end
 
@@ -251,10 +243,6 @@ function QueryUtils.checkBanStatus(accountId, charGuid)
         )
 
         local charResult, charError = DatabaseHelper.SafeQuery(charQuery, "char")
-        if not charResult then
-            -- Try auth database as fallback
-            charResult, charError = DatabaseHelper.SafeQuery(charQuery, "auth")
-        end
 
         if charResult then
             isBanned = true
@@ -360,17 +348,7 @@ function QueryUtils.checkBanStatusBatch(playerList, callback)
                 bannedCharacters[charGuid] = true
             until not result:NextRow()
         end
-
-        -- Try auth database as fallback for any missing character bans
-        DatabaseHelper.SafeQueryAsync(charQuery, function(authResult, authError)
-            if authResult then
-                repeat
-                    local charGuid = authResult:GetUInt32(0)
-                    bannedCharacters[charGuid] = true
-                until not authResult:NextRow()
-            end
-            onBatchQueryComplete()
-        end, "auth", true)  -- allowEmptyResults = true (no char bans is valid)
+        onBatchQueryComplete()
     end, "char", true)  -- allowEmptyResults = true (no char bans is valid)
 end
 

@@ -19,11 +19,11 @@ local CreatureDisplays = {
 }
 
 -- Item packet system
-local PlayerItemCache = {} -- [playerGuid][itemEntry] = true
+local PlayerItemCache = {} -- [playerGuid][itemEntry] = timestamp
+local PLAYER_ITEM_CACHE_MAX = 500
+local PLAYER_ITEM_CACHE_TTL = 600 -- 10 minutes
 
--- CONFIGURATION: Enable/disable item packet sending
--- Set to false to disable all item query response packets
-local ENABLE_ITEM_PACKETS = false
+local ENABLE_ITEM_PACKETS = config.enableItemPackets
 
 -- Constants for packet information
 local CREATURE_QUERY_RESPONSE = 97
@@ -32,6 +32,50 @@ local CREATURE_PACKET_SIZE = 100
 local ITEM_PACKET_SIZE = 800 -- Larger for item data
 local DEFAULT_STRING = ""
 local DEFAULT_FLAGS = 0
+
+-- Evict oldest entries when a player's cache exceeds max size
+local function evictOldestEntries(guid)
+	local cache = PlayerItemCache[guid]
+	if not cache then return end
+
+	local count = 0
+	for _ in pairs(cache) do
+		count = count + 1
+	end
+	if count <= PLAYER_ITEM_CACHE_MAX then return end
+
+	-- Collect entries sorted by timestamp (oldest first)
+	local entries = {}
+	for entry, ts in pairs(cache) do
+		entries[#entries + 1] = { entry = entry, ts = ts }
+	end
+	table.sort(entries, function(a, b) return a.ts < b.ts end)
+
+	-- Remove oldest until within limit
+	local toRemove = count - PLAYER_ITEM_CACHE_MAX
+	for i = 1, toRemove do
+		cache[entries[i].entry] = nil
+	end
+end
+
+-- Periodic cleanup: remove stale entries and offline player caches
+CreateLuaEvent(function()
+	local now = os.time()
+	for guid, cache in pairs(PlayerItemCache) do
+		-- Check if player is still online
+		local player = GetPlayerByGUID(guid)
+		if not player or not player:IsInWorld() then
+			PlayerItemCache[guid] = nil
+		else
+			-- Remove entries older than TTL
+			for entry, ts in pairs(cache) do
+				if now - ts > PLAYER_ITEM_CACHE_TTL then
+					cache[entry] = nil
+				end
+			end
+		end
+	end
+end, 300000, 0) -- Every 5 minutes, repeat forever
 
 -- Forward declarations for functions that need to be called before they're defined
 local LoadItemFromDatabase
@@ -59,7 +103,9 @@ local function SendItemQueryForList(player, itemEntries)
 	local errorCount = 0
 	for _, entry in ipairs(itemEntries) do
 		if entry and entry > 0 and not PlayerItemCache[guid][entry] then
-			print(string.format("[GameMasterUI] Processing item: %d", entry))
+			if config.debug then
+				print(string.format("[GameMasterUI] Processing item: %d", entry))
+			end
 			
 			-- Wrap in pcall to prevent one bad item from stopping the entire process
 			local success, result = pcall(function()
@@ -68,7 +114,7 @@ local function SendItemQueryForList(player, itemEntries)
 					-- SendItemQueryResponse now always returns true on successful call
 					local packetSent = SendItemQueryResponse(player, itemData)
 					if packetSent then
-						PlayerItemCache[guid][entry] = true
+						PlayerItemCache[guid][entry] = os.time()
 						return true
 					else
 						-- Failed to send packet
@@ -88,12 +134,12 @@ local function SendItemQueryForList(player, itemEntries)
 					-- Exception processing item
 				end
 				-- Mark problematic items as "sent" to avoid retrying them
-				PlayerItemCache[guid][entry] = true
+				PlayerItemCache[guid][entry] = os.time()
 			end
 		end
 	end
-	
-	-- Packet sending completed (debug messages removed)
+
+	evictOldestEntries(guid)
 end
 
 local function extractItemEntriesFromResults(items)
@@ -108,7 +154,9 @@ local function extractItemEntriesFromResults(items)
 		end
 	end
 	
-	print(string.format("[GameMasterUI] Extracted %d item entries", #entries))
+	if config.debug then
+		print(string.format("[GameMasterUI] Extracted %d item entries", #entries))
+	end
 	return entries
 end
 
@@ -179,7 +227,9 @@ LoadCreatureDisplays()
 
 -- Load single item from database for packet
 function LoadItemFromDatabase(itemEntry)
-	print(string.format("[GameMasterUI] LoadItemFromDatabase called for item: %d", itemEntry))
+	if config.debug then
+		print(string.format("[GameMasterUI] LoadItemFromDatabase called for item: %d", itemEntry))
+	end
 
 	local coreName = config.core.name
 	local queryFunc = getQuery(coreName, "loadItemForPacket")
@@ -380,7 +430,9 @@ function LoadItemFromDatabase(itemEntry)
 		idx = idx + 1
 		itemData.holidayId = result:GetUInt32(idx) or 0
 		
-		print(string.format("[GameMasterUI] Successfully loaded item %d: %s", itemData.entry, itemData.name or "Unknown"))
+		if config.debug then
+			print(string.format("[GameMasterUI] Successfully loaded item %d: %s", itemData.entry, itemData.name or "Unknown"))
+		end
 		return itemData
 	else
 		print(string.format("[GameMasterUI] ERROR: Failed to load item %d from database", itemEntry))
@@ -403,16 +455,22 @@ function SendItemQueryResponse(player, itemData)
 		return false
 	end
 	
-	print(string.format("[GameMasterUI] SendItemQueryResponse called for item: %d (%s)", itemData.entry, itemData.name or "Unknown"))
+	if config.debug then
+		print(string.format("[GameMasterUI] SendItemQueryResponse called for item: %d (%s)", itemData.entry, itemData.name or "Unknown"))
+	end
 	
 	-- Create response packet
-	print(string.format("[GameMasterUI] Creating packet with opcode: 0x%X, size: %d", ITEM_QUERY_RESPONSE, ITEM_PACKET_SIZE))
+	if config.debug then
+		print(string.format("[GameMasterUI] Creating packet with opcode: 0x%X, size: %d", ITEM_QUERY_RESPONSE, ITEM_PACKET_SIZE))
+	end
 	local packet = CreatePacket(ITEM_QUERY_RESPONSE, ITEM_PACKET_SIZE)
 	if not packet then
 		print("[GameMasterUI] ERROR: CreatePacket returned nil!")
 		return false
 	end
-	print("[GameMasterUI] Packet created successfully")
+	if config.debug then
+		print("[GameMasterUI] Packet created successfully")
+	end
 	
 	-- Helper function to safely write data
 	local function SafeWrite(value, default)
@@ -420,7 +478,9 @@ function SendItemQueryResponse(player, itemData)
 	end
 	
 	-- Write simplified packet data for testing
-	print("[GameMasterUI] Writing simplified packet data...")
+	if config.debug then
+		print("[GameMasterUI] Writing simplified packet data...")
+	end
 	local success, error = pcall(function()
 		-- Essential item data only
 		packet:WriteULong(itemData.entry or 0) -- Item entry ID

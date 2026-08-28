@@ -4,12 +4,7 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
-local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
+if not GM_RequireNamespace() then return end
 
 -- Get module references
 local GMCards = _G.GMCards
@@ -133,6 +128,20 @@ function GMCards.createPlayerCard(card, entity, i)
         end
     end)
     
+    -- Wire up card animations (model-based with class color accent)
+    if GMCards.setupCardVisuals then
+        GMCards.setupCardVisuals(card, "Player")
+    end
+    if card.modelFrame and GMCards.setupHoverEffects then
+        GMCards.setupHoverEffects(card)
+    end
+    if card.modelFrame and GMCards.setupBreathing then
+        GMCards.setupBreathing(card, "NPC")
+    end
+    if GMCards.setupClickFlash then
+        GMCards.setupClickFlash(card)
+    end
+
     -- Add online status indicator
     local statusIndicator = card:CreateTexture(nil, "OVERLAY")
     statusIndicator:SetSize(10, 10)

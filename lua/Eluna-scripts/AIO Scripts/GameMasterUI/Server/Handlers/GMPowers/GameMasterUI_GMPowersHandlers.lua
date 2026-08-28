@@ -1,11 +1,12 @@
 --[[
     GameMaster UI - GM Powers Handlers
-    
+
     This module handles all GM power toggles and controls including:
     - GM mode, fly mode, god mode toggles
     - Speed modifications
     - Cooldown and cast time cheats
-    - Quick actions like teleport, summon, heal
+    - Quick actions (self & target)
+    - Permission-tiered access and rate limiting
 ]]--
 
 local GMPowersHandlers = {}
@@ -16,6 +17,9 @@ local GameMasterSystem, Config, Utils, Database, DatabaseHelper
 -- Player state tracking
 local playerStates = {}
 
+-- Rate limit tracking: rateLimits[guid][actionCategory] = {timestamps}
+local rateLimits = {}
+
 -- Speed type mappings
 local SPEED_TYPES = {
     walk = 0,  -- MOVE_WALK
@@ -24,11 +28,83 @@ local SPEED_TYPES = {
     fly = 6    -- MOVE_FLIGHT
 }
 
--- Initialize player state
+-- ============================================================================
+-- Security: Permission checks & rate limiting
+-- ============================================================================
+
+-- Check if player has permission for an action
+local function checkActionPermission(player, actionId)
+    local rank = player:GetGMRank()
+    if rank < (Config.MIN_GM_RANK or 2) then
+        return false
+    end
+
+    local perms = Config.GM_PERMISSIONS
+    if not perms then return true end -- no config = allow all
+
+    -- Walk up from player's rank to find a matching tier
+    for r = rank, 2, -1 do
+        local tier = perms[r]
+        if tier then
+            if tier.actions == "all" then return true end
+            if type(tier.actions) == "table" then
+                return tier.actions[actionId] == true
+            end
+        end
+    end
+
+    return false
+end
+
+-- Check rate limit for an action category. Returns true if allowed.
+local function checkRateLimit(player, category)
+    local limits = Config.RATE_LIMITS and Config.RATE_LIMITS[category]
+    if not limits then return true end
+
+    local guid = player:GetGUIDLow()
+    rateLimits[guid] = rateLimits[guid] or {}
+    rateLimits[guid][category] = rateLimits[guid][category] or {}
+
+    local now = os.time()
+    local bucket = rateLimits[guid][category]
+
+    -- Prune entries outside the window
+    local cutoff = now - limits.window
+    local fresh = {}
+    for _, ts in ipairs(bucket) do
+        if ts > cutoff then
+            fresh[#fresh + 1] = ts
+        end
+    end
+    rateLimits[guid][category] = fresh
+
+    if #fresh >= limits.max then
+        return false
+    end
+
+    fresh[#fresh + 1] = now
+    return true
+end
+
+-- Structured audit log
+local function auditLog(player, action, details)
+    if not Config.LOG_GM_ACTIONS then return end
+    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
+    local msg = string.format("[AUDIT %s] GM %s (%d) | %s",
+        timestamp, player:GetName(), player:GetGUIDLow(), action)
+    if details then
+        msg = msg .. " | " .. details
+    end
+    print(msg)
+end
+
+-- ============================================================================
+-- Player state management
+-- ============================================================================
+
 local function InitializePlayerState(player)
     local guid = player:GetGUIDLow()
     if not playerStates[guid] then
-        -- Initialize with default speeds of 1.0
         playerStates[guid] = {
             gmMode = player:IsGM(),
             flyMode = player:CanFly(),
@@ -38,51 +114,44 @@ local function InitializePlayerState(player)
             invisible = not player:IsGMVisible(),
             waterWalk = false,
             taxiCheat = player:IsTaxiCheater(),
-            speeds = {
-                walk = 1.0,  -- Default to 1.0
-                run = 1.0,   -- Default to 1.0
-                swim = 1.0,  -- Default to 1.0
-                fly = 1.0    -- Default to 1.0
-            }
+            speeds = { walk = 1.0, run = 1.0, swim = 1.0, fly = 1.0 }
         }
-        
-        -- Set all speeds to 1.0 on initialization
-        player:SetSpeed(0, 1.0, true)  -- Walk
-        player:SetSpeed(1, 1.0, true)  -- Run
-        player:SetSpeed(3, 1.0, true)  -- Swim
-        player:SetSpeed(6, 1.0, true)  -- Fly
+        player:SetSpeed(0, 1.0, true)
+        player:SetSpeed(1, 1.0, true)
+        player:SetSpeed(3, 1.0, true)
+        player:SetSpeed(6, 1.0, true)
     end
     return playerStates[guid]
 end
 
--- Clean up player state on logout
 local function CleanupPlayerState(event, player)
     local guid = player:GetGUIDLow()
     playerStates[guid] = nil
+    rateLimits[guid] = nil
 end
 
+-- ============================================================================
 -- Toggle GM power
+-- ============================================================================
+
 function GMPowersHandlers.toggleGMPower(player, powerId, enable)
-    -- Validate GM rank
-    if player:GetGMRank() < Config.MIN_GM_RANK then
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then
         Utils.sendMessage(player, "error", "Insufficient GM rank")
         return
     end
-    
+
     local guid = player:GetGUIDLow()
     local state = InitializePlayerState(player)
-    
+
     local success = false
     local message = ""
-    
+
     if powerId == "gmMode" then
         player:SetGameMaster(enable)
         state.gmMode = enable
-        -- If disabling GM mode, also disable invisibility (can't be invisible without GM)
         if not enable and state.invisible then
-            player:SetGMVisible(true)  -- true = visible
+            player:SetGMVisible(true)
             state.invisible = false
-            -- Send update for invisibility state change
             AIO.Handle(player, "GMPowers", "HandleServerUpdate", "invisible", false)
         end
         message = enable and "GM Mode enabled" or "GM Mode disabled"
@@ -99,9 +168,7 @@ function GMPowersHandlers.toggleGMPower(player, powerId, enable)
             state.godMode = true
             message = "God Mode enabled"
         else
-            -- Restore normal health
-            local level = player:GetLevel()
-            local baseHealth = level * 100 -- Simplified calculation
+            local baseHealth = player:GetLevel() * 100
             player:SetMaxHealth(baseHealth)
             player:SetHealth(baseHealth)
             state.godMode = false
@@ -109,26 +176,21 @@ function GMPowersHandlers.toggleGMPower(player, powerId, enable)
         end
         success = true
     elseif powerId == "invisible" then
-        -- If enabling invisibility, ensure GM mode is also enabled
         if enable and not state.gmMode then
             player:SetGameMaster(true)
             state.gmMode = true
-            -- Send update for GM mode state change
             AIO.Handle(player, "GMPowers", "HandleServerUpdate", "gmMode", true)
         end
-        player:SetGMVisible(not enable) -- Note: SetGMVisible(false) makes invisible
+        player:SetGMVisible(not enable)
         state.invisible = enable
         message = enable and "Invisibility enabled" or "Invisibility disabled"
         success = true
     elseif powerId == "noCooldowns" then
-        if enable then
-            player:ResetAllCooldowns()
-        end
+        if enable then player:ResetAllCooldowns() end
         state.noCooldowns = enable
         message = enable and "Cooldown cheat enabled" or "Cooldown cheat disabled"
         success = true
     elseif powerId == "instantCast" then
-        -- Note: Instant cast would need to be handled via spell hooks
         state.instantCast = enable
         message = enable and "Instant cast enabled (partial)" or "Instant cast disabled"
         success = true
@@ -143,205 +205,372 @@ function GMPowersHandlers.toggleGMPower(player, powerId, enable)
         message = enable and "Taxi cheat enabled (all paths)" or "Taxi cheat disabled"
         success = true
     end
-    
+
     if success then
-        -- Send update back to client
         AIO.Handle(player, "GMPowers", "HandleServerUpdate", powerId, enable)
         AIO.Handle(player, "GMPowers", "HandleStatusMessage", message, "success")
-        
-        -- Log the action
-        if Config.LOG_GM_ACTIONS then
-            Utils.debug("INFO", string.format("[GMPowers] %s (%d) toggled %s to %s", 
-                player:GetName(), guid, powerId, tostring(enable)))
-        end
+        auditLog(player, "toggle", powerId .. " = " .. tostring(enable))
     else
         AIO.Handle(player, "GMPowers", "HandleStatusMessage", "Unknown power: " .. powerId, "error")
     end
 end
 
+-- ============================================================================
 -- Set GM speed
+-- ============================================================================
+
 function GMPowersHandlers.setGMSpeed(player, speedType, multiplier)
-    -- Validate GM rank
-    if player:GetGMRank() < Config.MIN_GM_RANK then
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then
         Utils.sendMessage(player, "error", "Insufficient GM rank")
         return
     end
-    
+
     local speedTypeId = SPEED_TYPES[speedType]
     if not speedTypeId then
         AIO.Handle(player, "GMPowers", "HandleStatusMessage", "Invalid speed type", "error")
         return
     end
-    
-    -- Clamp multiplier (allow 0 for complete stop)
+
     multiplier = math.max(0, math.min(10, multiplier))
-    
-    -- SetSpeed expects a rate multiplier, not absolute speed
-    -- Just pass the multiplier directly
-    player:SetSpeed(speedTypeId, multiplier, true) -- true = forced update
-    
-    -- Update state
+    player:SetSpeed(speedTypeId, multiplier, true)
+
     local state = InitializePlayerState(player)
     state.speeds[speedType] = multiplier
-    
-    -- Send confirmation
+
     AIO.Handle(player, "GMPowers", "HandleSpeedUpdate", speedType, multiplier)
-    AIO.Handle(player, "GMPowers", "HandleStatusMessage", 
-        string.format("%s speed set to %.1fx", speedType:gsub("^%l", string.upper), multiplier), 
+    AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+        string.format("%s speed set to %.1fx", speedType:gsub("^%l", string.upper), multiplier),
         "success")
-    
-    -- Log the action (only if debug mode is enabled for speed changes)
+
     if Config.LOG_GM_ACTIONS and Config.LOG_SPEED_CHANGES then
-        Utils.debug("INFO", string.format("[GMPowers] %s set %s speed to %.1fx", 
-            player:GetName(), speedType, multiplier))
+        auditLog(player, "speed", speedType .. " = " .. multiplier)
     end
 end
 
--- Execute GM action
-function GMPowersHandlers.executeGMAction(player, actionId)
-    -- Validate GM rank
-    if player:GetGMRank() < Config.MIN_GM_RANK then
+-- ============================================================================
+-- Resolve target: by name (typed) or by selection (clicked in-game)
+-- ============================================================================
+
+local function resolveTarget(player, targetName)
+    if targetName and targetName ~= "" then
+        local target = GetPlayerByName(targetName)
+        if target and target:IsInWorld() then return target end
+        return nil, targetName .. " not found or offline"
+    end
+    return player:GetSelection()
+end
+
+-- ============================================================================
+-- Execute GM action (with permission + rate limit checks)
+-- ============================================================================
+
+function GMPowersHandlers.executeGMAction(player, actionId, targetName)
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then
         Utils.sendMessage(player, "error", "Insufficient GM rank")
         return
     end
-    
+
+    -- Permission check
+    if not checkActionPermission(player, actionId) then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+            "You don't have permission for this action", "error")
+        return
+    end
+
     local success = false
     local message = ""
-    
+
+    -- ---- Self Actions ----
+
     if actionId == "resetCooldowns" then
         player:ResetAllCooldowns()
         message = "All cooldowns reset"
         success = true
+
     elseif actionId == "fullHeal" then
         player:SetHealth(player:GetMaxHealth())
         player:SetPower(player:GetMaxPower(player:GetPowerType()), player:GetPowerType())
         message = "Health and power restored"
         success = true
+
+    elseif actionId == "reviveSelf" then
+        if player:IsAlive() then
+            message = "You are already alive"
+        else
+            player:ResurrectPlayer(100, false)
+            message = "You have been revived"
+            success = true
+        end
+
+    elseif actionId == "replenish" then
+        player:SetHealth(player:GetMaxHealth())
+        player:SetPower(player:GetMaxPower(player:GetPowerType()), player:GetPowerType())
+        player:ResetAllCooldowns()
+        message = "Health, power and cooldowns restored"
+        success = true
+
+    elseif actionId == "refresh" then
+        local state = InitializePlayerState(player)
+        AIO.Handle(player, "GMPowers", "Initialize", state)
+        message = "GM Powers state refreshed"
+        success = true
+
+    -- ---- Target Actions ----
+
     elseif actionId == "teleportTarget" then
-        local target = player:GetSelection()
+        local target, err = resolveTarget(player, targetName)
         if target then
-            if target:GetTypeId() == 3 then -- TYPE_UNIT
+            local typeId = target:GetTypeId()
+            if typeId == 3 or typeId == 4 then -- UNIT or PLAYER
                 local x, y, z = target:GetLocation()
-                player:Teleport(player:GetMapId(), x, y, z, player:GetO())
+                local mapId = (typeId == 4) and target:GetMapId() or player:GetMapId()
+                player:Teleport(mapId, x, y, z, player:GetO())
                 message = "Teleported to target"
-                success = true
-            elseif target:GetTypeId() == 4 then -- TYPE_PLAYER
-                local x, y, z = target:GetLocation()
-                player:Teleport(target:GetMapId(), x, y, z, player:GetO())
-                message = "Teleported to player"
                 success = true
             else
                 message = "Invalid target for teleport"
             end
         else
-            message = "No target selected"
+            message = err or "No target selected"
         end
+
     elseif actionId == "appear" then
-        local target = player:GetSelection()
-        if target and target:GetTypeId() == 4 then -- TYPE_PLAYER
+        local target, err = resolveTarget(player, targetName)
+        if target and target:GetTypeId() == 4 then
             local x, y, z = target:GetLocation()
             player:Teleport(target:GetMapId(), x, y, z, player:GetO())
             message = "Appeared at " .. target:GetName()
             success = true
         else
-            message = "Select a player to appear at"
+            message = err or "Select a player to appear at"
         end
+
     elseif actionId == "summon" then
-        local target = player:GetSelection()
-        if target and target:GetTypeId() == 4 then -- TYPE_PLAYER
+        local target, err = resolveTarget(player, targetName)
+        if target and target:GetTypeId() == 4 then
             local x, y, z = player:GetLocation()
             target:Teleport(player:GetMapId(), x, y, z, player:GetO())
             message = "Summoned " .. target:GetName()
             success = true
         else
-            message = "Select a player to summon"
+            message = err or "Select a player to summon"
         end
-    elseif actionId == "refresh" then
-        -- Send current state to client
-        local state = InitializePlayerState(player)
-        AIO.Handle(player, "GMPowers", "Initialize", state)
-        message = "GM Powers state refreshed"
-        success = true
+
+    elseif actionId == "freezeTarget" then
+        local target, err = resolveTarget(player, targetName)
+        if target and target:GetTypeId() == 4 then
+            target:CastSpell(target, 9454, true) -- Freeze spell
+            message = "Froze " .. target:GetName()
+            success = true
+            auditLog(player, "freeze", "target=" .. target:GetName())
+        else
+            message = err or "Select a player to freeze"
+        end
+
+    elseif actionId == "unfreezeTarget" then
+        local target, err = resolveTarget(player, targetName)
+        if target and target:GetTypeId() == 4 then
+            target:RemoveAura(9454)
+            message = "Unfroze " .. target:GetName()
+            success = true
+            auditLog(player, "unfreeze", "target=" .. target:GetName())
+        else
+            message = err or "Select a player to unfreeze"
+        end
+
+    elseif actionId == "reviveTarget" then
+        local target, err = resolveTarget(player, targetName)
+        if target and target:GetTypeId() == 4 then
+            if target:IsAlive() then
+                message = target:GetName() .. " is already alive"
+            else
+                target:ResurrectPlayer(100, false)
+                message = "Revived " .. target:GetName()
+                success = true
+            end
+        else
+            message = err or "Select a player to revive"
+        end
+
+    elseif actionId == "kickTarget" then
+        -- Rate limit kicks
+        if not checkRateLimit(player, "kick") then
+            AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+                "Rate limit reached for kick actions", "error")
+            return
+        end
+
+        local target, err = resolveTarget(player, targetName)
+        if target and target:GetTypeId() == 4 then
+            local tName = target:GetName()
+            target:KickPlayer()
+            message = "Kicked " .. tName
+            success = true
+            auditLog(player, "KICK", "target=" .. tName)
+        else
+            message = err or "Select a player to kick"
+        end
     end
-    
-    -- Send response
+
     AIO.Handle(player, "GMPowers", "HandleStatusMessage", message, success and "success" or "error")
-    
-    -- Log the action
-    if Config.LOG_GM_ACTIONS and success then
-        Utils.debug("INFO", string.format("[GMPowers] %s executed action: %s", player:GetName(), actionId))
+
+    if success then
+        auditLog(player, "action", actionId)
     end
 end
 
--- Get GM powers state
-function GMPowersHandlers.getGMPowersState(player)
-    -- Validate GM rank
-    if player:GetGMRank() < Config.MIN_GM_RANK then
+-- ============================================================================
+-- Announce handler (separate because it takes a message param)
+-- ============================================================================
+
+function GMPowersHandlers.announceMessage(player, message)
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then
+        Utils.sendMessage(player, "error", "Insufficient GM rank")
         return
     end
-    
+
+    if not checkActionPermission(player, "announce") then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+            "You don't have permission to announce", "error")
+        return
+    end
+
+    if not checkRateLimit(player, "announce") then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+            "Rate limit reached for announcements", "error")
+        return
+    end
+
+    -- Sanitize: strip color codes and limit length
+    if not message or message == "" then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage", "Message cannot be empty", "error")
+        return
+    end
+    if #message > 200 then
+        message = message:sub(1, 200)
+    end
+
+    SendWorldMessage(string.format("|cffff8800[GM %s]|r %s", player:GetName(), message))
+    AIO.Handle(player, "GMPowers", "HandleStatusMessage", "Announcement sent", "success")
+    auditLog(player, "ANNOUNCE", message)
+end
+
+-- ============================================================================
+-- Save current position as game_tele entry
+-- ============================================================================
+
+function GMPowersHandlers.saveCurrentPosition(player, name)
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then
+        Utils.sendMessage(player, "error", "Insufficient GM rank")
+        return
+    end
+
+    if not checkActionPermission(player, "savePosition") then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+            "You don't have permission to save positions", "error")
+        return
+    end
+
+    if not checkRateLimit(player, "savePosition") then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+            "Rate limit reached for saving positions", "error")
+        return
+    end
+
+    if not name or name == "" then
+        AIO.Handle(player, "GMPowers", "HandleStatusMessage", "Name cannot be empty", "error")
+        return
+    end
+
+    -- Sanitize name
+    name = name:gsub("'", "''")
+    if #name > 100 then name = name:sub(1, 100) end
+
+    local x = player:GetX()
+    local y = player:GetY()
+    local z = player:GetZ()
+    local o = player:GetO()
+    local mapId = player:GetMapId()
+
+    -- Get next ID
+    local maxIdResult = WorldDBQuery("SELECT COALESCE(MAX(id), 0) + 1 FROM game_tele")
+    local nextId = maxIdResult and maxIdResult:GetUInt32(0) or 1
+
+    local query = string.format(
+        "INSERT INTO game_tele (id, position_x, position_y, position_z, orientation, map, name) "
+        .. "VALUES (%d, %.6f, %.6f, %.6f, %.6f, %d, '%s')",
+        nextId, x, y, z, o, mapId, name)
+
+    WorldDBExecute(query)
+    AIO.Handle(player, "GMPowers", "HandleStatusMessage",
+        "Saved position: " .. name, "success")
+    auditLog(player, "SAVE_POSITION", string.format("%s @ map=%d (%.1f, %.1f, %.1f)", name, mapId, x, y, z))
+end
+
+-- ============================================================================
+-- Request online player names (for autocomplete)
+-- ============================================================================
+
+function GMPowersHandlers.requestOnlinePlayerNames(player)
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then return end
+    local names = {}
+    for _, p in ipairs(GetPlayersInWorld()) do
+        names[#names + 1] = p:GetName()
+    end
+    table.sort(names)
+    AIO.Handle(player, "GMPowers", "ReceiveOnlinePlayerNames", names)
+end
+
+-- ============================================================================
+-- Get GM powers state
+-- ============================================================================
+
+function GMPowersHandlers.getGMPowersState(player)
+    if player:GetGMRank() < (Config.MIN_GM_RANK or 2) then return end
     local state = InitializePlayerState(player)
     AIO.Handle(player, "GMPowers", "Initialize", state)
 end
 
--- Handle instant cast hook (if needed)
+-- ============================================================================
+-- Spell cast hook (no-cooldown / instant-cast cheats)
+-- ============================================================================
+
 local function OnSpellCast(event, player, spell, skipCheck)
     if not player then return end
-    
     local guid = player:GetGUIDLow()
     local state = playerStates[guid]
-    
-    if state and state.instantCast then
-        -- Make the spell instant (this would need proper implementation)
-        -- For now, just reduce cast time significantly
-        -- Note: This would need to be handled differently in practice
-    end
-    
-    if state and state.noCooldowns then
-        -- Reset the spell cooldown immediately after cast
-        -- Note: In production, this would need a proper timer implementation
-        -- For now, just reset immediately
-        if player and spell then
-            player:ResetSpellCooldown(spell:GetEntry(), true)
-        end
+    if not state then return end
+
+    if state.noCooldowns and spell then
+        player:ResetSpellCooldown(spell:GetEntry(), true)
     end
 end
 
+-- ============================================================================
 -- Register handlers
+-- ============================================================================
+
 function GMPowersHandlers.RegisterHandlers(gmSystem, config, utils, database, dbHelper)
-    -- Store dependencies
     GameMasterSystem = gmSystem
     Config = config
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
-    
-    -- Set minimum GM rank if not defined
-    if not Config.MIN_GM_RANK then
-        Config.MIN_GM_RANK = 2
-    end
-    
-    -- Set logging flags if not defined
-    if Config.LOG_GM_ACTIONS == nil then
-        Config.LOG_GM_ACTIONS = true
-    end
-    
-    -- Separate flag for speed changes (disabled by default to avoid spam)
-    if Config.LOG_SPEED_CHANGES == nil then
-        Config.LOG_SPEED_CHANGES = false
-    end
-    
+
+    if not Config.MIN_GM_RANK then Config.MIN_GM_RANK = 2 end
+
     -- Register AIO handlers
     GameMasterSystem.toggleGMPower = GMPowersHandlers.toggleGMPower
     GameMasterSystem.setGMSpeed = GMPowersHandlers.setGMSpeed
     GameMasterSystem.executeGMAction = GMPowersHandlers.executeGMAction
     GameMasterSystem.getGMPowersState = GMPowersHandlers.getGMPowersState
-    
+    GameMasterSystem.announceMessage = GMPowersHandlers.announceMessage
+    GameMasterSystem.saveCurrentPosition = GMPowersHandlers.saveCurrentPosition
+    GameMasterSystem.requestOnlinePlayerNames = GMPowersHandlers.requestOnlinePlayerNames
+
     -- Register event hooks
     RegisterPlayerEvent(3, CleanupPlayerState) -- PLAYER_EVENT_ON_LOGOUT
-    RegisterPlayerEvent(5, OnSpellCast) -- PLAYER_EVENT_ON_SPELL_CAST
-    
-    -- GM Powers handlers registered
+    RegisterPlayerEvent(5, OnSpellCast)        -- PLAYER_EVENT_ON_SPELL_CAST
 end
 
 return GMPowersHandlers

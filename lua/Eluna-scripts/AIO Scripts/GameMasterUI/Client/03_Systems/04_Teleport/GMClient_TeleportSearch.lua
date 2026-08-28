@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Get module references
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 local Teleport = GameMasterSystem.Teleport
 if not Teleport then

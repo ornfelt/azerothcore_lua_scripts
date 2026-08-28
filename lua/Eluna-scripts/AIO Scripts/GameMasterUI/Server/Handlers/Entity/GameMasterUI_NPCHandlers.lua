@@ -11,14 +11,15 @@
 local NPCHandlers = {}
 
 -- Module dependencies (will be injected)
-local GameMasterSystem, Config, Utils, Database, DatabaseHelper
+local GameMasterSystem, Config, Utils, Database, DatabaseHelper, DatabaseErrorHelper
 
-function NPCHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
+function NPCHandlers.RegisterHandlers(gms, config, utils, database, dbHelper, dbErrorHelper)
     GameMasterSystem = gms
     Config = config
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
+    DatabaseErrorHelper = dbErrorHelper
     
     -- Register all NPC-related handlers
     GameMasterSystem.getNPCData = NPCHandlers.getNPCData
@@ -48,8 +49,14 @@ function NPCHandlers.getNPCData(player, offset, pageSize, sortOrder)
             elseif Config.debug then
                 print(string.format("[GameMasterUI] Failed to get NPC count: %s", countError or "unknown error"))
             end
-        elseif Config.debug then
-            print(string.format("[GameMasterUI] Failed to build NPC count query: %s", error or "unknown error"))
+        else
+            -- Notify user about missing tables
+            if DatabaseErrorHelper and error then
+                DatabaseErrorHelper.CheckTablesForFeature(player, "Creatures", {"creature_template"}, "world")
+                return -- Exit early - error sent to client
+            elseif Config.debug then
+                print(string.format("[GameMasterUI] Failed to build NPC count query: %s", error or "unknown error"))
+            end
         end
     end
     
@@ -70,8 +77,14 @@ function NPCHandlers.getNPCData(player, offset, pageSize, sortOrder)
             if not result and Config.debug then
                 print(string.format("[GameMasterUI] Failed to get NPC data: %s", queryError or "unknown error"))
             end
-        elseif Config.debug then
-            print(string.format("[GameMasterUI] Failed to build NPC data query: %s", error or "unknown error"))
+        else
+            -- Notify user about missing tables
+            if DatabaseErrorHelper and error then
+                DatabaseErrorHelper.CheckTablesForFeature(player, "Creatures", tables, "world")
+                return -- Exit early - error sent to client
+            elseif Config.debug then
+                print(string.format("[GameMasterUI] Failed to build NPC data query: %s", error or "unknown error"))
+            end
         end
     end
 
@@ -180,20 +193,18 @@ function NPCHandlers.searchNPCData(player, query, offset, pageSize, sortOrder)
 
     -- For search, we'll use the simple check since getting exact count for searches can be expensive
     local hasMoreData = #npcData == pageSize
-    local paginationInfo = {
-        totalCount = -1, -- Unknown for search
-        hasNextPage = hasMoreData,
-        currentOffset = offset,
-        pageSize = pageSize,
-        isEmpty = #npcData == 0
-    }
-    
+    local currentPage = math.floor(offset / pageSize) + 1
+
     -- Only show "no data" message on first search (offset 0), not on pagination
     if #npcData == 0 and offset == 0 then
         Utils.sendMessage(player, "info", "No NPC data found for the search query: " .. query)
     end
-    
-    AIO.Handle(player, "GameMasterSystem", "receiveNPCData", npcData, offset, pageSize, hasMoreData, paginationInfo)
+
+    -- Send pagination as separate parameters (matching getNPCData format)
+    -- totalCount = -1 means unknown for search results
+    AIO.Handle(player, "GameMasterSystem", "receiveNPCData",
+        npcData, offset, pageSize, hasMoreData,
+        -1, -1, currentPage)  -- totalCount, totalPages, currentPage
 end
 
 -- Function to query GameObject data from the database with pagination
@@ -217,30 +228,42 @@ function NPCHandlers.getGameObjectData(player, offset, pageSize, sortOrder)
             elseif Config.debug then
                 print(string.format("[GameMasterUI] Failed to get GameObject count: %s", countError or "unknown error"))
             end
-        elseif Config.debug then
-            print(string.format("[GameMasterUI] Failed to build GameObject count query: %s", error or "unknown error"))
+        else
+            -- Notify user about missing tables
+            if DatabaseErrorHelper and error then
+                DatabaseErrorHelper.CheckTablesForFeature(player, "Game Objects", {"gameobject_template"}, "world")
+                return -- Exit early - error sent to client
+            elseif Config.debug then
+                print(string.format("[GameMasterUI] Failed to build GameObject count query: %s", error or "unknown error"))
+            end
         end
     end
-    
+
     -- Calculate pagination info
     local paginationInfo = Utils.calculatePaginationInfo(totalCount, offset, pageSize)
-    
+
     -- Get the actual data even if total count is 0 (to handle edge cases)
     local queryFunc = Database.getQuery(coreName, "gobData")
     local result, queryError
     local gobData = {}
-    
+
     if queryFunc then
         local query = queryFunc(sortOrder, pageSize, offset)
-        local tables = {"gameobject_template", "gameobjectdisplayinfo"}
+        local tables = {"gameobject_template"}
         local modifiedQuery, error = DatabaseHelper.BuildSafeQuery(query, tables, "world")
         if modifiedQuery then
             result, queryError = DatabaseHelper.SafeQuery(modifiedQuery, "world")
             if not result and Config.debug then
                 print(string.format("[GameMasterUI] Failed to get GameObject data: %s", queryError or "unknown error"))
             end
-        elseif Config.debug then
-            print(string.format("[GameMasterUI] Failed to build GameObject data query: %s", error or "unknown error"))
+        else
+            -- Notify user about missing tables
+            if DatabaseErrorHelper and error then
+                DatabaseErrorHelper.CheckTablesForFeature(player, "Game Objects", tables, "world")
+                return -- Exit early - error sent to client
+            elseif Config.debug then
+                print(string.format("[GameMasterUI] Failed to build GameObject data query: %s", error or "unknown error"))
+            end
         end
     end
 
@@ -292,15 +315,21 @@ function NPCHandlers.searchGameObjectData(player, query, offset, pageSize, sortO
     
     if searchQueryFunc then
         local searchQuery = searchQueryFunc(query, typeId, sortOrder, pageSize, offset)
-        local tables = {"gameobject_template", "gameobjectdisplayinfo"}
+        local tables = {"gameobject_template"}
         local modifiedQuery, error = DatabaseHelper.BuildSafeQuery(searchQuery, tables, "world")
         if modifiedQuery then
             result, queryError = DatabaseHelper.SafeQuery(modifiedQuery, "world")
             if not result and Config.debug then
                 print(string.format("[GameMasterUI] Failed to search GameObject data: %s", queryError or "unknown error"))
             end
-        elseif Config.debug then
-            print(string.format("[GameMasterUI] Failed to build GameObject search query: %s", error or "unknown error"))
+        else
+            -- Notify user about missing tables
+            if DatabaseErrorHelper and error then
+                DatabaseErrorHelper.CheckTablesForFeature(player, "Game Objects", tables, "world")
+                return
+            elseif Config.debug then
+                print(string.format("[GameMasterUI] Failed to build GameObject search query: %s", error or "unknown error"))
+            end
         end
     end
 
@@ -319,26 +348,18 @@ function NPCHandlers.searchGameObjectData(player, query, offset, pageSize, sortO
 
     -- For search, we'll use the simple check since getting exact count for searches can be expensive
     local hasMoreData = #gobData == pageSize
-    local paginationInfo = {
-        totalCount = -1, -- Unknown for search
-        hasNextPage = hasMoreData,
-        currentOffset = offset,
-        pageSize = pageSize,
-        isEmpty = #gobData == 0
-    }
+    local currentPage = math.floor(offset / pageSize) + 1
 
     -- Only show "no data" message on first search (offset 0), not on pagination
     if #gobData == 0 and offset == 0 then
         Utils.sendMessage(player, "info", "No gameobject data found for the search query: " .. query)
     end
-    
-    -- Send pagination as individual parameters to avoid AIO serialization issues
-    local totalCount = paginationInfo and paginationInfo.totalCount or 0
-    local totalPages = paginationInfo and paginationInfo.totalPages or 1
-    local currentPage = paginationInfo and paginationInfo.currentPage or 1
-    AIO.Handle(player, "GameMasterSystem", "receiveGameObjectData", 
+
+    -- Send pagination as separate parameters (matching getGameObjectData format)
+    -- totalCount = -1 means unknown for search results
+    AIO.Handle(player, "GameMasterSystem", "receiveGameObjectData",
         gobData, offset, pageSize, hasMoreData,
-        totalCount, totalPages, currentPage)
+        -1, -1, currentPage)  -- totalCount, totalPages, currentPage
 end
 
 return NPCHandlers

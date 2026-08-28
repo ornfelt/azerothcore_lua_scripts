@@ -32,6 +32,10 @@ end
 
 -- Player spell management functions (managing spells for other players)
 function PlayerSpellManagementHandlers.getPlayerSpells(player, targetName)
+    -- Check if Name_Lang_enUS column exists (prevents C++ ABORT on unknown column)
+    local spellNameColumnAvailable = DatabaseHelper and DatabaseHelper.ColumnExists
+        and DatabaseHelper.ColumnExists("spell", "spell_name_enus", "world")
+
     -- Validate GM permissions
     if player:GetGMRank() < 2 then
         Utils.sendMessage(player, "error", "You do not have permission to use this command.")
@@ -92,21 +96,19 @@ function PlayerSpellManagementHandlers.getPlayerSpells(player, targetName)
             if not spellIds[spellId] then
                 spellIds[spellId] = true
                 
-                -- Get spell name and rank from world database
-                local spellInfoQuery = WorldDBQuery(string.format(
-                    "SELECT spellName0 FROM spell WHERE id = %d",
-                    spellId
-                ))
-                
+                -- Get spell name from world database (only if column exists)
                 local spellName = "Unknown"
                 local spellRank = ""
-                
-                if spellInfoQuery then
-                    spellName = spellInfoQuery:GetString(0) or "Unknown"
-                    spellRank = ""
-                    -- Clean up the strings to avoid delimiter issues
-                    spellName = spellName:gsub("[|;]", " ")
-                    spellRank = spellRank:gsub("[|;]", " ")
+
+                if spellNameColumnAvailable then
+                    local spellInfoQuery = WorldDBQuery(string.format(
+                        "SELECT spell_name_enus FROM spell WHERE id = %d",
+                        spellId
+                    ))
+                    if spellInfoQuery then
+                        spellName = spellInfoQuery:GetString(0) or "Unknown"
+                        spellName = spellName:gsub("[|;]", " ")
+                    end
                 end
                 
                 -- Format: id|name|rank|type|active|disabled

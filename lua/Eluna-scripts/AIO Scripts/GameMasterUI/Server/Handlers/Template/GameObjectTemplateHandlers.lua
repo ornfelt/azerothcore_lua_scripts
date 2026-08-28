@@ -243,13 +243,8 @@ function GameObjectTemplateHandlers.updateGameObjectTemplate(player, data)
                 table.concat(setParts, ", "), entry
             )
 
-            local result = WorldDBExecute(updateQuery)
-            if result ~= nil then
-                success = true
-            else
-                Utils.sendMessage(player, "error", "Failed to update gameobject template")
-                return
-            end
+            WorldDBExecute(updateQuery)
+            success = true
         end
 
         -- Update gameobject_template_addon
@@ -276,13 +271,8 @@ function GameObjectTemplateHandlers.updateGameObjectTemplate(player, data)
                     table.concat(setParts, ", "), entry
                 )
 
-                local result = WorldDBExecute(updateQuery)
-                if result ~= nil then
-                    success = true
-                else
-                    Utils.sendMessage(player, "error", "Failed to update gameobject template addon")
-                    return
-                end
+                WorldDBExecute(updateQuery)
+                success = true
             else
                 -- Create new addon record with default values
                 local defaultAddon = {
@@ -312,17 +302,9 @@ function GameObjectTemplateHandlers.updateGameObjectTemplate(player, data)
                     defaultAddon.artkit1, defaultAddon.artkit2, defaultAddon.artkit3
                 )
 
-                local result = WorldDBExecute(insertQuery)
-                if result ~= nil then
-                    success = true
-                else
-                    Utils.sendMessage(player, "error", "Failed to create gameobject template addon")
-                    return
-                end
+                WorldDBExecute(insertQuery)
+                success = true
             end
-        elseif data.changes and next(data.changes) then
-            -- Only template changes, success already set above
-            success = true
         end
 
         if success then

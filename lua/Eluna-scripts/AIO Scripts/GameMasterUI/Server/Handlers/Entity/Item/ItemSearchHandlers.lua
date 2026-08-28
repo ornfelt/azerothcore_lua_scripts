@@ -33,7 +33,6 @@ function ItemSearchHandlers.RegisterHandlers(gms, config, utils, database, dbHel
 
     -- Register search and placement handlers
     GameMasterSystem.requestModalItems = ItemSearchHandlers.requestModalItems
-    GameMasterSystem.searchItemsForModal = ItemSearchHandlers.searchItemsForModal
     GameMasterSystem.searchItems = ItemSearchHandlers.searchItems
     GameMasterSystem.addItemToSpecificSlot = ItemSearchHandlers.addItemToSpecificSlot
     GameMasterSystem.equipItemById = ItemSearchHandlers.equipItemById
@@ -182,12 +181,6 @@ function ItemSearchHandlers.requestModalItems(player, searchText, category, qual
         -- Send data to client
         AIO.Handle(player, "GameMasterSystem", "receiveModalItemData", items)
     end, "world")
-end
-
--- Handler for searching items in the modal
-function ItemSearchHandlers.searchItemsForModal(player, searchText, category, qualities)
-    -- Just redirect to requestModalItems with the search parameters
-    ItemSearchHandlers.requestModalItems(player, searchText, category, qualities)
 end
 
 -- Search items from database with filtering

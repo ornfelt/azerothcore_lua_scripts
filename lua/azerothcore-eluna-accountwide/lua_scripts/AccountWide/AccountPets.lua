@@ -19,17 +19,14 @@ local RETROACTIVE_DELAY_MS = 150
 if not ENABLE_ACCOUNTWIDE_PETS then return end
 
 local AUtils = AccountWideUtils
+if not AUtils then
+    print("[AccountWide] Missing 00_AccountWideUtils.lua; disabling AccountWide Pets.")
+    return
+end
 
 local accountPetCache = {}
 local backfillDone = {}
-
-local function csvInt(list)
-    local out = {}
-    for i = 1, #list do
-        out[i] = tostring(list[i])
-    end
-    return table.concat(out, ",")
-end
+local petSyncInProgress = {}
 
 -- Build pet spell list dynamically
 -- class=15 subclass=2 (pets), spellid_1 is learning spell (483/55884), spellid_2 is the pet spell.
@@ -56,7 +53,7 @@ do
 end
 
 -- cache once at load:
-local PET_ID_CSV = (#uniq_pets > 0) and csvInt(uniq_pets) or "0"
+local PET_ID_CSV = AUtils.csvInt(uniq_pets)
 
 local function InitializePetTable(accountId)
     -- If already backfilled this session, skip backfill
@@ -87,13 +84,19 @@ local function OnLearnNewPet(event, player, spellID)
     if AUtils.shouldSkipAll and AUtils.shouldSkipAll(player) then return end
 
     local accountId = player:GetAccountId()
+    local guid = player:GetGUIDLow()
 
     if PET_ID_SET[spellID] then
+        local cached = accountPetCache[accountId]
+
+        if petSyncInProgress[guid] and cached and cached[spellID] then return end
+        if cached and cached[spellID] then return end
+
         CharDBExecute(string.format("INSERT IGNORE INTO accountwide_pets (accountId, petSpellId) VALUES (%d, %d)", accountId, spellID))
 
         -- Keep cache in sync
-        if accountPetCache[accountId] then
-            accountPetCache[accountId][spellID] = true
+        if cached then
+            cached[spellID] = true
         end
     end
 end
@@ -114,11 +117,17 @@ local function LearnOwnedPetsNow(player, accountId)
     if next(ownedSet) == nil then return end
 
     -- Learn only those the account owns (and this character doesn't yet have)
-    for spellId in pairs(ownedSet) do
-        if not player:HasSpell(spellId) then
-            player:LearnSpell(spellId)
+    local guid = player:GetGUIDLow()
+    petSyncInProgress[guid] = true
+    local ok = pcall(function()
+        for spellId in pairs(ownedSet) do
+            if not player:HasSpell(spellId) then
+                player:LearnSpell(spellId)
+            end
         end
-    end
+    end)
+    petSyncInProgress[guid] = nil
+    if not ok then return end
 end
 
 local function SyncPetsToPlayer(event, player)

@@ -4,12 +4,8 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Get module references
 local GMConfig = _G.GMConfig
@@ -45,7 +41,7 @@ local LIST_CONFIG = {
     ROW_HEIGHT = 22,
     HEADER_HEIGHT = 28,
     MAX_VISIBLE_ROWS = 20,
-    VIEW_MODE = "detailed", -- "compact" or "detailed"
+    VIEW_MODE = "detailed",
     SORT_COLUMN = "name",
     SORT_ORDER = "ASC",
     COLUMNS = {
@@ -62,16 +58,19 @@ local LIST_CONFIG = {
         { id = "actions", width = 45, text = "Actions", sortable = false }
     },
     COMPACT_COLUMNS = {
-        -- Columns shown in compact mode (optimized widths)
+        -- Columns shown in compact mode (optimized for ~380px narrow panel)
         { id = "checkbox", width = 20, text = "", sortable = false },
         { id = "status", width = 16, text = "", sortable = false },
-        { id = "name", width = 130, text = "Name", sortable = true },
-        { id = "level", width = 35, text = "Lvl", sortable = true },
-        { id = "class", width = 70, text = "Class", sortable = true },
-        { id = "zone", width = 130, text = "Zone/Last Seen", sortable = true },
-        { id = "actions", width = 45, text = "Actions", sortable = false }
+        { id = "name", width = 120, text = "Name", sortable = true },
+        { id = "level", width = 30, text = "Lvl", sortable = true },
+        { id = "class", width = 55, text = "Class", sortable = true },
+        { id = "actions", width = 35, text = "", sortable = false }
     }
 }
+
+local ROW_POOL = {}
+local ACTIVE_ROWS = {}
+local MAX_POOL_SIZE = LIST_CONFIG.MAX_VISIBLE_ROWS + 4
 
 -- Lazy initialization function for SearchManager
 function PlayerList.EnsureSearchManagerInitialized()
@@ -119,7 +118,18 @@ function PlayerList.CreateListView(parent)
     local listFrame = CreateFrame("Frame", nil, parent)
     listFrame:SetAllPoints()
     listFrame:Hide() -- Start hidden, will be shown when list view is selected
-    
+
+    -- Initialize view mode from settings, fallback to auto-select for narrow panels
+    local GMSettings = _G.GMSettings
+    if GMSettings and GMSettings.current then
+        LIST_CONFIG.VIEW_MODE = GMSettings.current.compactMode and "compact" or "detailed"
+    else
+        local parentWidth = parent:GetWidth()
+        if parentWidth < 500 then
+            LIST_CONFIG.VIEW_MODE = "compact"
+        end
+    end
+
     -- Top toolbar with filters
     local toolbar = CreateFrame("Frame", nil, listFrame)
     toolbar:SetHeight(35)
@@ -133,7 +143,7 @@ function PlayerList.CreateListView(parent)
     showOfflineCheck:SetChecked(PlayerList.showOfflineState)  -- Use persistent state
     
     -- View mode toggle button
-    local viewToggle = CreateStyledButton(toolbar, "Detailed View", 100, 24)
+    local viewToggle = CreateStyledButton(toolbar, LIST_CONFIG.VIEW_MODE == "compact" and "Compact View" or "Detailed View", 100, 24)
     viewToggle:SetPoint("LEFT", showOfflineCheck, "RIGHT", 15, 0)
     viewToggle:SetScript("OnClick", function(self)
         if LIST_CONFIG.VIEW_MODE == "detailed" then
@@ -142,6 +152,15 @@ function PlayerList.CreateListView(parent)
         else
             LIST_CONFIG.VIEW_MODE = "detailed"
             self:SetText("Detailed View")
+        end
+        -- Sync back to persistent setting
+        local GMSettings = _G.GMSettings
+        if GMSettings and GMSettings.current then
+            local isCompact = LIST_CONFIG.VIEW_MODE == "compact"
+            if GMSettings.current.compactMode ~= isCompact then
+                GMSettings.current.compactMode = isCompact
+                GMSettings.Save()
+            end
         end
         PlayerList.RefreshDisplay()
     end)
@@ -218,6 +237,7 @@ function PlayerList.CreateListView(parent)
     
     scrollBar:SetScript("OnValueChanged", function(self, value)
         scrollFrame:SetVerticalScroll(value)
+        PlayerList.RenderVisibleRows()
     end)
     
     -- Mouse wheel scrolling
@@ -281,6 +301,9 @@ function PlayerList.CreateListView(parent)
     pageInfo:SetText("Showing 1-10 of 10 players")
     pageInfo:SetTextColor(0.7, 0.7, 0.7, 1)
     
+    -- Prevent clearContentFrame from orphaning this frame
+    listFrame.preserveOnClear = true
+
     -- Store references
     listFrame.toolbar = toolbar
     listFrame.showOfflineCheck = showOfflineCheck
@@ -390,6 +413,45 @@ function PlayerList.CreateHeaders(headerRow, listFrame)
     end
 end
 
+function PlayerList.releaseRow(row)
+    row:Hide()
+    row:ClearAllPoints()
+    row.playerData = nil
+    table.insert(ROW_POOL, row)
+end
+
+function PlayerList.releaseAllRows()
+    for i = #ACTIVE_ROWS, 1, -1 do
+        PlayerList.releaseRow(ACTIVE_ROWS[i])
+        ACTIVE_ROWS[i] = nil
+    end
+end
+
+function PlayerList.RenderVisibleRows()
+    local listFrame = GMCards.playerListFrame
+    if not listFrame or not PlayerList._virtualData then return end
+
+    local scrollOffset = listFrame.scrollFrame:GetVerticalScroll() or 0
+    local visibleHeight = listFrame.scrollFrame:GetHeight()
+    local data = PlayerList._virtualData
+
+    local firstVisible = math.floor(scrollOffset / LIST_CONFIG.ROW_HEIGHT) + 1
+    local lastVisible = math.min(#data, firstVisible + MAX_POOL_SIZE - 1)
+    firstVisible = math.max(1, firstVisible)
+
+    PlayerList.releaseAllRows()
+
+    for i = firstVisible, lastVisible do
+        local player = data[i]
+        if player then
+            local row = PlayerList.CreatePlayerRow(listFrame.content, player, i)
+            table.insert(ACTIVE_ROWS, row)
+        end
+    end
+
+    listFrame.rows = ACTIVE_ROWS
+end
+
 -- Create a player row
 function PlayerList.CreatePlayerRow(parent, playerData, index)
     local row = CreateFrame("Frame", nil, parent)
@@ -489,12 +551,17 @@ function PlayerList.CreatePlayerRow(parent, playerData, index)
             end
             
         elseif column.id == "name" then
-            -- Player name with class color
+            -- Player name with class color (truncate for narrow columns)
             local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             nameText:SetPoint("LEFT", xOffset + 5, 0)
             nameText:SetWidth(column.width - 10)
             nameText:SetJustifyH("LEFT")
-            nameText:SetText(string.format("|cff%s%s|r", playerData.classColor or "FFFFFF", playerData.name))
+            local displayName = playerData.name or ""
+            local maxChars = math.floor(column.width / 7)
+            if #displayName > maxChars then
+                displayName = string.sub(displayName, 1, maxChars - 2) .. ".."
+            end
+            nameText:SetText(string.format("|cff%s%s|r", playerData.classColor or "FFFFFF", displayName))
             
         elseif column.id == "level" then
             -- Level
@@ -662,65 +729,40 @@ function PlayerList.CreatePlayerRow(parent, playerData, index)
     return row
 end
 
--- Populate the list with player data
+-- Populate the list with player data (virtual scrolling)
 function PlayerList.PopulateList(playerData)
     if not GMCards.playerListFrame then
         return
     end
-    
+
     local listFrame = GMCards.playerListFrame
-    local content = listFrame.content
-    
-    -- Clear existing rows
-    for _, row in ipairs(listFrame.rows) do
-        row:Hide()
-        row:SetParent(nil)
-    end
-    listFrame.rows = {}
-    
+
     -- Only recreate headers if view mode changed
-    local needsHeaderUpdate = false
     if listFrame.lastViewMode ~= LIST_CONFIG.VIEW_MODE then
-        needsHeaderUpdate = true
         listFrame.lastViewMode = LIST_CONFIG.VIEW_MODE
-    end
-    
-    -- Update headers only if needed
-    if needsHeaderUpdate then
-        -- Clear existing headers
         for _, header in pairs(listFrame.headers) do
             header:Hide()
             header:SetParent(nil)
         end
         wipe(listFrame.headers)
-        
-        -- Create new headers
         PlayerList.CreateHeaders(listFrame.headerRow, listFrame)
     end
-    
-    -- Apply current sort
+
     PlayerList.SortData(playerData)
-    
-    -- Create rows
-    for i, player in ipairs(playerData) do
-        local row = PlayerList.CreatePlayerRow(content, player, i)
-        table.insert(listFrame.rows, row)
-    end
-    
-    -- Update content height
-    content:SetHeight(math.max(1, #playerData * LIST_CONFIG.ROW_HEIGHT))
-    
-    -- Update scrollbar range
-    local maxScroll = math.max(0, content:GetHeight() - listFrame.scrollFrame:GetHeight())
+
+    GMCards.currentPlayerData = playerData
+    PlayerList._virtualData = playerData
+
+    local totalHeight = #playerData * LIST_CONFIG.ROW_HEIGHT
+    listFrame.content:SetHeight(math.max(1, totalHeight))
+
+    local maxScroll = math.max(0, totalHeight - listFrame.scrollFrame:GetHeight())
     listFrame.scrollBar:SetMinMaxValues(0, maxScroll)
     listFrame.scrollBar:SetValue(0)
-    
-    -- Update page info
-    local total = #playerData
-    listFrame.pageInfo:SetText(string.format("Showing %d players", total))
-    
-    -- Store current data
-    GMCards.currentPlayerData = playerData
+
+    PlayerList.RenderVisibleRows()
+
+    listFrame.pageInfo:SetText(string.format("Showing %d players", #playerData))
 end
 
 -- Sort data by column
@@ -1178,16 +1220,24 @@ function PlayerList.ToggleView(viewType)
     end
 
     if viewType == "list" then
-        GMCards.playerGridFrame:Hide()
-        GMCards.playerListFrame:Show()
         GMCards.currentViewMode = "list"
-
-        -- Re-apply filters to show correct data
-        PlayerList.ReapplyFilters()
+        if _G.GMTransitions then
+            _G.GMTransitions.crossfadeViews(GMCards.playerGridFrame, GMCards.playerListFrame, function()
+                PlayerList.ReapplyFilters()
+            end)
+        else
+            GMCards.playerGridFrame:Hide()
+            GMCards.playerListFrame:Show()
+            PlayerList.ReapplyFilters()
+        end
     else
-        GMCards.playerListFrame:Hide()
-        GMCards.playerGridFrame:Show()
         GMCards.currentViewMode = "grid"
+        if _G.GMTransitions then
+            _G.GMTransitions.crossfadeViews(GMCards.playerListFrame, GMCards.playerGridFrame)
+        else
+            GMCards.playerListFrame:Hide()
+            GMCards.playerGridFrame:Show()
+        end
     end
 end
 
@@ -1255,6 +1305,15 @@ function PlayerList.receivePlayerData(player, results, pagination)
         local total = pagination.totalCount or #results
         GMCards.playerListFrame.pageInfo:SetText(string.format("Showing %d players", total))
     end
+end
+
+-- Set view mode externally (called by GMSettings.Apply)
+function PlayerList.SetViewMode(mode)
+    LIST_CONFIG.VIEW_MODE = mode
+    if GMCards.playerListFrame and GMCards.playerListFrame.viewToggle then
+        GMCards.playerListFrame.viewToggle:SetText(mode == "compact" and "Compact View" or "Detailed View")
+    end
+    PlayerList.RefreshDisplay()
 end
 
 -- Initialize the player list module

@@ -14,6 +14,22 @@ end
 local GameMasterSystem = _G.GameMasterSystem
 local GMConfig = _G.GMConfig
 
+-- Reusable timer frame to avoid creating new frames on every delayed call
+local enchantTimerFrame = CreateFrame("Frame")
+enchantTimerFrame:Hide()
+
+-- Build slot info string for server communication
+-- Used by applyEnchantment, removeEnchantments, etc.
+function PlayerInventory.buildSlotInfo(itemData, isEquipment, slot)
+    if isEquipment then
+        return tostring(slot.slotId)
+    end
+    if itemData.bag >= 1500 and itemData.itemGuid then
+        return string.format("%d:%d:%d", itemData.bag, itemData.slot, itemData.itemGuid)
+    end
+    return string.format("%d:%d", itemData.bag, itemData.slot)
+end
+
 -- Apply optimistic enchant update to show immediate visual feedback
 local function applyOptimisticEnchantUpdate(slot, itemData, enchantId)
     if not slot or not itemData then return end
@@ -136,10 +152,9 @@ function PlayerInventory.processEnchantmentQueue()
         enchantData.slot
     )
     
-    -- Schedule next item with delay using frame timer
-    local timerFrame = CreateFrame("Frame")
+    -- Schedule next item with delay using reusable timer frame
     local elapsed = 0
-    timerFrame:SetScript("OnUpdate", function(self, delta)
+    enchantTimerFrame:SetScript("OnUpdate", function(self, delta)
         elapsed = elapsed + delta
         if elapsed >= 0.5 then
             self:SetScript("OnUpdate", nil)
@@ -183,30 +198,18 @@ function PlayerInventory.applyEnchantment(itemData, enchantId, isEquipment, slot
         applyOptimisticEnchantUpdate(slot, itemData, enchantId)
     end
     
-    -- Determine slot info for the server
-    local slotInfo
-    if isEquipment then
-        slotInfo = tostring(slot.slotId)
-    else
-        -- For custom bags (1500+), include the item GUID
-        if itemData.bag >= 1500 and itemData.itemGuid then
-            slotInfo = string.format("%d:%d:%d", itemData.bag, itemData.slot, itemData.itemGuid)
-        else
-            slotInfo = string.format("%d:%d", itemData.bag, itemData.slot)
-        end
-    end
-    
+    local slotInfo = PlayerInventory.buildSlotInfo(itemData, isEquipment, slot)
+
     if GMConfig.config.debug then
         print(string.format("[PlayerInventory] Applying enchant %d to %s (slotInfo: %s, isEquipment: %s)",
             enchantId, itemData.name or "item", slotInfo, tostring(isEquipment)))
-        
-        -- Additional debug for the pending enchantment
+
         print(string.format("[PlayerInventory] Pending enchantment set: bag=%d, slot=%d, enchantId=%d, guid=%s",
             itemData.bag or -1, itemData.slot or -1, enchantId, tostring(itemData.itemGuid)))
     end
-    
+
     -- Send request to server
-    AIO.Handle("GameMasterSystem", "enchantPlayerItem", 
+    AIO.Handle("GameMasterSystem", "enchantPlayerItem",
         PlayerInventory.currentPlayerName, slotInfo, enchantId, isEquipment)
     
     -- Show success message
@@ -221,34 +224,22 @@ end
 function PlayerInventory.removeEnchantments(itemData, isEquipment, slot)
     if not itemData then return end
     
-    -- Determine slot info for the server
-    local slotInfo
-    if isEquipment then
-        slotInfo = tostring(slot.slotId)
-    else
-        -- For custom bags (1500+), include the item GUID
-        if itemData.bag >= 1500 and itemData.itemGuid then
-            slotInfo = string.format("%d:%d:%d", itemData.bag, itemData.slot, itemData.itemGuid)
-        else
-            slotInfo = string.format("%d:%d", itemData.bag, itemData.slot)
-        end
-    end
-    
+    local slotInfo = PlayerInventory.buildSlotInfo(itemData, isEquipment, slot)
+
     if GMConfig.config.debug then
         print(string.format("[PlayerInventory] Removing enchants from %s (slotInfo: %s, isEquipment: %s)",
             itemData.name or "item", slotInfo, tostring(isEquipment)))
     end
-    
+
     -- Send request to server
-    AIO.Handle("GameMasterSystem", "removeItemEnchant", 
+    AIO.Handle("GameMasterSystem", "removeItemEnchant",
         PlayerInventory.currentPlayerName, slotInfo, isEquipment)
-    
+
     print(string.format("|cffffff00Removing enchantments from %s...|r", itemData.name or "item"))
-    
-    -- Refresh display after a short delay using frame timer
-    local timerFrame = CreateFrame("Frame")
+
+    -- Refresh display after a short delay using reusable timer frame
     local elapsed = 0
-    timerFrame:SetScript("OnUpdate", function(self, delta)
+    enchantTimerFrame:SetScript("OnUpdate", function(self, delta)
         elapsed = elapsed + delta
         if elapsed >= 0.5 then
             self:SetScript("OnUpdate", nil)

@@ -16,6 +16,18 @@ local SpellSearchStrategy = {}
 local Utils
 local FuzzyMatcher
 
+-- Cached column existence check (nil = not checked yet)
+local spellNameColumnValid = nil
+
+local function isSpellNameColumnValid()
+    if spellNameColumnValid ~= nil then
+        return spellNameColumnValid
+    end
+    local colCheck = WorldDBQuery("SHOW COLUMNS FROM spell LIKE 'spell_name_enus'")
+    spellNameColumnValid = colCheck ~= nil
+    return spellNameColumnValid
+end
+
 function SpellSearchStrategy.Initialize(utils, fuzzyMatcher)
     Utils = utils
     FuzzyMatcher = fuzzyMatcher
@@ -54,25 +66,27 @@ function SpellSearchStrategy.GetConfig()
 
         -- Build count query for accurate pagination
         buildCountQuery = function(params)
+            if not isSpellNameColumnValid() then return nil end
             local query = params.query or ""
 
             if query == "" then
                 return [[
                     SELECT COUNT(*)
                     FROM spell
-                    WHERE spellName0 != ''
+                    WHERE spell_name_enus != ''
                 ]]
             else
                 return string.format([[
                     SELECT COUNT(*)
                     FROM spell
-                    WHERE spellName0 LIKE '%%%s%%' OR id = '%s'
+                    WHERE spell_name_enus LIKE '%%%s%%' OR id = '%s'
                 ]], query, query)
             end
         end,
 
         -- Build main query
         buildQuery = function(params)
+            if not isSpellNameColumnValid() then return nil end
             local query = params.query or ""
             local offset = params.offset or 0
             local pageSize = params.pageSize or 50
@@ -80,18 +94,18 @@ function SpellSearchStrategy.GetConfig()
             if query == "" then
                 -- Get all spells (no search filter)
                 return string.format([[
-                    SELECT id, spellName0
+                    SELECT id, spell_name_enus
                     FROM spell
-                    WHERE spellName0 != ''
+                    WHERE spell_name_enus != ''
                     ORDER BY id ASC
                     LIMIT %d OFFSET %d
                 ]], pageSize, offset)
             else
                 -- Search by name or ID
                 return string.format([[
-                    SELECT id, spellName0
+                    SELECT id, spell_name_enus
                     FROM spell
-                    WHERE spellName0 LIKE '%%%s%%' OR id = '%s'
+                    WHERE spell_name_enus LIKE '%%%s%%' OR id = '%s'
                     ORDER BY id ASC
                     LIMIT %d OFFSET %d
                 ]], query, query, pageSize, offset)
@@ -122,19 +136,19 @@ function SpellSearchStrategy.GetConfig()
             local query = params.query or ""
 
             -- Only add suggestions if search had a query and returned 0 results
-            if query ~= "" and #results == 0 and FuzzyMatcher then
+            if query ~= "" and #results == 0 and FuzzyMatcher and isSpellNameColumnValid() then
                 -- Query for similar spell names using fuzzy matching
                 local suggestionQuery = string.format([[
-                    SELECT id, spellName0
+                    SELECT id, spell_name_enus
                     FROM spell
-                    WHERE spellName0 != ''
+                    WHERE spell_name_enus != ''
                     ORDER BY id ASC
                     LIMIT 100
                 ]])
 
-                -- Execute query synchronously for suggestions (small result set)
                 local suggestionResult = WorldDBQuery(suggestionQuery)
-                if suggestionResult then
+                local queryOk = suggestionResult ~= nil
+                if queryOk and suggestionResult then
                     local candidates = {}
                     repeat
                         local spellId = suggestionResult:GetUInt32(0)

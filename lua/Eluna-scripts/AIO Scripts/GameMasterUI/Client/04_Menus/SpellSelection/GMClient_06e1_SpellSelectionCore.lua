@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Get the shared namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Get module references
 local GMMenus = _G.GMMenus
@@ -78,13 +75,8 @@ function SpellSelection.openModal(playerName, castType)
             -- Clear state references
             SpellSelection.state.spellSelectionModal = nil
             SpellSelection.state.selectedSpells = {}
-            -- Close state machine state
+            -- Close state machine state, then fall through to reopen
             StateMachine.closeModal()
-            -- Don't continue - let user click again
-            if CreateStyledToast then
-                CreateStyledToast("Modal closed - please try again", 2, 0.5)
-            end
-            return false
         end
     end
 

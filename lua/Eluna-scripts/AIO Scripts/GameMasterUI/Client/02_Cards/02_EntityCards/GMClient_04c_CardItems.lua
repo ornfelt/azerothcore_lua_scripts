@@ -4,12 +4,7 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
-local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
+if not GM_RequireNamespace() then return end
 
 -- Get module references
 local GMCards = _G.GMCards
@@ -81,16 +76,23 @@ function GMCards.createItemCard(card, entity, index)
     -- Update text fields with proper positioning
     card.nameText:ClearAllPoints()
     card.nameText:SetPoint("TOP", card.iconBg, "BOTTOM", 0, -5)
-    card.nameText:SetText(itemName or ("Item #" .. itemID))
+    card.nameText:SetWordWrap(false)
+    card.nameText:SetText(GMCards.truncateText(itemName or ("Item #" .. itemID), card:GetWidth() - 10))
     card.nameText:SetTextColor(colors.r, colors.g, colors.b)
 
     card.entityText:ClearAllPoints()
-    card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
-    card.entityText:SetText("ID: " .. itemID)
+    card.entityText:SetPoint("BOTTOM", card, "BOTTOM", 0, 20)
+    card.entityText:SetWordWrap(false)
+    card.entityText:SetText("")
 
     card.additionalText:ClearAllPoints()
     card.additionalText:SetPoint("BOTTOM", card.entityText, "TOP", 0, 2)
+    card.additionalText:SetWordWrap(false)
     card.additionalText:SetText(string.format("iLvl: %d | Quality: %d", itemLevel or 0, quality))
+
+    -- Copyable ID fields at bottom
+    local displayId = entity.displayId or "?"
+    GMCards.createCopyableIdLine(card, "ID", itemID, "Disp", displayId)
 
     -- Handle equippable items with model preview (with safe comparison)
     local inventoryType = GMUtils and GMUtils.safeGetValue and GMUtils.safeGetValue(entity.inventoryType) or entity.inventoryType
@@ -117,7 +119,7 @@ function GMCards.createItemCard(card, entity, index)
                     if model then
                         model:SetParent(card)  -- Explicitly set parent
                         -- Use fixed size like transmogrification addon
-                        model:SetSize(card:GetWidth() - 20, card:GetHeight() - 30)
+                        model:SetSize(card:GetWidth() - 20, card:GetHeight() - 40)
                         model:SetPoint("CENTER", card, "CENTER", 0, 0)
                         model:SetFrameStrata("MEDIUM")
                         model:SetFrameLevel(card:GetFrameLevel() + 3)
@@ -212,6 +214,21 @@ function GMCards.createItemCard(card, entity, index)
 
     -- Add magnifier icon
     GMCards.addMagnifierIcon(card, entity, index, "Item")
+
+    -- Wire up card animations (icon-based, quality-aware)
+    local accentColor = { colors.r, colors.g, colors.b }
+    if GMCards.setupCardVisuals then
+        GMCards.setupCardVisuals(card, "Item", accentColor)
+    end
+    if GMCards.setupIconGlow then
+        GMCards.setupIconGlow(card, accentColor)
+    end
+    if GMCards.setupIconHoverEffects then
+        GMCards.setupIconHoverEffects(card)
+    end
+    if GMCards.setupClickFlash then
+        GMCards.setupClickFlash(card)
+    end
 
     return card
 end

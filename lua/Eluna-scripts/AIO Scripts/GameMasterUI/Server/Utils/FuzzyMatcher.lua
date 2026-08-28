@@ -161,7 +161,8 @@ function FuzzyMatcher.findSimilar(query, candidates, limit)
 
         -- Only include if within threshold
         if distance <= CONFIG.MAX_DISTANCE then
-            local similarity = calculateSimilarity(query, candidate)
+            local maxLen = math.max(#query, #candidate)
+            local similarity = maxLen > 0 and math.floor((1 - (distance / maxLen)) * 100) or 100
 
             if similarity >= CONFIG.MIN_SIMILARITY_PERCENT then
                 table.insert(matches, {
@@ -215,7 +216,8 @@ function FuzzyMatcher.findSimilarSpells(query, spellData, limit)
             local distance = levenshteinDistance(query, spell.name, CONFIG.MAX_DISTANCE)
 
             if distance <= CONFIG.MAX_DISTANCE then
-                local similarity = calculateSimilarity(query, spell.name)
+                local maxLen = math.max(#query, #spell.name)
+                local similarity = maxLen > 0 and math.floor((1 - (distance / maxLen)) * 100) or 100
 
                 if similarity >= CONFIG.MIN_SIMILARITY_PERCENT then
                     -- Clone spell object and add matching metadata

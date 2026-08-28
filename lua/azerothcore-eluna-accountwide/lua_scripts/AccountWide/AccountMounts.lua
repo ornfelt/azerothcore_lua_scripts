@@ -14,6 +14,8 @@ local MIN_MOUNT_LEVEL = 11  -- Minimum character level before mounts are learned
 local RETROACTIVE_NOTIFY = true
 local RETROACTIVE_DELAY_MS = 150
 
+local RESTRICT_BY_FACTION = true  -- true: restrict mounts between ally/horde. false: all mounts available.
+
 ------------------------------------------------------------------------------------------------
 -- END CONFIG
 ------------------------------------------------------------------------------------------------
@@ -21,24 +23,21 @@ local RETROACTIVE_DELAY_MS = 150
 if not ENABLE_ACCOUNTWIDE_MOUNTS then return end
 
 local AUtils = AccountWideUtils
+if not AUtils then
+    print("[AccountWide] Missing 00_AccountWideUtils.lua; disabling AccountWide Mounts.")
+    return
+end
 
 local accountMountCache = {}
 local backfillDone = {}
-
-local function csvInt(list)
-    local out = {}
-    for i = 1, #list do 
-        out[i] = tostring(list[i])
-    end
-    return table.concat(out, ",")
-end
+local mountSyncInProgress = {}
 
 -- Build mount spell list dynamically
 -- class=15 subclass=5 (mount), spellid_1 is learning spell (483/55884), spellid_2 is the mount spell.
 local MOUNT_ID_SET, uniq_list = {}, {}
 do
     local query = WorldDBQuery([[
-        SELECT DISTINCT spellid_2
+        SELECT spellid_2, AllowableRace
           FROM item_template
          WHERE class = 15
            AND subclass = 5
@@ -49,16 +48,28 @@ do
     if query then
         repeat
             local id = query:GetUInt32(0)
+            local raceMask = query:GetInt32(1)
+
             if id and id > 0 then
-                MOUNT_ID_SET[id] = true
-                uniq_list[#uniq_list+1] = id
+                if not MOUNT_ID_SET[id] then
+                    MOUNT_ID_SET[id] = raceMask
+                    uniq_list[#uniq_list+1] = id
+                elseif MOUNT_ID_SET[id] ~= -1 then
+                    -- If there are multiple items for the same spell, join permissions
+                    --  -1 equals all races (no restriction)
+                    if raceMask == -1 then
+                        MOUNT_ID_SET[id] = -1
+                    else
+                        MOUNT_ID_SET[id] = bit_or(MOUNT_ID_SET[id], raceMask)
+                    end
+                end
             end
         until not query:NextRow()
     end
 end
 
 -- cache once at load:
-local MOUNT_ID_CSV = (#uniq_list > 0) and csvInt(uniq_list) or "0"
+local MOUNT_ID_CSV = AUtils.csvInt(uniq_list)
 
 local function InitializeMountTable(accountId)
     -- If already backfilled this session, skip backfill
@@ -89,13 +100,18 @@ local function OnLearnNewMount(event, player, spellID)
     if AUtils.shouldSkipAll and AUtils.shouldSkipAll(player) then return end
 
     local accountId = player:GetAccountId()
+    local guid = player:GetGUIDLow()
 
     if MOUNT_ID_SET[spellID] then
+        local cached = accountMountCache[accountId]
+
+        if mountSyncInProgress[guid] and cached and cached[spellID] then return end
+        if cached and cached[spellID] then return end
+
         CharDBExecute(string.format("INSERT IGNORE INTO accountwide_mounts (accountId, mountSpellId) VALUES (%d, %d)", accountId, spellID))
 
-        -- Keep cache in sync
-        if accountMountCache[accountId] then
-            accountMountCache[accountId][spellID] = true
+        if cached then
+            cached[spellID] = true
         end
     end
 end
@@ -115,12 +131,24 @@ local function LearnOwnedMountsNow(player, accountId)
 
     if next(ownedSet) == nil then return end
 
+    local guid = player:GetGUIDLow()
+    local playerRaceMask = player:GetRaceMask()
+
     -- Learn only those the account owns (and this character doesn't yet have)
-    for spellId in pairs(ownedSet) do
-        if not player:HasSpell(spellId) then
-            player:LearnSpell(spellId)
+    mountSyncInProgress[guid] = true
+    local ok = pcall(function()
+        for spellId in pairs(ownedSet) do
+            if not player:HasSpell(spellId) then
+                local reqMask = MOUNT_ID_SET[spellId]
+                
+                if not RESTRICT_BY_FACTION or reqMask == nil or reqMask == -1 or bit_and(reqMask, playerRaceMask) > 0 then
+                    player:LearnSpell(spellId)
+                end
+            end
         end
-    end
+    end)
+    mountSyncInProgress[guid] = nil
+    if not ok then return end
 end
 
 local function SyncMountsToPlayer(event, player)
@@ -162,7 +190,15 @@ local function OnSendLearnedSpell(event, packet, player)
     end
 end
 
+local function OnPlayerLevelChanged(event, player, oldLevel)
+    local newLevel = player:GetLevel()
+    if oldLevel < MIN_MOUNT_LEVEL and newLevel >= MIN_MOUNT_LEVEL then
+        SyncMountsToPlayer(nil, player)
+    end
+end
+
 RegisterPlayerEvent(3, SyncMountsToPlayer) -- PLAYER_EVENT_ON_LOGIN
 RegisterPlayerEvent(44, OnLearnNewMount) -- PLAYER_EVENT_ON_LEARN_SPELL
+RegisterPlayerEvent(13, OnPlayerLevelChanged) -- PLAYER_EVENT_ON_LEVEL_CHANGE
 RegisterPacketEvent(299, 7, OnSendLearnedSpell) -- PACKET_EVENT_ON_PACKET_SEND (SMSG_LEARNED_SPELL)
 RegisterPacketEvent(300, 7, OnSendLearnedSpell) -- PACKET_EVENT_ON_PACKET_SEND (SMSG_SUPERCEDED_SPELL)

@@ -14,17 +14,6 @@
 local TemplateValidation = {}
 
 -- =====================================================
--- Module Initialization
--- =====================================================
-
-function TemplateValidation.Initialize(config, utils, databaseHelper)
-    -- TemplateValidation is a stateless utility module that provides
-    -- validation functions and field definitions. No initialization
-    -- is required, but this function exists for consistency with
-    -- the modular architecture pattern.
-end
-
--- =====================================================
 -- Creature Template Field Definitions & Validation
 -- =====================================================
 
@@ -84,6 +73,15 @@ local CREATURE_TEMPLATE_FIELDS = {
     MovementType = { type = "number", min = 0, max = 255 },
     movementId = { type = "number", min = 0 },
 
+    -- Movement override fields (creature_template_movement)
+    Ground = { type = "number", min = 0, max = 2 },
+    Swim = { type = "number", min = 0, max = 1 },
+    Flight = { type = "number", min = 0, max = 2 },
+    Rooted = { type = "number", min = 0, max = 1 },
+    Chase = { type = "number", min = 0, max = 2 },
+    Random = { type = "number", min = 0, max = 2 },
+    InteractionPauseTimer = { type = "number", min = 0, max = 600000 },
+
     -- Loot fields
     lootid = { type = "number", min = 0 },
     pickpocketloot = { type = "number", min = 0 },
@@ -137,31 +135,31 @@ local GAMEOBJECT_TEMPLATE_FIELDS = {
     ExtraFlags = { type = "number", min = 0 },
     size = { type = "decimal", min = 0.1, max = 50 },
 
-    -- Data fields (0-23)
-    data0 = { type = "number", min = 0 },
-    data1 = { type = "number", min = 0 },
-    data2 = { type = "number", min = 0 },
-    data3 = { type = "number", min = 0 },
-    data4 = { type = "number", min = 0 },
-    data5 = { type = "number", min = 0 },
-    data6 = { type = "number", min = 0 },
-    data7 = { type = "number", min = 0 },
-    data8 = { type = "number", min = 0 },
-    data9 = { type = "number", min = 0 },
-    data10 = { type = "number", min = 0 },
-    data11 = { type = "number", min = 0 },
-    data12 = { type = "number", min = 0 },
-    data13 = { type = "number", min = 0 },
-    data14 = { type = "number", min = 0 },
-    data15 = { type = "number", min = 0 },
-    data16 = { type = "number", min = 0 },
-    data17 = { type = "number", min = 0 },
-    data18 = { type = "number", min = 0 },
-    data19 = { type = "number", min = 0 },
-    data20 = { type = "number", min = 0 },
-    data21 = { type = "number", min = 0 },
-    data22 = { type = "number", min = 0 },
-    data23 = { type = "number", min = 0 },
+    -- Data fields (0-23) — column names are capitalized in gameobject_template
+    Data0 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data1 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data2 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data3 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data4 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data5 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data6 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data7 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data8 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data9 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data10 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data11 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data12 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data13 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data14 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data15 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data16 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data17 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data18 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data19 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data20 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data21 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data22 = { type = "number", min = -2147483648, max = 2147483647 },
+    Data23 = { type = "number", min = -2147483648, max = 2147483647 },
 
     -- AI and script fields
     AIName = { type = "string", max_length = 64, nullable = true },
@@ -339,52 +337,30 @@ function TemplateValidation.ValidateItemField(fieldName, value)
     return validateFieldCore(fieldName, value, ITEM_TEMPLATE_FIELDS)
 end
 
--- Validate all fields in a creature template data object
+-- Validate every non-entry field in `data` against the given field definitions.
+local function validateTemplate(data, fieldDefinitions)
+    local errors = {}
+    for fieldName, value in pairs(data) do
+        if fieldName ~= "entry" then
+            local isValid, errorMsg = validateFieldCore(fieldName, value, fieldDefinitions)
+            if not isValid then
+                table.insert(errors, errorMsg)
+            end
+        end
+    end
+    return #errors == 0, errors
+end
+
 function TemplateValidation.ValidateCreatureTemplate(data)
-    local errors = {}
-
-    for fieldName, value in pairs(data) do
-        if fieldName ~= "entry" then -- Skip entry field as it's handled separately
-            local isValid, errorMsg = TemplateValidation.ValidateCreatureField(fieldName, value)
-            if not isValid then
-                table.insert(errors, errorMsg)
-            end
-        end
-    end
-
-    return #errors == 0, errors
+    return validateTemplate(data, CREATURE_TEMPLATE_FIELDS)
 end
 
--- Validate all fields in a GameObject template data object
 function TemplateValidation.ValidateGameObjectTemplate(data)
-    local errors = {}
-
-    for fieldName, value in pairs(data) do
-        if fieldName ~= "entry" then -- Skip entry field as it's handled separately
-            local isValid, errorMsg = TemplateValidation.ValidateGameObjectField(fieldName, value)
-            if not isValid then
-                table.insert(errors, errorMsg)
-            end
-        end
-    end
-
-    return #errors == 0, errors
+    return validateTemplate(data, GAMEOBJECT_TEMPLATE_FIELDS)
 end
 
--- Validate all fields in an item template data object
 function TemplateValidation.ValidateItemTemplate(data)
-    local errors = {}
-
-    for fieldName, value in pairs(data) do
-        if fieldName ~= "entry" then -- Skip entry field as it's handled separately
-            local isValid, errorMsg = TemplateValidation.ValidateItemField(fieldName, value)
-            if not isValid then
-                table.insert(errors, errorMsg)
-            end
-        end
-    end
-
-    return #errors == 0, errors
+    return validateTemplate(data, ITEM_TEMPLATE_FIELDS)
 end
 
 -- Get field definitions (for external use)

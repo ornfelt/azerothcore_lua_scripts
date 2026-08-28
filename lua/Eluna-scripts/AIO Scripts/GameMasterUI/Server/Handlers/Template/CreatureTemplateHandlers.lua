@@ -99,6 +99,14 @@ function CreatureTemplateHandlers.getCreatureTemplateData(player, entry)
         HoverHeight = 1.0,
         MovementType = 0,
         movementId = 0,
+        -- Movement override defaults (creature_template_movement)
+        Ground = 1,
+        Swim = 1,
+        Flight = 0,
+        Rooted = 0,
+        Chase = 0,
+        Random = 0,
+        InteractionPauseTimer = 0,
         lootid = 0,
         pickpocketloot = 0,
         skinloot = 0,
@@ -223,6 +231,22 @@ function CreatureTemplateHandlers.getCreatureTemplateData(player, entry)
         data.auras = addonQuery:GetString(10) or ""
     end
 
+    -- Query movement override data from creature_template_movement
+    local movementQuery = WorldDBQuery(string.format([[
+        SELECT Ground, Swim, Flight, Rooted, Chase, Random, InteractionPauseTimer
+        FROM creature_template_movement WHERE CreatureId = %d
+    ]], entry))
+
+    if movementQuery then
+        data.Ground = movementQuery:GetUInt32(0)
+        data.Swim = movementQuery:GetUInt32(1)
+        data.Flight = movementQuery:GetUInt32(2)
+        data.Rooted = movementQuery:GetUInt32(3)
+        data.Chase = movementQuery:GetUInt32(4)
+        data.Random = movementQuery:GetUInt32(5)
+        data.InteractionPauseTimer = movementQuery:GetUInt32(6)
+    end
+
     -- Send data to client
     AIO.Handle(player, "CreatureTemplateEditor", "ReceiveTemplateData", data)
 end
@@ -329,12 +353,19 @@ function CreatureTemplateHandlers.updateCreatureTemplate(player, data)
         PvPFlags = true, emote = true, visibilityDistanceType = true,
         mount = true, MountCreatureID = true, path_id = true, auras = true
     }
+    local movementOverrideFields = {
+        Ground = true, Swim = true, Flight = true, Rooted = true,
+        Chase = true, Random = true, InteractionPauseTimer = true
+    }
+    local movementOverrideChanges = {}
 
     -- Build UPDATE query if there are changes
     if data.changes and next(data.changes) then
         for fieldName, value in pairs(data.changes) do
             if addonFields[fieldName] then
                 addonChanges[fieldName] = value
+            elseif movementOverrideFields[fieldName] then
+                movementOverrideChanges[fieldName] = value
             else
                 templateChanges[fieldName] = value
             end
@@ -358,13 +389,8 @@ function CreatureTemplateHandlers.updateCreatureTemplate(player, data)
                     table.concat(setParts, ", "), entry
             )
 
-            local result = WorldDBExecute(updateQuery)
-            if result ~= nil then
-                success = true
-            else
-                Utils.sendMessage(player, "error", "Failed to update creature template")
-                return
-            end
+            WorldDBExecute(updateQuery)
+            success = true
         end
 
         -- Update creature_template_addon
@@ -391,13 +417,8 @@ function CreatureTemplateHandlers.updateCreatureTemplate(player, data)
                         table.concat(setParts, ", "), entry
                 )
 
-                local result = WorldDBExecute(updateQuery)
-                if result ~= nil then
-                    success = true
-                else
-                    Utils.sendMessage(player, "error", "Failed to update creature template addon")
-                    return
-                end
+                WorldDBExecute(updateQuery)
+                success = true
             else
                 -- Create new addon record with default values
                 local defaultAddon = {
@@ -433,17 +454,55 @@ function CreatureTemplateHandlers.updateCreatureTemplate(player, data)
                         Utils.escapeString(defaultAddon.auras)
                 )
 
-                local result = WorldDBExecute(insertQuery)
-                if result ~= nil then
-                    success = true
-                else
-                    Utils.sendMessage(player, "error", "Failed to create creature template addon")
-                    return
-                end
+                WorldDBExecute(insertQuery)
+                success = true
             end
-        elseif data.changes and next(data.changes) then
-            -- Only template changes, success already set above
-            success = true
+        end
+
+        -- Update creature_template_movement
+        if next(movementOverrideChanges) then
+            local movExists = WorldDBQuery(string.format(
+                    "SELECT CreatureId FROM creature_template_movement WHERE CreatureId = %d",
+                    entry
+            ))
+
+            if movExists then
+                local setParts = {}
+                for fieldName, value in pairs(movementOverrideChanges) do
+                    table.insert(setParts, string.format("`%s` = %s", fieldName, tostring(value)))
+                end
+
+                local updateQuery = string.format(
+                        "UPDATE creature_template_movement SET %s WHERE CreatureId = %d",
+                        table.concat(setParts, ", "), entry
+                )
+
+                WorldDBExecute(updateQuery)
+                success = true
+            else
+                local defaultMov = {
+                    CreatureId = entry,
+                    Ground = 1, Swim = 1, Flight = 0, Rooted = 0,
+                    Chase = 0, Random = 0, InteractionPauseTimer = 0
+                }
+
+                for fieldName, value in pairs(movementOverrideChanges) do
+                    defaultMov[fieldName] = value
+                end
+
+                local insertQuery = string.format([[
+                    INSERT INTO creature_template_movement
+                    (CreatureId, Ground, Swim, Flight, Rooted, Chase, Random, InteractionPauseTimer)
+                    VALUES (%d, %d, %d, %d, %d, %d, %d, %d)
+                ]],
+                        defaultMov.CreatureId, defaultMov.Ground, defaultMov.Swim,
+                        defaultMov.Flight, defaultMov.Rooted, defaultMov.Chase,
+                        defaultMov.Random, defaultMov.InteractionPauseTimer
+                )
+
+                WorldDBExecute(insertQuery)
+                success = true
+            end
         end
 
         if success then

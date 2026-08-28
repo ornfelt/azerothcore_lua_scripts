@@ -37,9 +37,9 @@ end
 -- LRU Cache structure for each cache type
 local function createLRUCache(maxSize)
     return {
-        map = {},      -- key -> node
-        head = nil,    -- most recently used
-        tail = nil,    -- least recently used
+        map = {}, -- key -> node
+        head = nil, -- most recently used
+        tail = nil, -- least recently used
         size = 0,
         maxSize = maxSize
     }
@@ -47,18 +47,20 @@ end
 
 -- Cache storage with LRU support
 local caches = {
-    zones = createLRUCache(500),      -- Zone ID -> Zone Name
+    zones = createLRUCache(500), -- Zone ID -> Zone Name
     banStatus = createLRUCache(1000), -- "accountId:charGuid" -> {banned: bool, type: string}
     playerData = createLRUCache(200), -- Player GUID -> full player data
-    itemData = createLRUCache(1000),  -- Item ID -> item template data
+    itemData = createLRUCache(1000), -- Item ID -> item template data
+    spellData = createLRUCache(500), -- Spell search key -> results
 }
 
 -- TTL configuration (in seconds)
 local TTL_CONFIG = {
-    zones = 300,      -- 5 minutes (zones rarely change)
-    banStatus = 60,   -- 1 minute (bans need frequent updates)
-    playerData = 30,  -- 30 seconds (player data changes frequently)
-    itemData = 600,   -- 10 minutes (item templates rarely change)
+    zones = 300, -- 5 minutes (zones rarely change)
+    banStatus = 60, -- 1 minute (bans need frequent updates)
+    playerData = 30, -- 30 seconds (player data changes frequently)
+    itemData = 600, -- 10 minutes (item templates rarely change)
+    spellData = 300, -- 5 minutes (spell data rarely changes)
 }
 
 -- Cache statistics for monitoring
@@ -67,6 +69,7 @@ local stats = {
     banStatus = { hits = 0, misses = 0, sets = 0 },
     playerData = { hits = 0, misses = 0, sets = 0 },
     itemData = { hits = 0, misses = 0, sets = 0 },
+    spellData = { hits = 0, misses = 0, sets = 0 },
 }
 
 -- Reference to config (will be injected)
@@ -135,7 +138,9 @@ end
 -- Clean expired entries from LRU cache
 local function cleanExpiredEntries(cacheType)
     local lru = caches[cacheType]
-    if not lru then return 0 end
+    if not lru then
+        return 0
+    end
 
     local currentTime = getCurrentTime()
     local cleaned = 0
@@ -223,7 +228,7 @@ function QueryCache.set(cacheType, key, value, customTTL)
             local evicted = evictLRU(lru)
             if Config and Config.debug and evicted then
                 print(string.format("[QueryCache] LRU evicted: %s (key: %s)",
-                    cacheType, tostring(evicted.key)))
+                        cacheType, tostring(evicted.key)))
             end
         end
 
@@ -320,6 +325,15 @@ function QueryCache.setItemData(itemId, itemData)
     return QueryCache.set("itemData", tostring(itemId), itemData)
 end
 
+-- Spell data caching
+function QueryCache.getSpellData(key)
+    return QueryCache.get("spellData", key)
+end
+
+function QueryCache.setSpellData(key, data)
+    return QueryCache.set("spellData", key, data)
+end
+
 -- =====================================================
 -- Cache Maintenance Functions
 -- =====================================================
@@ -386,7 +400,7 @@ function QueryCache.getStats()
     end
 
     totalStats.hitRate = totalStats.hits + totalStats.misses > 0 and
-        (totalStats.hits / (totalStats.hits + totalStats.misses)) or 0
+            (totalStats.hits / (totalStats.hits + totalStats.misses)) or 0
 
     return {
         total = totalStats,
@@ -427,8 +441,9 @@ function QueryCache.Initialize(config)
     end
 
     -- Start periodic cleanup (every 5 minutes)
-    -- Note: This would need to be implemented with a timer system
-    -- For now, cleanup will be manual or triggered by cache operations
+    CreateLuaEvent(function()
+        QueryCache.periodicCleanup()
+    end, 300000, 0)
 end
 
 -- Manual cleanup trigger (call periodically)

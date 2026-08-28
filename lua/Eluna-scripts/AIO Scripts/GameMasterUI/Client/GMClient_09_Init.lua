@@ -8,12 +8,8 @@ if AIO.AddAddon() then
     return
 end
 
--- Verify namespace exists
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Local references
 local GMData = _G.GMData
@@ -57,16 +53,50 @@ local function OnLogin(event, player)
     GMUtils.delayedExecution(0.5, function()
         -- Create UI if GM level is sufficient
         if GMData.gmLevel >= GMConfig.config.REQUIRED_GM_LEVEL then
-            if GMUI and GMUI.initializeUI then
-                GMUI.initializeUI()
-                GMUtils.debug("GM UI created successfully")
-                
-                -- Finalize any cross-module dependencies
-                if GameMasterSystem.FinalizeHandlers then
-                    GameMasterSystem.FinalizeHandlers()
+            -- Load settings before UI creation
+            local GMSettings = _G.GMSettings
+            if GMSettings and GMSettings.Load then
+                GMSettings.Load()
+            end
+
+            local ok, err = pcall(function()
+                if GMUI and GMUI.initializeUI then
+                    GMUI.initializeUI()
+
+                    -- Hook OnHide for slide animation cleanup
+                    if GMUI.hookSlideOnHide and GMData.frames.mainFrame then
+                        GMUI.hookSlideOnHide(GMData.frames.mainFrame)
+                    end
+
+                    -- Apply settings after UI creation
+                    if GMSettings and GMSettings.Apply then
+                        GMSettings.Apply()
+                    end
+
+                    GMUtils.debug("GM UI created successfully")
+
+                    -- Finalize any cross-module dependencies
+                    if GameMasterSystem.FinalizeHandlers then
+                        GameMasterSystem.FinalizeHandlers()
+                    end
+                else
+                    GMUtils.debug("GMUI.createMainFrame not found")
                 end
-            else
-                GMUtils.debug("GMUI.createMainFrame not found")
+            end)
+
+            if not ok then
+                print("|cffff0000[GM] UI init error:|r " .. tostring(err))
+            end
+
+            -- Ensure side tab exists even if UI init errored
+            if not GMData.frames.sideTab and GMUI.createSideTab then
+                GMUI.createSideTab()
+            end
+
+            -- Create shortcut bar (anchored to side tab)
+            local GMShortcutBar = _G.GMShortcutBar
+            if GMShortcutBar and GMShortcutBar.Create then
+                GMShortcutBar.Create()
             end
         else
             GMUtils.debug("Insufficient GM level:", GMData.gmLevel)
@@ -97,12 +127,9 @@ local function OnCommand(msg, player)
         
         if GMData.frames.mainFrame then
             if GMData.frames.mainFrame:IsShown() then
-                GMData.frames.mainFrame:Hide()
+                GMUI.slideOut()
             else
-                -- Reset position to center before showing
-                GMData.frames.mainFrame:ClearAllPoints()
-                GMData.frames.mainFrame:SetPoint("CENTER")
-                GMData.frames.mainFrame:Show()
+                GMUI.slideIn()
                 -- Request data for current tab
                 if GMDataHandler and GMDataHandler.RequestDataForCurrentTab then
                     GMDataHandler.RequestDataForCurrentTab()
@@ -227,14 +254,9 @@ local function OnCommand(msg, player)
     end
 end
 
--- Create event frame for login handling
-local eventFrame = CreateFrame("Frame")
-eventFrame:RegisterEvent("PLAYER_LOGIN")
-eventFrame:SetScript("OnEvent", function(self, event, ...)
-    if event == "PLAYER_LOGIN" then
-        OnLogin(event, ...)
-    end
-end)
+-- AIO delivers client code after PLAYER_LOGIN has already fired,
+-- so call init directly instead of waiting for an event we missed.
+OnLogin()
 
 -- Add refresh data function for sort order changes
 function GameMasterSystem.refreshData()

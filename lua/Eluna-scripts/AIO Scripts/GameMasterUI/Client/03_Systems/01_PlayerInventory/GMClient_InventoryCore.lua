@@ -4,12 +4,8 @@ if AIO.AddAddon() then
     return -- Exit if on server
 end
 
--- Verify namespace exists
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[ERROR] GameMasterSystem namespace not found! Check load order.")
-    return
-end
 
 -- Get module references
 local GMConfig = _G.GMConfig
@@ -703,13 +699,8 @@ function PlayerInventory.showInventoryModal(playerName)
                 end
                 -- Clear state reference
                 PlayerInventory.currentModal = nil
-                -- Close state machine state
+                -- Close state machine state, then fall through to reopen
                 StateMachine.closeModal()
-                -- Don't continue - let user click again
-                if CreateStyledToast then
-                    CreateStyledToast("Modal closed - please try again", 2, 0.5)
-                end
-                return
             end
         end
 

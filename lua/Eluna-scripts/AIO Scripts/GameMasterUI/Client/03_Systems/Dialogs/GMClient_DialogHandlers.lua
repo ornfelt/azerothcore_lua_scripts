@@ -5,11 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Use existing namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    print("[GameMasterSystem] ERROR: Namespace not found in DialogHandlers! Check load order.")
-    return
-end
 
 -- Access shared data and UI references
 local GMData = _G.GMData

@@ -41,7 +41,6 @@ function TemplateCore.Initialize(gmSystem, config, utils, database, databaseHelp
     DatabaseHelper = databaseHelper
 
     -- Initialize all sub-modules with shared dependencies
-    TemplateValidation.Initialize(config, utils, databaseHelper)
     CreatureTemplateHandlers.Initialize(config, utils, databaseHelper, TemplateValidation)
     GameObjectTemplateHandlers.Initialize(config, utils, databaseHelper, TemplateValidation)
     ItemTemplateHandlers.Initialize(config, utils, databaseHelper, TemplateValidation)

@@ -15,6 +15,31 @@ local GameMasterSystem = _G.GameMasterSystem
 local GMConfig = _G.GMConfig
 local GMUtils = _G.GMUtils
 
+-- Hoisted constants (avoid rebuilding on every UpdateSlot call)
+local QUALITY_NAMES = {"Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary"}
+
+local EQUIPMENT_EMPTY_TEXTURES = {
+    [0] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Head",
+    [1] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Neck",
+    [2] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Shoulder",
+    [3] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Shirt",
+    [4] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest",
+    [5] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Waist",
+    [6] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Legs",
+    [7] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Feet",
+    [8] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Wrists",
+    [9] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Hands",
+    [10] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Finger",
+    [11] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Finger",
+    [12] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Trinket",
+    [13] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Trinket",
+    [14] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest",
+    [15] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-MainHand",
+    [16] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-SecondaryHand",
+    [17] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Ranged",
+    [18] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Tabard",
+}
+
 -- Create inventory slot using proper UIStyleLibrary
 function PlayerInventory.createInventorySlot(parent, slotData, isEquipment)
     local INVENTORY_CONFIG = PlayerInventory.INVENTORY_CONFIG
@@ -165,8 +190,7 @@ function PlayerInventory.createInventorySlot(parent, slotData, isEquipment)
             
             if itemTexture then
                 -- Convert numeric quality to string
-                local qualityNames = {"Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary"}
-                local qualityString = qualityNames[itemQuality + 1] or "Common"
+                local qualityString = QUALITY_NAMES[itemQuality + 1] or "Common"
                 
                 -- Add visual indicator for enchanted items
                 local isEnchanted = enchantId and enchantId > 0
@@ -255,8 +279,7 @@ function PlayerInventory.createInventorySlot(parent, slotData, isEquipment)
                 -- Use server-provided name if available
                 local displayName = itemData.name or string.format("Item #%d", itemData.entry)
                 local displayQuality = itemData.quality or 1
-                local qualityNames = {"Poor", "Common", "Uncommon", "Rare", "Epic", "Legendary"}
-                local qualityString = qualityNames[displayQuality + 1] or "Common"
+                local qualityString = QUALITY_NAMES[displayQuality + 1] or "Common"
                 
                 -- Use a loading icon for cache-missed items
                 local fallbackTexture = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -342,29 +365,7 @@ function PlayerInventory.createInventorySlot(parent, slotData, isEquipment)
             -- Empty slot - use appropriate texture based on slot type
             local emptyTexture = "Interface\\PaperDoll\\UI-Backpack-EmptySlot"
             if isEquipment and self.slotId then
-                -- Use equipment-specific empty slot textures if available
-                local equipmentEmptyTextures = {
-                    [0] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Head",
-                    [1] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Neck",
-                    [2] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Shoulder",
-                    [3] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Shirt",
-                    [4] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest",
-                    [5] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Waist",
-                    [6] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Legs",
-                    [7] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Feet",
-                    [8] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Wrists",
-                    [9] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Hands",
-                    [10] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Finger",
-                    [11] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Finger",
-                    [12] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Trinket",
-                    [13] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Trinket",
-                    [14] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Chest",  -- Back uses chest texture
-                    [15] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-MainHand",
-                    [16] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-SecondaryHand",
-                    [17] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Ranged",
-                    [18] = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Tabard",
-                }
-                emptyTexture = equipmentEmptyTextures[self.slotId] or emptyTexture
+                emptyTexture = EQUIPMENT_EMPTY_TEXTURES[self.slotId] or emptyTexture
             end
             
             local emptyData = {
@@ -1190,70 +1191,63 @@ function PlayerInventory.createEquipmentPanel(parent)
     return equipPanel
 end
 
--- Create inventory panel with grid layout
-function PlayerInventory.createInventoryPanel(parent)
-    local INVENTORY_CONFIG = PlayerInventory.INVENTORY_CONFIG
-    
-    local invPanel = CreateStyledFrame(parent, UISTYLE_COLORS.ContentBg)
-    invPanel:SetAllPoints()
-    
-    -- Create search bar at the top with proper styling
-    local searchBox = CreateStyledSearchBox(invPanel, 350, "Search...", function(text)
-        PlayerInventory.filterInventoryItems(text)
-    end)
-    searchBox:SetPoint("TOP", invPanel, "TOP", 0, -10)
-    
+-- Shared helper for creating scrollable item panels (inventory/bank)
+-- opts.searchCallback: function(text) called on search input
+-- opts.countLabelText: initial text for item count label
+-- opts.countLabelKey: key to store count label on panel (e.g. "itemCountText" or "bankItemCountText")
+-- opts.collapseFunc: function called on collapse all
+-- opts.expandFunc: function called on expand all
+local function createScrollableItemPanel(parent, opts)
+    local panel = CreateStyledFrame(parent, UISTYLE_COLORS.ContentBg)
+    panel:SetAllPoints()
+
+    -- Search bar
+    local searchBox = CreateStyledSearchBox(panel, 350, "Search...", opts.searchCallback)
+    searchBox:SetPoint("TOP", panel, "TOP", 0, -10)
+
     -- Item count display
-    local itemCountText = invPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    itemCountText:SetPoint("LEFT", searchBox, "RIGHT", 15, 0)
-    itemCountText:SetText("Items: 0 / 0")
-    itemCountText:SetTextColor(UISTYLE_COLORS.TextGrey[1], UISTYLE_COLORS.TextGrey[2], UISTYLE_COLORS.TextGrey[3])
-    invPanel.itemCountText = itemCountText
-    
-    -- Add Collapse All button
-    local collapseAllBtn = CreateStyledButton(invPanel, "[-]", 30, 20)
-    collapseAllBtn:SetPoint("TOPRIGHT", invPanel, "TOPRIGHT", -60, -12)
-    collapseAllBtn:SetScript("OnClick", function()
-        PlayerInventory.collapseAllBags()
-    end)
+    local countText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    countText:SetPoint("LEFT", searchBox, "RIGHT", 15, 0)
+    countText:SetText(opts.countLabelText)
+    countText:SetTextColor(UISTYLE_COLORS.TextGrey[1], UISTYLE_COLORS.TextGrey[2], UISTYLE_COLORS.TextGrey[3])
+    panel[opts.countLabelKey] = countText
+
+    -- Collapse All button
+    local collapseAllBtn = CreateStyledButton(panel, "[-]", 30, 20)
+    collapseAllBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -60, -12)
+    collapseAllBtn:SetScript("OnClick", opts.collapseFunc)
     collapseAllBtn:SetTooltip("Collapse All", "Hide all bag contents")
-    
-    -- Add Expand All button
-    local expandAllBtn = CreateStyledButton(invPanel, "[+]", 30, 20)
+
+    -- Expand All button
+    local expandAllBtn = CreateStyledButton(panel, "[+]", 30, 20)
     expandAllBtn:SetPoint("RIGHT", collapseAllBtn, "LEFT", -5, 0)
-    expandAllBtn:SetScript("OnClick", function()
-        PlayerInventory.expandAllBags()
-    end)
+    expandAllBtn:SetScript("OnClick", opts.expandFunc)
     expandAllBtn:SetTooltip("Expand All", "Show all bag contents")
-    
-    -- Create scrollable container for inventory slots
-    local containerWidth = 550  -- Fixed width for consistency
-    local containerHeight = 400  -- Fixed height
-    
-    -- Use CreateScrollableFrame if available
+
+    -- Scrollable container
+    local containerWidth = 550
+    local containerHeight = 400
+
     local container, content, scrollBar, updateScrollBar
     if CreateScrollableFrame then
         container, content, scrollBar, updateScrollBar = CreateScrollableFrame(
-            invPanel,
-            containerWidth,
-            containerHeight
+            panel, containerWidth, containerHeight
         )
         container:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -175, -15)
-        container:SetPoint("BOTTOMRIGHT", invPanel, "BOTTOMRIGHT", -25, 10)
+        container:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -25, 10)
     else
-        -- Fallback to manual creation
-        container = CreateFrame("Frame", nil, invPanel)
+        container = CreateFrame("Frame", nil, panel)
         container:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -175, -15)
-        container:SetPoint("BOTTOMRIGHT", invPanel, "BOTTOMRIGHT", -25, 10)
-        
+        container:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -25, 10)
+
         local scrollFrame = CreateFrame("ScrollFrame", nil, container)
         scrollFrame:SetAllPoints()
-        
+
         content = CreateFrame("Frame", nil, scrollFrame)
         content:SetWidth(container:GetWidth() - 20)
         content:SetHeight(1)
         scrollFrame:SetScrollChild(content)
-        
+
         scrollBar = CreateFrame("Slider", nil, scrollFrame, "UIPanelScrollBarTemplate")
         scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 4, -16)
         scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 4, 16)
@@ -1261,7 +1255,7 @@ function PlayerInventory.createInventoryPanel(parent)
         scrollBar:SetValueStep(20)
         scrollBar:SetValue(0)
         scrollBar:SetWidth(16)
-        
+
         updateScrollBar = function()
             local maxScroll = math.max(0, content:GetHeight() - container:GetHeight())
             scrollBar:SetMinMaxValues(0, maxScroll)
@@ -1272,11 +1266,11 @@ function PlayerInventory.createInventoryPanel(parent)
                 scrollBar:SetValue(0)
             end
         end
-        
+
         scrollBar:SetScript("OnValueChanged", function(self, value)
             scrollFrame:SetVerticalScroll(value)
         end)
-        
+
         scrollFrame:EnableMouseWheel(true)
         scrollFrame:SetScript("OnMouseWheel", function(self, delta)
             local current = scrollBar:GetValue()
@@ -1288,146 +1282,44 @@ function PlayerInventory.createInventoryPanel(parent)
                 scrollBar:SetValue(math.min(max, current + step))
             end
         end)
-        
-        -- Store the scrollFrame reference for compatibility
+
         container.scrollFrame = scrollFrame
     end
-    
-    invPanel.container = container
-    
-    -- Store references
-    invPanel.scrollFrame = container.scrollFrame or container  -- Reference scrollFrame or container
-    invPanel.content = content
-    invPanel.scrollBar = scrollBar
-    invPanel.updateScrollBar = updateScrollBar
-    invPanel.searchBox = searchBox
-    
-    -- Initialize slot storage
-    invPanel.slots = {}
-    invPanel.slotMap = {} -- For O(1) lookup
-    invPanel.bagHeaders = {} -- Store bag header frames
-    
-    return invPanel
+
+    panel.container = container
+    panel.scrollFrame = container.scrollFrame or container
+    panel.content = content
+    panel.scrollBar = scrollBar
+    panel.updateScrollBar = updateScrollBar
+    panel.searchBox = searchBox
+
+    panel.slots = {}
+    panel.slotMap = {}
+    panel.bagHeaders = {}
+
+    return panel
+end
+
+-- Create inventory panel with grid layout
+function PlayerInventory.createInventoryPanel(parent)
+    return createScrollableItemPanel(parent, {
+        searchCallback = function(text) PlayerInventory.filterInventoryItems(text) end,
+        countLabelText = "Items: 0 / 0",
+        countLabelKey = "itemCountText",
+        collapseFunc = function() PlayerInventory.collapseAllBags() end,
+        expandFunc = function() PlayerInventory.expandAllBags() end,
+    })
 end
 
 -- Create bank panel with grid layout
 function PlayerInventory.createBankPanel(parent)
-    local INVENTORY_CONFIG = PlayerInventory.INVENTORY_CONFIG
-    
-    local bankPanel = CreateStyledFrame(parent, UISTYLE_COLORS.ContentBg)
-    bankPanel:SetAllPoints()
-    
-    -- Create search bar at the top with proper styling (matching inventory panel)
-    local searchBox = CreateStyledSearchBox(bankPanel, 350, "Search...", function(text)
-        PlayerInventory.filterBankItems(text)
-    end)
-    searchBox:SetPoint("TOP", bankPanel, "TOP", 0, -10)
-    
-    -- Bank item count display (positioned like inventory panel)
-    local bankItemCountText = bankPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bankItemCountText:SetPoint("LEFT", searchBox, "RIGHT", 15, 0)
-    bankItemCountText:SetText("Bank Items: 0 / 0")
-    bankItemCountText:SetTextColor(UISTYLE_COLORS.TextGrey[1], UISTYLE_COLORS.TextGrey[2], UISTYLE_COLORS.TextGrey[3])
-    bankPanel.bankItemCountText = bankItemCountText
-    
-    -- Add Collapse All button (matching inventory panel)
-    local collapseAllBtn = CreateStyledButton(bankPanel, "[-]", 30, 20)
-    collapseAllBtn:SetPoint("TOPRIGHT", bankPanel, "TOPRIGHT", -60, -12)
-    collapseAllBtn:SetScript("OnClick", function()
-        PlayerInventory.collapseAllBags()
-    end)
-    collapseAllBtn:SetTooltip("Collapse All", "Hide all bag contents")
-    
-    -- Add Expand All button (matching inventory panel)
-    local expandAllBtn = CreateStyledButton(bankPanel, "[+]", 30, 20)
-    expandAllBtn:SetPoint("RIGHT", collapseAllBtn, "LEFT", -5, 0)
-    expandAllBtn:SetScript("OnClick", function()
-        PlayerInventory.expandAllBags()
-    end)
-    expandAllBtn:SetTooltip("Expand All", "Show all bag contents")
-    
-    -- Create scrollable container for bank slots
-    local containerWidth = 550  -- Fixed width for consistency
-    local containerHeight = 400  -- Same as inventory panel
-    
-    -- Use CreateScrollableFrame if available
-    local container, content, scrollBar, updateScrollBar
-    if CreateScrollableFrame then
-        container, content, scrollBar, updateScrollBar = CreateScrollableFrame(
-            bankPanel,
-            containerWidth,
-            containerHeight
-        )
-        container:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -175, -15)
-        container:SetPoint("BOTTOMRIGHT", bankPanel, "BOTTOMRIGHT", -25, 10)
-    else
-        -- Fallback to manual creation
-        container = CreateFrame("Frame", nil, bankPanel)
-        container:SetPoint("TOPLEFT", searchBox, "BOTTOMLEFT", -175, -15)
-        container:SetPoint("BOTTOMRIGHT", bankPanel, "BOTTOMRIGHT", -25, 10)
-        
-        local scrollFrame = CreateFrame("ScrollFrame", nil, container)
-        scrollFrame:SetAllPoints()
-        
-        content = CreateFrame("Frame", nil, scrollFrame)
-        content:SetWidth(container:GetWidth() - 20)
-        content:SetHeight(1)
-        scrollFrame:SetScrollChild(content)
-        
-        scrollBar = CreateFrame("Slider", nil, scrollFrame, "UIPanelScrollBarTemplate")
-        scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 4, -16)
-        scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 4, 16)
-        scrollBar:SetMinMaxValues(0, 0)
-        scrollBar:SetValueStep(20)
-        scrollBar:SetValue(0)
-        scrollBar:SetWidth(16)
-        
-        updateScrollBar = function()
-            local maxScroll = math.max(0, content:GetHeight() - container:GetHeight())
-            scrollBar:SetMinMaxValues(0, maxScroll)
-            if maxScroll > 0 then
-                scrollBar:Show()
-            else
-                scrollBar:Hide()
-                scrollBar:SetValue(0)
-            end
-        end
-        
-        scrollBar:SetScript("OnValueChanged", function(self, value)
-            scrollFrame:SetVerticalScroll(value)
-        end)
-        
-        scrollFrame:EnableMouseWheel(true)
-        scrollFrame:SetScript("OnMouseWheel", function(self, delta)
-            local current = scrollBar:GetValue()
-            local min, max = scrollBar:GetMinMaxValues()
-            local step = 40
-            if delta > 0 then
-                scrollBar:SetValue(math.max(min, current - step))
-            else
-                scrollBar:SetValue(math.min(max, current + step))
-            end
-        end)
-        
-        -- Store the scrollFrame reference for compatibility
-        container.scrollFrame = scrollFrame
-    end
-    
-    bankPanel.container = container
-    
-    -- Store references
-    bankPanel.scrollFrame = container.scrollFrame or container  -- Reference scrollFrame or container
-    bankPanel.content = content
-    bankPanel.scrollBar = scrollBar
-    bankPanel.updateScrollBar = updateScrollBar
-    bankPanel.searchBox = searchBox
-    
-    -- Initialize slot storage
-    bankPanel.slots = {}
-    bankPanel.slotMap = {} -- For O(1) lookup
-    bankPanel.bagHeaders = {} -- Store bank bag header frames
-    
-    return bankPanel
+    return createScrollableItemPanel(parent, {
+        searchCallback = function(text) PlayerInventory.filterBankItems(text) end,
+        countLabelText = "Bank Items: 0 / 0",
+        countLabelKey = "bankItemCountText",
+        collapseFunc = function() PlayerInventory.collapseAllBags() end,
+        expandFunc = function() PlayerInventory.expandAllBags() end,
+    })
 end
 
 -- Debug message

@@ -5,10 +5,8 @@ if AIO.AddAddon() then
 end
 
 -- Get the shared namespace
+if not GM_RequireNamespace() then return end
 local GameMasterSystem = _G.GameMasterSystem
-if not GameMasterSystem then
-    return
-end
 
 -- State Machine Module for GameMaster UI System
 local StateMachine = {}

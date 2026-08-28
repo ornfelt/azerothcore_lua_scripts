@@ -42,12 +42,44 @@ function BanHandlers.RegisterHandlers(gms, config, utils, database, dbHelper)
     Utils = utils
     Database = database
     DatabaseHelper = dbHelper
-    
+
+    -- Ensure character_banned table exists (standard TC/AC table)
+    BanHandlers.ensureCharacterBannedTable()
+
     -- Register all ban-related handlers
     GameMasterSystem.banPlayer = BanHandlers.banPlayer
     GameMasterSystem.unbanPlayer = BanHandlers.unbanPlayer
     GameMasterSystem.getBanInfo = BanHandlers.getBanInfo
     GameMasterSystem.checkServerCapabilities = BanHandlers.checkServerCapabilities
+end
+
+-- Create the character_banned table if it doesn't exist in characters database
+function BanHandlers.ensureCharacterBannedTable()
+    local exists = CharDBQuery("SHOW TABLES LIKE 'character_banned'")
+    if exists then return end
+
+    -- Table missing — create in characters DB (standard location)
+    local createSQL = [[
+        CREATE TABLE IF NOT EXISTS `character_banned` (
+            `guid` int unsigned NOT NULL DEFAULT '0' COMMENT 'Global Unique Identifier',
+            `bandate` int unsigned NOT NULL DEFAULT '0',
+            `unbandate` int unsigned NOT NULL DEFAULT '0',
+            `bannedby` varchar(50) NOT NULL,
+            `banreason` varchar(255) NOT NULL,
+            `active` tinyint unsigned NOT NULL DEFAULT '1',
+            PRIMARY KEY (`guid`,`bandate`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Ban List'
+    ]]
+
+    local success = pcall(function()
+        CharDBExecute(createSQL)
+    end)
+
+    if success then
+        print("[GameMasterUI] Created missing 'character_banned' table in characters database")
+    else
+        print("[GameMasterUI] WARNING: Failed to create 'character_banned' table — character bans may not work")
+    end
 end
 
 -- Check server capabilities for ban support
@@ -56,18 +88,11 @@ function BanHandlers.checkServerCapabilities(player)
     local supportsCharacterBan = false
     local characterBanLocation = nil
     
-    -- Check CHARACTERS database first (preferred)
+    -- Check CHARACTERS database (ensureCharacterBannedTable guarantees it exists)
     local checkCharTable = CharDBQuery("SHOW TABLES LIKE 'character_banned'")
     if checkCharTable then
         supportsCharacterBan = true
         characterBanLocation = "CHARACTERS"
-    else
-        -- Check AUTH database as fallback
-        local checkAuthTable = AuthDBQuery("SHOW TABLES LIKE 'character_banned'")
-        if checkAuthTable then
-            supportsCharacterBan = true
-            characterBanLocation = "AUTH"
-        end
     end
     
     local capabilities = {
@@ -258,20 +283,13 @@ function BanHandlers.executeSQLBan(banType, accountId, charGuid, ipAddress, dura
         end
         
     elseif banType == BAN_TYPE.CHARACTER and charGuid then
-        -- Determine which database has character_banned table
-        local DBExecute = nil
-        local checkCharTable = CharDBQuery("SHOW TABLES LIKE 'character_banned'")
-        if checkCharTable then
-            DBExecute = CharDBExecute
-            print("[GameMasterSystem] Using CHARACTERS database for character ban")
-        else
-            DBExecute = AuthDBExecute
-            print("[GameMasterSystem] Using AUTH database for character ban")
-        end
-        
+        -- Always use CHARACTERS database (ensureCharacterBannedTable guarantees it exists)
+        local DBExecute = CharDBExecute
+        print("[GameMasterSystem] Using CHARACTERS database for character ban")
+
         -- Check if table has 'active' column
         local hasActive = false
-        local columns = checkCharTable and CharDBQuery("DESCRIBE character_banned") or AuthDBQuery("DESCRIBE character_banned")
+        local columns = CharDBQuery("DESCRIBE character_banned")
         if columns then
             repeat
                 if columns:GetString(0) == "active" then
@@ -380,10 +398,8 @@ function BanHandlers.unbanPlayer(player, targetName, banType)
             return
         end
         
-        -- Try both databases for character_banned
-        local charSuccess = CharDBExecute(string.format("DELETE FROM character_banned WHERE guid = %d", charGuid))
-        local authSuccess = AuthDBExecute(string.format("DELETE FROM character_banned WHERE guid = %d", charGuid))
-        success = charSuccess or authSuccess
+        -- Delete from characters DB (ensureCharacterBannedTable guarantees it exists)
+        success = CharDBExecute(string.format("DELETE FROM character_banned WHERE guid = %d", charGuid))
         
     elseif banType == BAN_TYPE.IP then
         Utils.sendMessage(player, "error", "IP unban requires the IP address, not player name.")
@@ -439,17 +455,11 @@ function BanHandlers.getBanInfo(player, targetName)
         }
     end
     
-    -- Check character ban (try both databases)
+    -- Check character ban (characters DB only)
     local charBan = CharDBQuery(string.format(
         "SELECT bandate, unbandate, bannedby, banreason FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
         charGuid
     ))
-    if not charBan then
-        charBan = AuthDBQuery(string.format(
-            "SELECT bandate, unbandate, bannedby, banreason FROM character_banned WHERE guid = %d AND (unbandate > UNIX_TIMESTAMP() OR unbandate = 0)",
-            charGuid
-        ))
-    end
     if charBan then
         banInfo.character = {
             banDate = charBan:GetUInt32(0),

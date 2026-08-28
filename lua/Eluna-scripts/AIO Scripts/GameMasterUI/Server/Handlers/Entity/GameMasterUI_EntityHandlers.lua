@@ -34,7 +34,7 @@ local EntityHandlers = {
 		end
 
 		-- Use PerformIngameSpawn for better compatibility
-		local spawnedCreature = PerformIngameSpawn(1, entry, mapId, instanceId, x, y, z, o, save, respawnTime, phase)
+		local spawnedCreature = PerformIngameSpawn(1, entry, mapId, instanceId, x, y, z, o, save, durorresptime, phase)
 
 		if spawnedCreature then
 			utils.sendMessage(player, "success", "Successfully spawned creature with ID: " .. entry)

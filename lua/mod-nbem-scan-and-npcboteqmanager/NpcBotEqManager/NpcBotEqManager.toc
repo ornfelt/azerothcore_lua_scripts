@@ -1,0 +1,10 @@
+## Interface: 30300
+## Title: NpcBot Equipment Manager
+## Notes: Visual NPCBot gear viewer for Trickerer NPCBots via mod-nbem-scan.
+## Author: Torrozin
+## Version: 0.4.0
+## SavedVariables: NBEM_DB
+
+NpcBotEqManager.lua
+
+
